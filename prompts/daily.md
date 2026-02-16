@@ -12,7 +12,10 @@
 - 날짜: {{ date }}
 - 작성한 PR: {{ stats.authored_count }}건
 - 리뷰한 PR: {{ stats.reviewed_count }}건
-- 코멘트: {{ stats.commented_count }}건
+- PR 코멘트: {{ stats.commented_count }}건
+- 커밋: {{ stats.commit_count | default(0) }}건
+- 작성한 Issue: {{ stats.issue_authored_count | default(0) }}건
+- Issue 코멘트: {{ stats.issue_commented_count | default(0) }}건
 - 작성 코드: +{{ stats.total_additions }}/-{{ stats.total_deletions }}
 - 관련 저장소: {{ stats.repos_touched | join(", ") }}
 
@@ -30,8 +33,14 @@
 ### 리뷰한 PR
 - [PR 제목](URL): 리뷰 포인트
 
-### 코멘트
-- [PR 제목](URL): 코멘트 맥락
+### 커밋
+- [커밋 메시지](URL): 핵심 변경사항 1줄 설명
+
+### 작성한 Issue
+- [Issue 제목](URL): 핵심 내용
+
+### 코멘트 (PR/Issue)
+- [PR/Issue 제목](URL): 코멘트 맥락
 
 ## 수치
 - 작성 코드: +N/-N

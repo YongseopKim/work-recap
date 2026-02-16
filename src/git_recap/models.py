@@ -62,6 +62,39 @@ class PRRaw:
     reviews: list[Review] = field(default_factory=list)
 
 
+@dataclass
+class CommitRaw:
+    """Fetcher가 수집한 Commit 원시 데이터."""
+
+    sha: str
+    url: str  # HTML URL
+    api_url: str
+    message: str  # full commit message
+    author: str  # GitHub login
+    repo: str  # "org/repo"
+    committed_at: str  # ISO 8601
+    files: list[FileChange] = field(default_factory=list)
+
+
+@dataclass
+class IssueRaw:
+    """Fetcher가 수집한 Issue 원시 데이터."""
+
+    url: str
+    api_url: str
+    number: int
+    title: str
+    body: str
+    state: str  # "open" | "closed"
+    created_at: str
+    updated_at: str
+    closed_at: str | None
+    repo: str
+    labels: list[str] = field(default_factory=list)
+    author: str = ""
+    comments: list[Comment] = field(default_factory=list)
+
+
 # ── Normalizer 출력 모델 ──
 
 
@@ -71,6 +104,9 @@ class ActivityKind(str, Enum):
     PR_AUTHORED = "pr_authored"
     PR_REVIEWED = "pr_reviewed"
     PR_COMMENTED = "pr_commented"
+    COMMIT = "commit"
+    ISSUE_AUTHORED = "issue_authored"
+    ISSUE_COMMENTED = "issue_commented"
 
 
 @dataclass
@@ -84,6 +120,7 @@ class Activity:
     title: str
     url: str  # PR HTML URL
     summary: str  # 스크립트가 생성하는 1줄 요약
+    sha: str = ""  # commit SHA (COMMIT kind만 사용)
     files: list[str] = field(default_factory=list)
     additions: int = 0
     deletions: int = 0
@@ -104,6 +141,11 @@ class DailyStats:
     repos_touched: list[str] = field(default_factory=list)
     authored_prs: list[dict] = field(default_factory=list)
     reviewed_prs: list[dict] = field(default_factory=list)
+    commit_count: int = 0
+    issue_authored_count: int = 0
+    issue_commented_count: int = 0
+    commits: list[dict] = field(default_factory=list)  # [{url, title, repo, sha}]
+    authored_issues: list[dict] = field(default_factory=list)  # [{url, title, repo}]
 
 
 # ── 비동기 Job 모델 ──
@@ -199,6 +241,39 @@ def pr_raw_from_dict(d: dict) -> PRRaw:
     )
 
 
+def commit_raw_from_dict(d: dict) -> CommitRaw:
+    """dict → CommitRaw 복원."""
+    return CommitRaw(
+        sha=d["sha"],
+        url=d["url"],
+        api_url=d["api_url"],
+        message=d["message"],
+        author=d["author"],
+        repo=d["repo"],
+        committed_at=d["committed_at"],
+        files=[FileChange(**f) for f in d.get("files", [])],
+    )
+
+
+def issue_raw_from_dict(d: dict) -> IssueRaw:
+    """dict → IssueRaw 복원."""
+    return IssueRaw(
+        url=d["url"],
+        api_url=d["api_url"],
+        number=d["number"],
+        title=d["title"],
+        body=d["body"],
+        state=d["state"],
+        created_at=d["created_at"],
+        updated_at=d["updated_at"],
+        closed_at=d.get("closed_at"),
+        repo=d["repo"],
+        labels=d.get("labels", []),
+        author=d.get("author", ""),
+        comments=[Comment(**c) for c in d.get("comments", [])],
+    )
+
+
 def activity_from_dict(d: dict) -> Activity:
     """dict → Activity 복원."""
     return Activity(
@@ -209,6 +284,7 @@ def activity_from_dict(d: dict) -> Activity:
         title=d["title"],
         url=d["url"],
         summary=d["summary"],
+        sha=d.get("sha", ""),
         files=d.get("files", []),
         additions=d.get("additions", 0),
         deletions=d.get("deletions", 0),
@@ -229,4 +305,9 @@ def daily_stats_from_dict(d: dict) -> DailyStats:
         repos_touched=d.get("repos_touched", []),
         authored_prs=d.get("authored_prs", []),
         reviewed_prs=d.get("reviewed_prs", []),
+        commit_count=d.get("commit_count", 0),
+        issue_authored_count=d.get("issue_authored_count", 0),
+        issue_commented_count=d.get("issue_commented_count", 0),
+        commits=d.get("commits", []),
+        authored_issues=d.get("authored_issues", []),
     )

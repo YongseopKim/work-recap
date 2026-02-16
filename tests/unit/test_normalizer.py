@@ -7,8 +7,10 @@ from git_recap.models import (
     Activity,
     ActivityKind,
     Comment,
+    CommitRaw,
     DailyStats,
     FileChange,
+    IssueRaw,
     PRRaw,
     load_json,
     load_jsonl,
@@ -385,6 +387,266 @@ class TestNormalize:
 
         assert activities == []
         assert stats["authored_count"] == 0
+
+
+# ── Commit/Issue 헬퍼 ──
+
+
+def _make_commit(
+    sha="abc123",
+    author="testuser",
+    message="feat: add feature",
+    repo="org/repo",
+    committed_at="2025-02-16T10:00:00Z",
+    files=None,
+) -> CommitRaw:
+    return CommitRaw(
+        sha=sha,
+        url=f"https://ghes/{repo}/commit/{sha}",
+        api_url=f"https://ghes/api/v3/repos/{repo}/commits/{sha}",
+        message=message,
+        author=author,
+        repo=repo,
+        committed_at=committed_at,
+        files=files or [FileChange("src/main.py", 10, 3, "modified")],
+    )
+
+
+def _make_issue(
+    number=10,
+    author="testuser",
+    title="Bug report",
+    body="Description",
+    repo="org/repo",
+    created_at="2025-02-16T09:00:00Z",
+    updated_at="2025-02-16T15:00:00Z",
+    comments=None,
+    labels=None,
+) -> IssueRaw:
+    return IssueRaw(
+        url=f"https://ghes/{repo}/issues/{number}",
+        api_url=f"https://ghes/api/v3/repos/{repo}/issues/{number}",
+        number=number,
+        title=title,
+        body=body,
+        state="open",
+        created_at=created_at,
+        updated_at=updated_at,
+        closed_at=None,
+        repo=repo,
+        labels=labels or [],
+        author=author,
+        comments=comments or [],
+    )
+
+
+def _save_raw_commits(test_config, commits: list[CommitRaw], date: str = DATE):
+    raw_dir = test_config.date_raw_dir(date)
+    save_json(commits, raw_dir / "commits.json")
+
+
+def _save_raw_issues(test_config, issues: list[IssueRaw], date: str = DATE):
+    raw_dir = test_config.date_raw_dir(date)
+    save_json(issues, raw_dir / "issues.json")
+
+
+# ── Commit 변환 테스트 ──
+
+
+class TestConvertCommitActivities:
+    def test_basic_conversion(self, normalizer):
+        commits = [_make_commit()]
+        result = normalizer._convert_commit_activities(commits, DATE)
+        assert len(result) == 1
+        assert result[0].kind == ActivityKind.COMMIT
+        assert result[0].sha == "abc123"
+        assert result[0].pr_number == 0
+        assert result[0].additions == 10
+        assert result[0].deletions == 3
+
+    def test_date_filtering(self, normalizer):
+        """target_date에 해당하지 않는 commit은 제외."""
+        commits = [_make_commit(committed_at="2025-02-15T23:59:59Z")]
+        result = normalizer._convert_commit_activities(commits, DATE)
+        assert len(result) == 0
+
+    def test_title_is_first_line_of_message(self, normalizer):
+        commits = [_make_commit(message="feat: short title\n\nLong body text")]
+        result = normalizer._convert_commit_activities(commits, DATE)
+        assert result[0].title == "feat: short title"
+
+    def test_title_truncation(self, normalizer):
+        long_msg = "x" * 200
+        commits = [_make_commit(message=long_msg)]
+        result = normalizer._convert_commit_activities(commits, DATE)
+        assert len(result[0].title) == 121  # 120 + "…"
+        assert result[0].title.endswith("…")
+
+    def test_empty_commits(self, normalizer):
+        result = normalizer._convert_commit_activities([], DATE)
+        assert result == []
+
+
+# ── Issue 변환 테스트 ──
+
+
+class TestConvertIssueActivities:
+    def test_issue_authored(self, normalizer):
+        issues = [_make_issue(author="testuser")]
+        result = normalizer._convert_issue_activities(issues, DATE)
+        assert len(result) == 1
+        assert result[0].kind == ActivityKind.ISSUE_AUTHORED
+        assert result[0].title == "Bug report"
+
+    def test_issue_commented(self, normalizer):
+        issues = [_make_issue(
+            author="other",
+            comments=[_comment(author="testuser", created_at="2025-02-16T11:00:00Z")],
+        )]
+        result = normalizer._convert_issue_activities(issues, DATE)
+        assert len(result) == 1
+        assert result[0].kind == ActivityKind.ISSUE_COMMENTED
+
+    def test_both_authored_and_commented(self, normalizer):
+        """한 issue에서 authored + commented 둘 다 생성 가능."""
+        issues = [_make_issue(
+            author="testuser",
+            comments=[_comment(author="testuser", created_at="2025-02-16T11:00:00Z")],
+        )]
+        result = normalizer._convert_issue_activities(issues, DATE)
+        kinds = {a.kind for a in result}
+        assert ActivityKind.ISSUE_AUTHORED in kinds
+        assert ActivityKind.ISSUE_COMMENTED in kinds
+
+    def test_date_filtering_authored(self, normalizer):
+        issues = [_make_issue(author="testuser", created_at="2025-02-15T09:00:00Z")]
+        result = normalizer._convert_issue_activities(issues, DATE)
+        assert len(result) == 0
+
+    def test_date_filtering_commented(self, normalizer):
+        issues = [_make_issue(
+            author="other",
+            comments=[_comment(author="testuser", created_at="2025-02-15T23:59:59Z")],
+        )]
+        result = normalizer._convert_issue_activities(issues, DATE)
+        assert len(result) == 0
+
+    def test_case_insensitive_username(self, normalizer):
+        issues = [_make_issue(author="TestUser")]
+        result = normalizer._convert_issue_activities(issues, DATE)
+        assert len(result) == 1
+        assert result[0].kind == ActivityKind.ISSUE_AUTHORED
+
+    def test_empty_issues(self, normalizer):
+        result = normalizer._convert_issue_activities([], DATE)
+        assert result == []
+
+
+# ── _compute_stats 확장 테스트 ──
+
+
+class TestComputeStatsExtended:
+    def test_commit_count(self):
+        activities = [
+            Activity(ts="t", kind=ActivityKind.COMMIT, repo="r", pr_number=0,
+                     title="t", url="u", summary="s", sha="abc", additions=15, deletions=5),
+        ]
+        stats = NormalizerService._compute_stats(activities, DATE)
+        assert stats.commit_count == 1
+        assert stats.commits == [{"url": "u", "title": "t", "repo": "r", "sha": "abc"}]
+
+    def test_additions_include_commits(self):
+        """total_additions/deletions는 authored PR + commit 합산."""
+        activities = [
+            Activity(ts="t", kind=ActivityKind.PR_AUTHORED, repo="r", pr_number=1,
+                     title="t", url="u", summary="s", additions=10, deletions=2),
+            Activity(ts="t", kind=ActivityKind.COMMIT, repo="r", pr_number=0,
+                     title="t", url="u", summary="s", sha="abc", additions=20, deletions=5),
+        ]
+        stats = NormalizerService._compute_stats(activities, DATE)
+        assert stats.total_additions == 30
+        assert stats.total_deletions == 7
+
+    def test_issue_counts(self):
+        activities = [
+            Activity(ts="t", kind=ActivityKind.ISSUE_AUTHORED, repo="r", pr_number=10,
+                     title="t", url="u", summary="s"),
+            Activity(ts="t", kind=ActivityKind.ISSUE_COMMENTED, repo="r", pr_number=10,
+                     title="t", url="u2", summary="s"),
+        ]
+        stats = NormalizerService._compute_stats(activities, DATE)
+        assert stats.issue_authored_count == 1
+        assert stats.issue_commented_count == 1
+        assert stats.authored_issues == [{"url": "u", "title": "t", "repo": "r"}]
+
+    def test_repos_touched_all_types(self):
+        """모든 활동 유형에서 repos_touched 수집."""
+        activities = [
+            Activity(ts="t", kind=ActivityKind.PR_AUTHORED, repo="org/a", pr_number=1,
+                     title="t", url="u", summary="s"),
+            Activity(ts="t", kind=ActivityKind.COMMIT, repo="org/b", pr_number=0,
+                     title="t", url="u", summary="s", sha="abc"),
+            Activity(ts="t", kind=ActivityKind.ISSUE_AUTHORED, repo="org/c", pr_number=10,
+                     title="t", url="u", summary="s"),
+        ]
+        stats = NormalizerService._compute_stats(activities, DATE)
+        assert stats.repos_touched == ["org/a", "org/b", "org/c"]
+
+
+# ── normalize() 통합 테스트 확장 ──
+
+
+class TestNormalizeWithCommitsAndIssues:
+    def test_with_commits(self, normalizer, test_config):
+        _save_raw(test_config, [_make_pr(author="testuser")])
+        _save_raw_commits(test_config, [_make_commit()])
+
+        act_path, stats_path = normalizer.normalize(DATE)
+        activities = load_jsonl(act_path)
+        stats = load_json(stats_path)
+
+        kinds = {a["kind"] for a in activities}
+        assert "pr_authored" in kinds
+        assert "commit" in kinds
+        assert stats["commit_count"] == 1
+
+    def test_with_issues(self, normalizer, test_config):
+        _save_raw(test_config, [])
+        _save_raw_issues(test_config, [_make_issue(author="testuser")])
+
+        act_path, stats_path = normalizer.normalize(DATE)
+        activities = load_jsonl(act_path)
+        stats = load_json(stats_path)
+
+        assert any(a["kind"] == "issue_authored" for a in activities)
+        assert stats["issue_authored_count"] == 1
+
+    def test_without_commits_issues_backward_compat(self, normalizer, test_config):
+        """commits.json/issues.json 없어도 정상 동작 (하위 호환)."""
+        _save_raw(test_config, [_make_pr(author="testuser")])
+        # commits.json, issues.json 없음
+
+        act_path, stats_path = normalizer.normalize(DATE)
+        activities = load_jsonl(act_path)
+        stats = load_json(stats_path)
+
+        assert len(activities) == 1
+        assert stats["commit_count"] == 0
+        assert stats["issue_authored_count"] == 0
+
+    def test_sorted_by_timestamp(self, normalizer, test_config):
+        """모든 활동이 시간순 정렬."""
+        _save_raw(test_config, [_make_pr(author="testuser", created_at="2025-02-16T15:00:00Z")])
+        _save_raw_commits(test_config, [_make_commit(committed_at="2025-02-16T09:00:00Z")])
+        _save_raw_issues(test_config, [_make_issue(
+            author="testuser", created_at="2025-02-16T12:00:00Z",
+        )])
+
+        act_path, _ = normalizer.normalize(DATE)
+        activities = load_jsonl(act_path)
+
+        timestamps = [a["ts"] for a in activities]
+        assert timestamps == sorted(timestamps)
 
 
 # load_jsonl import

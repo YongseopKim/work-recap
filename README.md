@@ -1,6 +1,6 @@
 # git-recap
 
-GitHub Enterprise Server(GHES)의 PR, review, comment 활동 데이터를 수집하여
+GitHub Enterprise Server(GHES)의 PR, commit, issue, review, comment 활동 데이터를 수집하여
 LLM 기반으로 일/주/월/년 단위 업무 요약을 자동 생성하는 개인 도구.
 
 ## 핵심 원칙
@@ -99,8 +99,8 @@ GHES API
 │              │    │                │    │                 │
 │ raw/         │    │ normalized/    │    │ summaries/      │
 │  prs.json    │    │  activities.   │    │  daily/02-16.md │
-│              │    │  jsonl         │    │  weekly/W07.md  │
-│              │    │  stats.json    │    │  monthly/02.md  │
+│  commits.json│    │  jsonl         │    │  weekly/W07.md  │
+│  issues.json │    │  stats.json    │    │  monthly/02.md  │
 └──────────────┘    └────────────────┘    └─────────────────┘
 ```
 
@@ -108,7 +108,10 @@ GHES API
 
 ```
 data/
-├── raw/{YYYY}/{MM}/{DD}/prs.json           # Fetcher 출력
+├── raw/{YYYY}/{MM}/{DD}/
+│   ├── prs.json                           # PR 원시 데이터
+│   ├── commits.json                       # Commit 원시 데이터
+│   └── issues.json                        # Issue 원시 데이터
 ├── normalized/{YYYY}/{MM}/{DD}/
 │   ├── activities.jsonl                    # Activity 목록
 │   └── stats.json                          # 일일 통계
@@ -134,7 +137,7 @@ git-recap/
 │   │   ├── ghes_client.py      # GHES REST API 클라이언트 (retry, rate limit)
 │   │   └── llm_client.py       # LLM 클라이언트 (OpenAI, Anthropic)
 │   ├── services/
-│   │   ├── fetcher.py          # PR 데이터 수집 (3축 검색, dedup, enrich)
+│   │   ├── fetcher.py          # PR/Commit/Issue 데이터 수집 (검색, dedup, enrich)
 │   │   ├── normalizer.py       # Activity 변환 + 통계 계산
 │   │   ├── summarizer.py       # LLM 요약 생성 (Jinja2 템플릿)
 │   │   └── orchestrator.py     # 파이프라인 오케스트레이션

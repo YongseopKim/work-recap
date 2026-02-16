@@ -1,4 +1,4 @@
-"""Raw PR 데이터를 정규화된 Activity + DailyStats로 변환하는 서비스."""
+"""Raw PR/Commit/Issue 데이터를 정규화된 Activity + DailyStats로 변환하는 서비스."""
 
 import logging
 from pathlib import Path
@@ -8,8 +8,12 @@ from git_recap.exceptions import NormalizeError
 from git_recap.models import (
     Activity,
     ActivityKind,
+    CommitRaw,
     DailyStats,
+    IssueRaw,
     PRRaw,
+    commit_raw_from_dict,
+    issue_raw_from_dict,
     load_json,
     pr_raw_from_dict,
     save_json,
@@ -48,7 +52,32 @@ class NormalizerService:
 
         prs = [pr_raw_from_dict(d) for d in raw_data]
 
-        activities = self._convert_activities(prs, target_date)
+        # Commit/Issue 로드 (optional — 없으면 빈 리스트, 하위 호환)
+        raw_dir = self._config.date_raw_dir(target_date)
+
+        commits_path = raw_dir / "commits.json"
+        commits: list[CommitRaw] = []
+        if commits_path.exists():
+            try:
+                commits = [commit_raw_from_dict(d) for d in load_json(commits_path)]
+            except Exception:
+                logger.warning("Failed to parse %s, skipping commits", commits_path)
+
+        issues_path = raw_dir / "issues.json"
+        issues: list[IssueRaw] = []
+        if issues_path.exists():
+            try:
+                issues = [issue_raw_from_dict(d) for d in load_json(issues_path)]
+            except Exception:
+                logger.warning("Failed to parse %s, skipping issues", issues_path)
+
+        pr_activities = self._convert_activities(prs, target_date)
+        commit_activities = self._convert_commit_activities(commits, target_date)
+        issue_activities = self._convert_issue_activities(issues, target_date)
+
+        activities = pr_activities + commit_activities + issue_activities
+        activities.sort(key=lambda a: a.ts)
+
         stats = self._compute_stats(activities, target_date)
 
         out_dir = self._config.date_normalized_dir(target_date)
@@ -122,6 +151,85 @@ class NormalizerService:
         activities.sort(key=lambda a: a.ts)
         return activities
 
+    # ── Commit → Activity 변환 ──
+
+    def _convert_commit_activities(
+        self, commits: list[CommitRaw], target_date: str
+    ) -> list[Activity]:
+        """Commit 목록에서 COMMIT Activity를 생성."""
+        activities: list[Activity] = []
+        for commit in commits:
+            if not self._matches_date(commit.committed_at, target_date):
+                continue
+
+            # 제목: commit message 첫 줄, 120자 truncate
+            first_line = commit.message.split("\n", 1)[0]
+            title = first_line[:120] + ("…" if len(first_line) > 120 else "")
+
+            total_adds = sum(f.additions for f in commit.files)
+            total_dels = sum(f.deletions for f in commit.files)
+            file_names = [f.filename for f in commit.files]
+
+            activities.append(Activity(
+                ts=commit.committed_at,
+                kind=ActivityKind.COMMIT,
+                repo=commit.repo,
+                pr_number=0,
+                title=title,
+                url=commit.url,
+                summary=f"commit: {title} ({commit.repo}) +{total_adds}/-{total_dels}",
+                sha=commit.sha,
+                files=file_names,
+                additions=total_adds,
+                deletions=total_dels,
+            ))
+        return activities
+
+    # ── Issue → Activity 변환 ──
+
+    def _convert_issue_activities(
+        self, issues: list[IssueRaw], target_date: str
+    ) -> list[Activity]:
+        """Issue 목록에서 ISSUE_AUTHORED / ISSUE_COMMENTED Activity를 생성."""
+        activities: list[Activity] = []
+        for issue in issues:
+            # ISSUE_AUTHORED
+            if (
+                issue.author.lower() == self._username.lower()
+                and self._matches_date(issue.created_at, target_date)
+            ):
+                activities.append(Activity(
+                    ts=issue.created_at,
+                    kind=ActivityKind.ISSUE_AUTHORED,
+                    repo=issue.repo,
+                    pr_number=issue.number,
+                    title=issue.title,
+                    url=issue.url,
+                    summary=f"issue_authored: {issue.title} ({issue.repo})",
+                    labels=issue.labels,
+                ))
+
+            # ISSUE_COMMENTED
+            user_comments = [
+                c for c in issue.comments
+                if c.author.lower() == self._username.lower()
+                and self._matches_date(c.created_at, target_date)
+            ]
+            if user_comments:
+                earliest = min(user_comments, key=lambda c: c.created_at)
+                activities.append(Activity(
+                    ts=earliest.created_at,
+                    kind=ActivityKind.ISSUE_COMMENTED,
+                    repo=issue.repo,
+                    pr_number=issue.number,
+                    title=issue.title,
+                    url=issue.url,
+                    summary=f"issue_commented: {issue.title} ({issue.repo})",
+                    labels=issue.labels,
+                    evidence_urls=[c.url for c in user_comments],
+                ))
+        return activities
+
     def _make_activity(
         self,
         pr: PRRaw,
@@ -187,9 +295,19 @@ class NormalizerService:
         authored = [a for a in activities if a.kind == ActivityKind.PR_AUTHORED]
         reviewed = [a for a in activities if a.kind == ActivityKind.PR_REVIEWED]
         commented = [a for a in activities if a.kind == ActivityKind.PR_COMMENTED]
+        commits = [a for a in activities if a.kind == ActivityKind.COMMIT]
+        issue_authored = [a for a in activities if a.kind == ActivityKind.ISSUE_AUTHORED]
+        issue_commented = [a for a in activities if a.kind == ActivityKind.ISSUE_COMMENTED]
 
-        total_adds = sum(a.additions for a in authored)
-        total_dels = sum(a.deletions for a in authored)
+        # additions/deletions: authored PR + commit 합산
+        total_adds = (
+            sum(a.additions for a in authored)
+            + sum(a.additions for a in commits)
+        )
+        total_dels = (
+            sum(a.deletions for a in authored)
+            + sum(a.deletions for a in commits)
+        )
 
         repos = sorted(set(a.repo for a in activities))
 
@@ -208,5 +326,16 @@ class NormalizerService:
             reviewed_prs=[
                 {"url": a.url, "title": a.title, "repo": a.repo}
                 for a in reviewed
+            ],
+            commit_count=len(commits),
+            issue_authored_count=len(issue_authored),
+            issue_commented_count=len(issue_commented),
+            commits=[
+                {"url": a.url, "title": a.title, "repo": a.repo, "sha": a.sha}
+                for a in commits
+            ],
+            authored_issues=[
+                {"url": a.url, "title": a.title, "repo": a.repo}
+                for a in issue_authored
             ],
         )

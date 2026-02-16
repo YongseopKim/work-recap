@@ -119,10 +119,46 @@ class GHESClient:
         """PR 리뷰 목록."""
         return self._paginate(f"/repos/{owner}/{repo}/pulls/{number}/reviews")
 
+    def search_commits(self, query: str, page: int = 1, per_page: int = 30) -> dict:
+        """
+        Commit Search API 호출. cloak-preview Accept 헤더 필요.
+
+        Args:
+            query: 검색 쿼리 (e.g., "author:user committer-date:2025-02-16")
+            page: 페이지 번호 (1-based)
+            per_page: 페이지당 결과 수 (max 100)
+
+        Returns:
+            {"total_count": int, "items": list[dict]}
+        """
+        return self._request_with_retry(
+            "GET",
+            "/search/commits",
+            params={"q": query, "page": page, "per_page": per_page},
+            extra_headers={"Accept": "application/vnd.github.cloak-preview+json"},
+        )
+
+    def get_commit(self, owner: str, repo: str, sha: str) -> dict:
+        """Commit 상세 정보 조회."""
+        return self._request_with_retry(
+            "GET", f"/repos/{owner}/{repo}/commits/{sha}"
+        )
+
+    def get_issue(self, owner: str, repo: str, number: int) -> dict:
+        """Issue 상세 정보 조회."""
+        return self._request_with_retry(
+            "GET", f"/repos/{owner}/{repo}/issues/{number}"
+        )
+
+    def get_issue_comments(self, owner: str, repo: str, number: int) -> list[dict]:
+        """Issue 코멘트 목록. 페이지네이션 포함."""
+        return self._paginate(f"/repos/{owner}/{repo}/issues/{number}/comments")
+
     # ── Internal ──
 
     def _request_with_retry(
-        self, method: str, path: str, params: dict | None = None
+        self, method: str, path: str, params: dict | None = None,
+        extra_headers: dict | None = None,
     ) -> dict | list:
         """
         HTTP 요청 + retry (429/5xx 시 exponential backoff).
@@ -133,7 +169,9 @@ class GHESClient:
 
         for attempt in range(MAX_RETRIES + 1):
             try:
-                response = self._client.request(method, path, params=params)
+                response = self._client.request(
+                    method, path, params=params, headers=extra_headers,
+                )
 
                 # Rate limit 처리: 429
                 if response.status_code == 429:
@@ -226,8 +264,8 @@ class GHESClient:
 
 | API 종류 | Rate Limit | 대응 |
 |---|---|---|
-| Search API | 30 req/min | 429 응답 시 Retry-After 헤더 참조 후 대기 |
-| Core API (PR, files 등) | 5000 req/hr | 대부분 충분. 429 시 동일 backoff |
+| Search API (issues, commits) | 30 req/min | 429 응답 시 Retry-After 헤더 참조 후 대기 |
+| Core API (PR, commit, issue, files 등) | 5000 req/hr | 대부분 충분. 429 시 동일 backoff |
 | 5xx 에러 | - | Exponential backoff (2^attempt초) |
 
 ---
@@ -298,6 +336,23 @@ class TestPREndpoints:
     def test_get_pr_reviews(self, respx_mock):
         """PR 리뷰 목록 조회."""
 
+class TestCommitEndpoints:
+    def test_search_commits(self, respx_mock):
+        """Commit Search API 호출 + cloak-preview Accept 헤더."""
+
+    def test_search_commits_pagination(self, respx_mock):
+        """query, page, per_page 파라미터가 전달된다."""
+
+    def test_get_commit(self, respx_mock):
+        """Commit 상세 조회."""
+
+class TestIssueEndpoints:
+    def test_get_issue(self, respx_mock):
+        """Issue 상세 조회."""
+
+    def test_get_issue_comments(self, respx_mock):
+        """Issue 코멘트 목록 조회 (페이지네이션 포함)."""
+
 class TestContextManager:
     def test_closes_client(self):
         """with 문 종료 시 client가 닫힌다."""
@@ -314,3 +369,6 @@ class TestContextManager:
 | 1.1.3 | `_request_with_retry()` — 429/5xx retry + 4xx 즉시 실패 | TestRetry |
 | 1.1.4 | `_paginate()` — 페이지네이션 | TestPagination |
 | 1.1.5 | PR 엔드포인트 메서드 (get_pr, get_pr_files, get_pr_comments, get_pr_reviews) | TestPREndpoints |
+| 1.1.6 | `_request_with_retry()` — extra_headers 파라미터 지원 | TestCommitEndpoints |
+| 1.1.7 | Commit 엔드포인트 (search_commits, get_commit) | TestCommitEndpoints |
+| 1.1.8 | Issue 엔드포인트 (get_issue, get_issue_comments) | TestIssueEndpoints |

@@ -75,16 +75,44 @@ class GHESClient:
         """PR 리뷰 목록."""
         return self._paginate(f"/repos/{owner}/{repo}/pulls/{number}/reviews")
 
+    def search_commits(self, query: str, page: int = 1, per_page: int = 30) -> dict:
+        """Commit Search API 호출. cloak-preview Accept 헤더 필요."""
+        return self._request_with_retry(
+            "GET",
+            "/search/commits",
+            params={"q": query, "page": page, "per_page": per_page},
+            extra_headers={"Accept": "application/vnd.github.cloak-preview+json"},
+        )
+
+    def get_commit(self, owner: str, repo: str, sha: str) -> dict:
+        """Commit 상세 정보 조회."""
+        return self._request_with_retry(
+            "GET", f"/repos/{owner}/{repo}/commits/{sha}"
+        )
+
+    def get_issue(self, owner: str, repo: str, number: int) -> dict:
+        """Issue 상세 정보 조회."""
+        return self._request_with_retry(
+            "GET", f"/repos/{owner}/{repo}/issues/{number}"
+        )
+
+    def get_issue_comments(self, owner: str, repo: str, number: int) -> list[dict]:
+        """Issue 코멘트 목록. 페이지네이션 포함."""
+        return self._paginate(f"/repos/{owner}/{repo}/issues/{number}/comments")
+
     # ── Internal ──
 
     def _request_with_retry(
-        self, method: str, path: str, params: dict | None = None
+        self, method: str, path: str, params: dict | None = None,
+        extra_headers: dict | None = None,
     ) -> dict | list:
         last_error: Exception | None = None
 
         for attempt in range(MAX_RETRIES + 1):
             try:
-                response = self._client.request(method, path, params=params)
+                response = self._client.request(
+                    method, path, params=params, headers=extra_headers,
+                )
 
                 if response.status_code == 429:
                     retry_after = self._get_retry_after(response)

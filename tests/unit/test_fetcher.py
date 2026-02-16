@@ -69,6 +69,11 @@ def mock_client():
             "html_url": "https://ghes/org/repo/pull/1#review-1",
         },
     ]
+    # Commit/Issue 관련 기본값
+    client.search_commits.return_value = {"total_count": 0, "items": []}
+    client.get_commit.return_value = {}
+    client.get_issue.return_value = {}
+    client.get_issue_comments.return_value = []
     return client
 
 
@@ -350,3 +355,252 @@ class TestCheckpoint:
 
         data = load_json(test_config.checkpoints_path)
         assert data["last_fetch_date"] == "2025-02-16"
+
+
+# ── Commit 수집 테스트 ──
+
+
+def _make_commit_search_item(sha="abc123", repo_full="org/repo"):
+    return {
+        "sha": sha,
+        "repository": {"full_name": repo_full},
+        "author": {"login": "testuser"},
+        "commit": {
+            "message": "feat: add feature",
+            "committer": {"date": "2025-02-16T10:00:00Z"},
+        },
+    }
+
+
+def _make_commit_detail(sha="abc123", repo_full="org/repo"):
+    return {
+        "sha": sha,
+        "url": f"https://ghes/api/v3/repos/{repo_full}/commits/{sha}",
+        "html_url": f"https://ghes/{repo_full}/commit/{sha}",
+        "commit": {
+            "message": "feat: add feature\n\nDetailed description",
+            "committer": {"date": "2025-02-16T10:00:00Z"},
+        },
+        "files": [
+            {"filename": "src/main.py", "additions": 10, "deletions": 3, "status": "modified"},
+        ],
+    }
+
+
+class TestFetchCommits:
+    def test_fetch_commits_basic(self, fetcher, mock_client):
+        mock_client.search_commits.return_value = {
+            "total_count": 1,
+            "items": [_make_commit_search_item()],
+        }
+        mock_client.get_commit.return_value = _make_commit_detail()
+
+        result = fetcher._fetch_commits("2025-02-16")
+        assert len(result) == 1
+        assert result[0].sha == "abc123"
+        assert result[0].repo == "org/repo"
+        assert len(result[0].files) == 1
+
+    def test_fetch_commits_search_failure_returns_empty(self, fetcher, mock_client):
+        """Commit search 미지원 시 빈 리스트 반환."""
+        mock_client.search_commits.side_effect = FetchError("422 not supported")
+        result = fetcher._fetch_commits("2025-02-16")
+        assert result == []
+
+    def test_fetch_commits_enrich_failure_skips(self, fetcher, mock_client):
+        """개별 commit enrich 실패 시 skip."""
+        mock_client.search_commits.return_value = {
+            "total_count": 1,
+            "items": [_make_commit_search_item()],
+        }
+        mock_client.get_commit.side_effect = FetchError("timeout")
+
+        result = fetcher._fetch_commits("2025-02-16")
+        assert result == []
+
+    def test_fetch_commits_pagination(self, fetcher, mock_client):
+        """100개 초과 시 다음 페이지 요청."""
+        page1 = [_make_commit_search_item(sha=f"sha{i}") for i in range(100)]
+        page2 = [_make_commit_search_item(sha=f"sha{i}") for i in range(100, 110)]
+
+        call_count = 0
+        def search_side_effect(query, page=1, per_page=100):
+            nonlocal call_count
+            call_count += 1
+            if page == 1:
+                return {"total_count": 110, "items": page1}
+            return {"total_count": 110, "items": page2}
+
+        mock_client.search_commits.side_effect = search_side_effect
+        mock_client.get_commit.return_value = _make_commit_detail()
+
+        result = fetcher._fetch_commits("2025-02-16")
+        assert len(result) == 110
+
+
+# ── Issue 수집 테스트 ──
+
+
+def _make_issue_search_item(number=10, repo="org/repo"):
+    return {
+        "url": f"https://ghes/api/v3/repos/{repo}/issues/{number}",
+        "html_url": f"https://ghes/{repo}/issues/{number}",
+        "number": number,
+        "title": "Bug report",
+        "user": {"login": "testuser"},
+        "state": "open",
+        "created_at": "2025-02-16T09:00:00Z",
+        "updated_at": "2025-02-16T15:00:00Z",
+    }
+
+
+def _make_issue_detail(number=10, repo="org/repo"):
+    owner, repo_name = repo.split("/")
+    return {
+        "url": f"https://ghes/api/v3/repos/{repo}/issues/{number}",
+        "html_url": f"https://ghes/{repo}/issues/{number}",
+        "number": number,
+        "title": "Bug report",
+        "body": "Steps to reproduce...",
+        "state": "open",
+        "created_at": "2025-02-16T09:00:00Z",
+        "updated_at": "2025-02-16T15:00:00Z",
+        "closed_at": None,
+        "user": {"login": "testuser"},
+        "labels": [{"name": "bug"}],
+    }
+
+
+class TestFetchIssues:
+    def test_fetch_issues_basic(self, fetcher, mock_client):
+        item = _make_issue_search_item()
+
+        def search_side_effect(query, **kwargs):
+            if "type:issue" in query:
+                return {"total_count": 1, "items": [item]}
+            return {"total_count": 0, "items": []}
+
+        mock_client.search_issues.side_effect = search_side_effect
+        mock_client.get_issue.return_value = _make_issue_detail()
+        mock_client.get_issue_comments.return_value = []
+
+        result = fetcher._fetch_issues("2025-02-16")
+        assert len(result) == 1
+        assert result[0].number == 10
+        assert result[0].title == "Bug report"
+
+    def test_fetch_issues_two_axis_dedup(self, fetcher, mock_client):
+        """같은 issue가 author/commenter 축 모두에서 나오면 1개로 dedup."""
+        item = _make_issue_search_item(10)
+
+        def search_side_effect(query, **kwargs):
+            if "type:issue" in query:
+                return {"total_count": 1, "items": [item]}
+            return {"total_count": 0, "items": []}
+
+        mock_client.search_issues.side_effect = search_side_effect
+        mock_client.get_issue.return_value = _make_issue_detail()
+        mock_client.get_issue_comments.return_value = []
+
+        result = fetcher._fetch_issues("2025-02-16")
+        assert len(result) == 1  # 2 axes return same item, deduped
+
+    def test_fetch_issues_enrich_failure_skips(self, fetcher, mock_client):
+        item = _make_issue_search_item()
+
+        def search_side_effect(query, **kwargs):
+            if "type:issue" in query:
+                return {"total_count": 1, "items": [item]}
+            return {"total_count": 0, "items": []}
+
+        mock_client.search_issues.side_effect = search_side_effect
+        mock_client.get_issue.side_effect = FetchError("timeout")
+
+        result = fetcher._fetch_issues("2025-02-16")
+        assert result == []
+
+    def test_fetch_issues_search_failure_graceful(self, fetcher, mock_client):
+        """Issue search 실패 시 빈 리스트."""
+        mock_client.search_issues.side_effect = FetchError("server error")
+        result = fetcher._fetch_issues("2025-02-16")
+        assert result == []
+
+    def test_issue_comments_noise_filtered(self, fetcher, mock_client):
+        item = _make_issue_search_item()
+
+        def search_side_effect(query, **kwargs):
+            if "type:issue" in query:
+                return {"total_count": 1, "items": [item]}
+            return {"total_count": 0, "items": []}
+
+        mock_client.search_issues.side_effect = search_side_effect
+        mock_client.get_issue.return_value = _make_issue_detail()
+        mock_client.get_issue_comments.return_value = [
+            {"user": {"login": "human"}, "body": "Good point",
+             "created_at": "2025-02-16T10:00:00Z", "html_url": "u1"},
+            {"user": {"login": "ci-bot"}, "body": "Build passed",
+             "created_at": "2025-02-16T10:00:00Z", "html_url": "u2"},
+        ]
+
+        result = fetcher._fetch_issues("2025-02-16")
+        assert len(result) == 1
+        assert len(result[0].comments) == 1  # bot comment filtered
+
+
+class TestParseIssueUrl:
+    def test_standard_url(self):
+        owner, repo, num = FetcherService._parse_issue_url(
+            "https://ghes/api/v3/repos/org/repo/issues/42"
+        )
+        assert (owner, repo, num) == ("org", "repo", 42)
+
+    def test_trailing_slash(self):
+        owner, repo, num = FetcherService._parse_issue_url(
+            "https://ghes/api/v3/repos/my-org/my-repo/issues/7/"
+        )
+        assert (owner, repo, num) == ("my-org", "my-repo", 7)
+
+
+class TestFetchIntegration:
+    def test_fetch_creates_all_files(self, fetcher, mock_client, test_config):
+        """fetch()가 prs.json + commits.json + issues.json 모두 생성."""
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        mock_client.search_commits.return_value = {"total_count": 0, "items": []}
+
+        fetcher.fetch("2025-02-16")
+
+        raw_dir = test_config.date_raw_dir("2025-02-16")
+        assert (raw_dir / "prs.json").exists()
+        assert (raw_dir / "commits.json").exists()
+        assert (raw_dir / "issues.json").exists()
+
+    def test_fetch_with_commits_and_issues(self, fetcher, mock_client, test_config):
+        """fetch()가 PR + commit + issue를 모두 수집."""
+        pr_api_url = "https://ghes/api/v3/repos/org/repo/pulls/1"
+        pr_item = _make_search_item(pr_api_url, 1)
+        commit_item = _make_commit_search_item()
+        issue_item = _make_issue_search_item()
+
+        def search_issues_side_effect(query, **kwargs):
+            if "type:issue" in query:
+                return {"total_count": 1, "items": [issue_item]}
+            return {"total_count": 1, "items": [pr_item]}
+
+        mock_client.search_issues.side_effect = search_issues_side_effect
+        mock_client.search_commits.return_value = {
+            "total_count": 1, "items": [commit_item],
+        }
+        mock_client.get_commit.return_value = _make_commit_detail()
+        mock_client.get_issue.return_value = _make_issue_detail()
+        mock_client.get_issue_comments.return_value = []
+
+        result_path = fetcher.fetch("2025-02-16")
+
+        raw_dir = test_config.date_raw_dir("2025-02-16")
+        prs = load_json(raw_dir / "prs.json")
+        commits = load_json(raw_dir / "commits.json")
+        issues = load_json(raw_dir / "issues.json")
+
+        assert len(prs) == 1
+        assert len(commits) == 1
+        assert len(issues) == 1

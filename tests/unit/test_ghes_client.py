@@ -223,6 +223,104 @@ class TestPREndpoints:
         assert result[0]["state"] == "APPROVED"
 
 
+class TestCommitEndpoints:
+    @respx.mock
+    def test_search_commits_with_accept_header(self, client):
+        route = respx.get(f"{API_BASE}/search/commits").mock(
+            return_value=httpx.Response(200, json={
+                "total_count": 1,
+                "items": [{"sha": "abc123"}],
+            })
+        )
+        result = client.search_commits("author:user committer-date:2025-02-16")
+        assert result["total_count"] == 1
+        assert route.called
+        request = route.calls[0].request
+        assert "cloak-preview" in request.headers.get("Accept", "")
+
+    @respx.mock
+    def test_search_commits_passes_pagination(self, client):
+        route = respx.get(f"{API_BASE}/search/commits").mock(
+            return_value=httpx.Response(200, json={"total_count": 0, "items": []})
+        )
+        client.search_commits("test", page=2, per_page=50)
+        request = route.calls[0].request
+        assert "page=2" in str(request.url)
+        assert "per_page=50" in str(request.url)
+
+    @respx.mock
+    def test_get_commit(self, client):
+        respx.get(f"{API_BASE}/repos/org/repo/commits/abc123").mock(
+            return_value=httpx.Response(200, json={
+                "sha": "abc123",
+                "commit": {"message": "fix bug"},
+                "html_url": "https://example.com/commit/abc123",
+            })
+        )
+        result = client.get_commit("org", "repo", "abc123")
+        assert result["sha"] == "abc123"
+
+
+class TestIssueEndpoints:
+    @respx.mock
+    def test_get_issue(self, client):
+        respx.get(f"{API_BASE}/repos/org/repo/issues/10").mock(
+            return_value=httpx.Response(200, json={
+                "number": 10, "title": "Bug report", "state": "open",
+            })
+        )
+        result = client.get_issue("org", "repo", 10)
+        assert result["number"] == 10
+        assert result["title"] == "Bug report"
+
+    @respx.mock
+    def test_get_issue_comments(self, client):
+        respx.get(f"{API_BASE}/repos/org/repo/issues/10/comments").mock(
+            return_value=httpx.Response(200, json=[
+                {"user": {"login": "user1"}, "body": "comment",
+                 "created_at": "2025-01-01T00:00:00Z", "html_url": "u1"},
+            ])
+        )
+        result = client.get_issue_comments("org", "repo", 10)
+        assert len(result) == 1
+        assert result[0]["user"]["login"] == "user1"
+
+    @respx.mock
+    def test_get_issue_comments_pagination(self, client):
+        page1 = [{"id": i} for i in range(100)]
+        page2 = [{"id": i} for i in range(100, 120)]
+        respx.get(f"{API_BASE}/repos/org/repo/issues/10/comments").mock(
+            side_effect=[
+                httpx.Response(200, json=page1),
+                httpx.Response(200, json=page2),
+            ]
+        )
+        result = client.get_issue_comments("org", "repo", 10)
+        assert len(result) == 120
+
+
+class TestExtraHeaders:
+    @respx.mock
+    def test_extra_headers_passed_to_request(self, client):
+        """extra_headers가 _request_with_retry에 전달된다."""
+        route = respx.get(f"{API_BASE}/search/commits").mock(
+            return_value=httpx.Response(200, json={"total_count": 0, "items": []})
+        )
+        client.search_commits("test")
+        request = route.calls[0].request
+        assert "cloak-preview" in request.headers.get("Accept", "")
+
+    @respx.mock
+    def test_no_extra_headers_uses_default(self, client):
+        """extra_headers 없으면 기본 Accept 헤더 사용."""
+        route = respx.get(f"{API_BASE}/search/issues").mock(
+            return_value=httpx.Response(200, json={"total_count": 0, "items": []})
+        )
+        client.search_issues("test")
+        request = route.calls[0].request
+        assert "v3+json" in request.headers.get("Accept", "")
+
+
 class TestRetryAfterHeader:
     @respx.mock
     def test_uses_retry_after_header(self, client, monkeypatch):

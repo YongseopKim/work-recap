@@ -2,8 +2,8 @@
 
 ## 목적
 
-GHES Search API를 통해 특정 사용자의 특정 날짜 PR 활동을 수집하고,
-PR별 상세 정보(files, comments, reviews)를 enrich하여 `data/raw/` 에 저장한다.
+GHES Search API를 통해 특정 사용자의 특정 날짜 PR, Commit, Issue 활동을 수집하고,
+각 항목별 상세 정보를 enrich하여 `data/raw/` 에 저장한다.
 
 ---
 
@@ -15,7 +15,7 @@ PR별 상세 정보(files, comments, reviews)를 enrich하여 `data/raw/` 에 �
 
 - `git_recap.config.AppConfig`
 - `git_recap.infra.ghes_client.GHESClient`
-- `git_recap.models.PRRaw, FileChange, Comment, Review, save_json, load_json`
+- `git_recap.models.PRRaw, CommitRaw, IssueRaw, FileChange, Comment, Review, save_json, load_json`
 - `git_recap.exceptions.FetchError`
 
 ---
@@ -33,7 +33,7 @@ from git_recap.config import AppConfig
 from git_recap.exceptions import FetchError
 from git_recap.infra.ghes_client import GHESClient
 from git_recap.models import (
-    Comment, FileChange, PRRaw, Review, save_json, load_json,
+    Comment, CommitRaw, FileChange, IssueRaw, PRRaw, Review, save_json, load_json,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ class FetcherService:
 
     def fetch(self, target_date: str) -> Path:
         """
-        지정 날짜의 PR 활동을 수집하여 파일로 저장.
+        지정 날짜의 PR/Commit/Issue 활동을 수집하여 파일로 저장.
 
         Args:
             target_date: "YYYY-MM-DD"
@@ -65,10 +65,9 @@ class FetcherService:
         Returns:
             저장된 파일 경로 (data/raw/{Y}/{M}/{D}/prs.json)
         """
-        # 1. 3축 검색 + dedup
+        # 1. PR 파이프라인: 3축 검색 + dedup + enrich
         pr_urls_map = self._search_prs(target_date)
 
-        # 2. PR별 enrich
         prs: list[PRRaw] = []
         for pr_api_url, pr_basic in pr_urls_map.items():
             try:
@@ -77,13 +76,23 @@ class FetcherService:
             except FetchError:
                 logger.warning("Failed to enrich PR %s, skipping", pr_api_url)
 
-        # 3. 저장
         output_path = self._save(target_date, prs)
+
+        # 2. Commit 파이프라인
+        commits = self._fetch_commits(target_date)
+        self._save_commits(target_date, commits)
+
+        # 3. Issue 파이프라인
+        issues = self._fetch_issues(target_date)
+        self._save_issues(target_date, issues)
 
         # 4. checkpoint 갱신
         self._update_checkpoint(target_date)
 
-        logger.info("Fetched %d PRs for %s → %s", len(prs), target_date, output_path)
+        logger.info(
+            "Fetched %d PRs, %d commits, %d issues for %s → %s",
+            len(prs), len(commits), len(issues), target_date, output_path,
+        )
         return output_path
 ```
 
@@ -272,6 +281,150 @@ class FetcherService:
         return FetcherService._is_bot_user(author)
 ```
 
+### Commit 수집
+
+```python
+    def _fetch_commits(self, target_date: str) -> list[CommitRaw]:
+        """커밋 검색 + enrich. GHES 미지원 시 빈 리스트 반환."""
+        query = f"author:{self._username} committer-date:{target_date}"
+        try:
+            items = self._search_all_commit_pages(query)
+        except FetchError:
+            logger.warning("Commit search not supported, skipping")
+            return []
+
+        commits: list[CommitRaw] = []
+        for item in items:
+            try:
+                commits.append(self._enrich_commit(item))
+            except Exception:
+                logger.warning("Failed to enrich commit %s, skipping",
+                               item.get("sha", "unknown"))
+        return commits
+
+    def _search_all_commit_pages(self, query: str) -> list[dict]:
+        """Commit Search API 전체 페이지 수집."""
+        all_items: list[dict] = []
+        page = 1
+
+        while True:
+            result = self._client.search_commits(query, page=page, per_page=100)
+            items = result.get("items", [])
+            all_items.extend(items)
+
+            if len(items) < 100:
+                break
+            page += 1
+
+        return all_items
+
+    def _enrich_commit(self, item: dict) -> CommitRaw:
+        """검색 결과를 CommitRaw로 변환. get_commit으로 files 포함 상세 조회."""
+        repo_full = item["repository"]["full_name"]
+        sha = item["sha"]
+        owner, repo = repo_full.split("/", 1)
+
+        detail = self._client.get_commit(owner, repo, sha)
+
+        raw_files = detail.get("files", [])
+        return CommitRaw(
+            sha=sha,
+            url=detail["html_url"],
+            api_url=detail["url"],
+            message=detail["commit"]["message"],
+            author=item["author"]["login"] if item.get("author") else "",
+            repo=repo_full,
+            committed_at=detail["commit"]["committer"]["date"],
+            files=[
+                FileChange(
+                    filename=f["filename"],
+                    additions=f["additions"],
+                    deletions=f["deletions"],
+                    status=f["status"],
+                )
+                for f in raw_files
+            ],
+        )
+```
+
+### Issue 수집
+
+```python
+    def _fetch_issues(self, target_date: str) -> list[IssueRaw]:
+        """Issue 2축 검색(author + commenter) + enrich. 실패 시 빈 리스트 반환."""
+        axes = [
+            f"type:issue author:{self._username} updated:{target_date}",
+            f"type:issue commenter:{self._username} updated:{target_date}",
+        ]
+
+        issue_map: dict[str, dict] = {}
+        for query in axes:
+            try:
+                items = self._search_all_pages(query)
+            except FetchError:
+                logger.warning("Issue search failed for query '%s', skipping", query)
+                continue
+
+            for item in items:
+                api_url = item["url"]
+                if api_url not in issue_map:
+                    issue_map[api_url] = item
+
+        issues: list[IssueRaw] = []
+        for api_url, item in issue_map.items():
+            try:
+                issues.append(self._enrich_issue(item))
+            except Exception:
+                logger.warning("Failed to enrich issue %s, skipping", api_url)
+        return issues
+
+    def _enrich_issue(self, item: dict) -> IssueRaw:
+        """Issue 검색 결과를 IssueRaw로 변환."""
+        api_url = item["url"]
+        owner, repo, number = self._parse_issue_url(api_url)
+
+        detail = self._client.get_issue(owner, repo, number)
+        raw_comments = self._client.get_issue_comments(owner, repo, number)
+
+        filtered_comments = [
+            c for c in raw_comments if not self._is_noise_comment(c)
+        ]
+
+        return IssueRaw(
+            url=detail["html_url"],
+            api_url=detail["url"],
+            number=detail["number"],
+            title=detail["title"],
+            body=detail.get("body") or "",
+            state=detail["state"],
+            created_at=detail["created_at"],
+            updated_at=detail["updated_at"],
+            closed_at=detail.get("closed_at"),
+            repo=f"{owner}/{repo}",
+            labels=[label["name"] for label in detail.get("labels", [])],
+            author=detail["user"]["login"],
+            comments=[
+                Comment(
+                    author=c["user"]["login"],
+                    body=c.get("body") or "",
+                    created_at=c["created_at"],
+                    url=c["html_url"],
+                )
+                for c in filtered_comments
+            ],
+        )
+
+    @staticmethod
+    def _parse_issue_url(api_url: str) -> tuple[str, str, int]:
+        """Issue API URL에서 owner, repo, number 추출."""
+        parts = api_url.rstrip("/").split("/")
+        issues_idx = parts.index("issues")
+        owner = parts[issues_idx - 2]
+        repo = parts[issues_idx - 1]
+        number = int(parts[issues_idx + 1])
+        return owner, repo, number
+```
+
 ### 파일 저장 + Checkpoint
 
 ```python
@@ -280,6 +433,20 @@ class FetcherService:
         output_dir = self._config.date_raw_dir(target_date)
         output_path = output_dir / "prs.json"
         save_json(prs, output_path)
+        return output_path
+
+    def _save_commits(self, target_date: str, commits: list[CommitRaw]) -> Path:
+        """CommitRaw 목록을 JSON 파일로 저장."""
+        output_dir = self._config.date_raw_dir(target_date)
+        output_path = output_dir / "commits.json"
+        save_json(commits, output_path)
+        return output_path
+
+    def _save_issues(self, target_date: str, issues: list[IssueRaw]) -> Path:
+        """IssueRaw 목록을 JSON 파일로 저장."""
+        output_dir = self._config.date_raw_dir(target_date)
+        output_path = output_dir / "issues.json"
+        save_json(issues, output_path)
         return output_path
 
     def _update_checkpoint(self, target_date: str) -> None:
@@ -297,6 +464,16 @@ class FetcherService:
         with open(cp_path, "w", encoding="utf-8") as f:
             json.dump(checkpoints, f, indent=2)
 ```
+
+---
+
+## 출력 파일
+
+| 파일 | 내용 |
+|---|---|
+| `data/raw/{Y}/{M}/{D}/prs.json` | `list[PRRaw]` — PR 원시 데이터 |
+| `data/raw/{Y}/{M}/{D}/commits.json` | `list[CommitRaw]` — Commit 원시 데이터 |
+| `data/raw/{Y}/{M}/{D}/issues.json` | `list[IssueRaw]` — Issue 원시 데이터 |
 
 ---
 
@@ -375,6 +552,75 @@ class FetcherService:
     "body": "",
     "submitted_at": "2025-02-16T12:00:00Z",
     "html_url": "https://ghes/org/repo/pull/42#review-1"
+  }
+]
+```
+
+### Commit Search API 응답 (`GET /search/commits?q=author:user ...`)
+
+`Accept: application/vnd.github.cloak-preview+json` 헤더 필요.
+
+```json
+{
+  "total_count": 1,
+  "items": [
+    {
+      "sha": "abc123",
+      "repository": {"full_name": "org/repo"},
+      "author": {"login": "testuser"},
+      "commit": {
+        "message": "Add new feature",
+        "committer": {"date": "2025-02-16T14:00:00Z"}
+      }
+    }
+  ]
+}
+```
+
+### Commit Detail (`GET /repos/{owner}/{repo}/commits/{sha}`)
+
+```json
+{
+  "sha": "abc123",
+  "url": "https://ghes/api/v3/repos/org/repo/commits/abc123",
+  "html_url": "https://ghes/org/repo/commit/abc123",
+  "commit": {
+    "message": "Add new feature",
+    "committer": {"date": "2025-02-16T14:00:00Z"}
+  },
+  "files": [
+    {"filename": "src/main.py", "additions": 10, "deletions": 3, "status": "modified"}
+  ]
+}
+```
+
+### Issue Detail (`GET /repos/{owner}/{repo}/issues/{number}`)
+
+```json
+{
+  "url": "https://ghes/api/v3/repos/org/repo/issues/5",
+  "html_url": "https://ghes/org/repo/issues/5",
+  "number": 5,
+  "title": "Bug report",
+  "body": "Description",
+  "state": "open",
+  "created_at": "2025-02-16T09:00:00Z",
+  "updated_at": "2025-02-16T12:00:00Z",
+  "closed_at": null,
+  "user": {"login": "testuser"},
+  "labels": [{"name": "bug"}]
+}
+```
+
+### Issue Comments (`GET /repos/{owner}/{repo}/issues/{number}/comments`)
+
+```json
+[
+  {
+    "user": {"login": "commenter1"},
+    "body": "I can reproduce this.",
+    "created_at": "2025-02-16T10:00:00Z",
+    "html_url": "https://ghes/org/repo/issues/5#issuecomment-1"
   }
 ]
 ```
@@ -460,9 +706,49 @@ class TestNoiseFiltering:
         """일반 리뷰는 유지된다."""
 
 
+class TestFetchCommits:
+    def test_commit_search_and_enrich(self, fetcher, mock_client, tmp_data_dir):
+        """커밋 검색 후 enrich하여 commits.json 생성."""
+
+    def test_commit_search_not_supported(self, fetcher, mock_client, tmp_data_dir):
+        """Commit Search API 미지원 시 빈 리스트로 graceful skip."""
+
+    def test_enrich_commit_failure_skips(self, fetcher, mock_client, tmp_data_dir):
+        """개별 커밋 enrich 실패 시 해당 커밋만 스킵."""
+
+    def test_pagination(self, fetcher, mock_client):
+        """100개 초과 결과 시 다음 페이지 요청."""
+
+
+class TestFetchIssues:
+    def test_two_axis_search(self, fetcher, mock_client, tmp_data_dir):
+        """2축 쿼리 (author, commenter)로 Issue 검색."""
+
+    def test_dedup_by_api_url(self, fetcher, mock_client, tmp_data_dir):
+        """동일 Issue가 여러 축에서 나오면 1개로 dedup."""
+
+    def test_enrich_issue(self, fetcher, mock_client, tmp_data_dir):
+        """Issue enrich 후 IssueRaw 객체 생성."""
+
+    def test_issue_search_failure_skips_axis(self, fetcher, mock_client, tmp_data_dir):
+        """개별 축 검색 실패 시 해당 축만 스킵."""
+
+    def test_enrich_issue_failure_skips(self, fetcher, mock_client, tmp_data_dir):
+        """개별 Issue enrich 실패 시 해당 Issue만 스킵."""
+
+
+class TestParseIssueUrl:
+    def test_standard_url(self):
+        """표준 Issue API URL 파싱."""
+        owner, repo, num = FetcherService._parse_issue_url(
+            "https://ghes/api/v3/repos/org/repo/issues/5"
+        )
+        assert (owner, repo, num) == ("org", "repo", 5)
+
+
 class TestFetch:
     def test_full_pipeline(self, fetcher, mock_client, tmp_data_dir):
-        """fetch() 호출 시 prs.json 생성 + checkpoint 갱신."""
+        """fetch() 호출 시 prs.json + commits.json + issues.json 생성 + checkpoint 갱신."""
 
     def test_empty_result(self, fetcher, mock_client, tmp_data_dir):
         """검색 결과 없으면 빈 배열 JSON 생성."""
@@ -497,6 +783,10 @@ def mock_client():
     client.get_pr_files.return_value = []
     client.get_pr_comments.return_value = []
     client.get_pr_reviews.return_value = []
+    client.search_commits.return_value = {"total_count": 0, "items": []}
+    client.get_commit.return_value = {}
+    client.get_issue.return_value = {}
+    client.get_issue_comments.return_value = []
     return client
 
 @pytest.fixture
@@ -516,3 +806,6 @@ def fetcher(test_config, mock_client):
 | 1.2.4 | `_enrich()` 구현 | TestEnrich |
 | 1.2.5 | `_save()` + `_update_checkpoint()` 구현 | TestCheckpoint |
 | 1.2.6 | `fetch()` 통합 | TestFetch |
+| 1.2.7 | `_fetch_commits()` + `_search_all_commit_pages()` + `_enrich_commit()` 구현 | TestFetchCommits |
+| 1.2.8 | `_fetch_issues()` + `_enrich_issue()` + `_parse_issue_url()` 구현 | TestFetchIssues, TestParseIssueUrl |
+| 1.2.9 | `_save_commits()` + `_save_issues()` 구현 | TestFetch (통합) |

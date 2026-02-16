@@ -2,7 +2,7 @@
 
 ## 1. 프로젝트 개요
 
-GitHub Enterprise Server(GHES)의 PR, review, issue comment 데이터를 수집하여
+GitHub Enterprise Server(GHES)의 PR, commit, issue, review, comment 데이터를 수집하여
 LLM 기반으로 일/주/월/년 단위 업무 요약을 자동 생성하는 개인 도구.
 
 **핵심 원칙:**
@@ -19,7 +19,7 @@ LLM 기반으로 일/주/월/년 단위 업무 요약을 자동 생성하는 개
 
 | ID | 요구사항 | 담당 모듈 |
 |---|---|---|
-| FR-1 | GHES Search API로 사용자의 PR authored/reviewed/commented 활동을 날짜 기준 수집 | Fetcher |
+| FR-1 | GHES Search API로 사용자의 PR authored/reviewed/commented, commit, issue 활동을 날짜 기준 수집 | Fetcher |
 | FR-2 | Raw 데이터를 정규화된 Activity 포맷으로 변환 | Normalizer |
 | FR-3 | Activity + 스크립트 수치 기반 daily/weekly/monthly/yearly summary 생성 | Summarizer |
 | FR-4 | 상위 summary는 하위 summary를 input으로 사용 | Summarizer |
@@ -144,12 +144,12 @@ GHES API
 │              │    │                │    │                 │
 │ raw/         │    │ normalized/    │    │ summaries/      │
 │  prs.json    │    │  activities.   │    │  daily/02-16.md │
-│              │    │  jsonl         │    │  weekly/W07.md  │
-│              │    │  stats.json    │    │  monthly/02.md  │
+│  commits.json│    │  jsonl         │    │  weekly/W07.md  │
+│  issues.json │    │  stats.json    │    │  monthly/02.md  │
 └──────────────┘    └────────────────┘    └─────────────────┘
 ```
 
-- **Fetcher**: GHES API → `data/raw/{YYYY}/{MM}/{DD}/prs.json`
+- **Fetcher**: GHES API → `data/raw/{YYYY}/{MM}/{DD}/prs.json` + `commits.json` + `issues.json`
 - **Normalizer**: prs.json → `data/normalized/{YYYY}/{MM}/{DD}/activities.jsonl` + `stats.json`
 - **Summarizer**: activities + stats → `data/summaries/{YYYY}/daily/{MM}-{DD}.md`
 
@@ -196,7 +196,9 @@ git-recap/
 │   │       └── {job_id}.json
 │   ├── raw/                       # Fetcher output
 │   │   └── {YYYY}/{MM}/{DD}/
-│   │       └── prs.json
+│   │       ├── prs.json
+│   │       ├── commits.json
+│   │       └── issues.json
 │   ├── normalized/                # Normalizer output
 │   │   └── {YYYY}/{MM}/{DD}/
 │   │       ├── activities.jsonl
@@ -307,6 +309,33 @@ class PRRaw:
     comments: list[Comment]
     reviews: list[Review]
 
+@dataclass
+class CommitRaw:
+    sha: str
+    url: str                 # HTML URL
+    api_url: str
+    message: str             # full commit message
+    author: str              # GitHub login
+    repo: str                # "org/repo"
+    committed_at: str        # ISO 8601
+    files: list[FileChange]
+
+@dataclass
+class IssueRaw:
+    url: str                 # HTML URL
+    api_url: str
+    number: int
+    title: str
+    body: str
+    state: str               # open | closed
+    created_at: str          # ISO 8601
+    updated_at: str          # ISO 8601
+    closed_at: str | None    # ISO 8601 or None
+    repo: str                # "org/repo-name"
+    labels: list[str]
+    author: str
+    comments: list[Comment]
+
 
 # ── Normalizer output ──
 
@@ -314,6 +343,9 @@ class ActivityKind(str, Enum):
     PR_AUTHORED = "pr_authored"
     PR_REVIEWED = "pr_reviewed"
     PR_COMMENTED = "pr_commented"
+    COMMIT = "commit"
+    ISSUE_AUTHORED = "issue_authored"
+    ISSUE_COMMENTED = "issue_commented"
 
 @dataclass
 class Activity:
@@ -324,6 +356,7 @@ class Activity:
     title: str
     url: str                 # PR HTML URL
     summary: str             # 스크립트가 생성하는 1줄 요약
+    sha: str = ""            # commit SHA (COMMIT kind만 사용)
     files: list[str]         # 변경된 파일 경로 목록
     additions: int
     deletions: int
@@ -339,8 +372,13 @@ class DailyStats:
     total_additions: int
     total_deletions: int
     repos_touched: list[str]
-    authored_prs: list[dict] # [{url, title, repo}]
-    reviewed_prs: list[dict] # [{url, title, repo}]
+    authored_prs: list[dict]     # [{url, title, repo}]
+    reviewed_prs: list[dict]     # [{url, title, repo}]
+    commit_count: int
+    issue_authored_count: int
+    issue_commented_count: int
+    commits: list[dict]          # [{url, title, repo, sha}]
+    authored_issues: list[dict]  # [{url, title, repo}]
 
 
 # ── Job status (async API) ──
@@ -369,7 +407,7 @@ class FetcherService:
 
     def fetch(self, target_date: str) -> Path:
         """
-        지정 날짜의 PR 활동을 GHES에서 수집하여 파일로 저장.
+        지정 날짜의 PR/Commit/Issue 활동을 GHES에서 수집하여 파일로 저장.
 
         Args:
             target_date: "YYYY-MM-DD" 형식
@@ -380,18 +418,17 @@ class FetcherService:
         Raises:
             FetchError: GHES API 호출 실패 시
 
-        산출물 스키마: list[PRRaw] as JSON
+        산출물: prs.json (list[PRRaw]), commits.json (list[CommitRaw]),
+                issues.json (list[IssueRaw])
         멱등성: 동일 날짜 재실행 시 파일 덮어쓰기
         """
 ```
 
 **내부 동작:**
-1. Search API 3축 쿼리: `author:{username}`, `reviewed-by:{username}`, `commenter:{username}`
-2. 결과 합산 + PR URL 기준 dedup
-3. PR별 enrich: `GET /repos/{owner}/{repo}/pulls/{number}/files`, `/comments`, `/reviews`
-4. 노이즈 필터링: bot author, body가 "LGTM"만 있는 comment 제거
-5. `list[PRRaw]` → JSON 파일 저장
-6. checkpoints.json 갱신 (마지막 성공 날짜 기록)
+1. **PR 파이프라인**: Search API 3축 쿼리 (`author`, `reviewed-by`, `commenter`) → dedup → enrich (files, comments, reviews) → 노이즈 필터링 → `prs.json`
+2. **Commit 파이프라인**: Commit Search API (`author`, `committer-date`) → enrich (`get_commit`으로 files 포함) → `commits.json` (GHES 미지원 시 graceful skip)
+3. **Issue 파이프라인**: Search API 2축 (`author`, `commenter`) → dedup → enrich (`get_issue` + `get_issue_comments`) → 노이즈 필터링 → `issues.json`
+4. checkpoints.json 갱신 (마지막 성공 날짜 기록)
 
 ### 6.3 NormalizerService
 
@@ -407,7 +444,9 @@ class NormalizerService:
             target_date: "YYYY-MM-DD" 형식
 
         Input:
-            data/raw/{Y}/{M}/{D}/prs.json (list[PRRaw])
+            data/raw/{Y}/{M}/{D}/prs.json (필수, list[PRRaw])
+            data/raw/{Y}/{M}/{D}/commits.json (optional, list[CommitRaw])
+            data/raw/{Y}/{M}/{D}/issues.json (optional, list[IssueRaw])
 
         Returns:
             (activities_path, stats_path) 튜플
@@ -415,22 +454,20 @@ class NormalizerService:
             - data/normalized/{Y}/{M}/{D}/stats.json
 
         Raises:
-            NormalizeError: 입력 파일 없음 또는 파싱 실패 시
+            NormalizeError: prs.json 없음 또는 파싱 실패 시
 
         멱등성: 동일 날짜 재실행 시 파일 덮어쓰기
         """
 ```
 
 **내부 동작:**
-1. prs.json 로드 → `list[PRRaw]`
-2. 각 PR에 대해 사용자 역할 분류:
-   - `author == username` → `PR_AUTHORED`
-   - reviews에 username 존재 → `PR_REVIEWED`
-   - comments에 username 존재 → `PR_COMMENTED`
-   - 하나의 PR이 여러 kind를 가질 수 있음 (authored + self-reviewed는 authored만)
-3. Activity 객체 생성, auto_summary = `"{kind}: {title} ({repo}) +{adds}/-{dels}"`
-4. DailyStats 계산: count, additions/deletions 합산, repos 목록
-5. activities.jsonl + stats.json 저장
+1. prs.json 로드 → `list[PRRaw]` (필수), commits.json → `list[CommitRaw]`, issues.json → `list[IssueRaw]` (optional, 하위 호환)
+2. PR 활동 분류: `PR_AUTHORED`, `PR_REVIEWED`, `PR_COMMENTED`
+3. Commit → `COMMIT` Activity (title: message 첫 줄 120자 truncate)
+4. Issue → `ISSUE_AUTHORED` (author+date 매치), `ISSUE_COMMENTED` (사용자 comment on date)
+5. 전체 활동 시간순 정렬
+6. DailyStats 계산: PR/commit/issue 카운터, additions/deletions (authored PR + commit 합산)
+7. activities.jsonl + stats.json 저장
 
 ### 6.4 SummarizerService
 
@@ -532,6 +569,13 @@ class GHESClient:
     def get_pr_files(self, owner: str, repo: str, number: int) -> list[dict]: ...
     def get_pr_comments(self, owner: str, repo: str, number: int) -> list[dict]: ...
     def get_pr_reviews(self, owner: str, repo: str, number: int) -> list[dict]: ...
+
+    def search_commits(self, query: str, page: int = 1) -> dict:
+        """Commit Search API 호출. cloak-preview Accept 헤더 사용."""
+
+    def get_commit(self, owner: str, repo: str, sha: str) -> dict: ...
+    def get_issue(self, owner: str, repo: str, number: int) -> dict: ...
+    def get_issue_comments(self, owner: str, repo: str, number: int) -> list[dict]: ...
 ```
 
 - HTTP 라이브러리: `httpx`
@@ -669,12 +713,17 @@ AppConfig ◄──────────────────────�
 - 3축 쿼리 결과 dedup 검증
 - 노이즈 필터링 (bot, LGTM 등)
 - 429 retry 동작 검증
-- prs.json 파일 생성 검증
+- prs.json + commits.json + issues.json 파일 생성 검증
+- Commit Search API 미지원 시 graceful skip
+- Issue 2축 검색 + dedup
 
 **NormalizerService:**
 - PRRaw → Activity 변환 (kind 분류 정확성)
+- CommitRaw → COMMIT Activity 변환 (title truncate)
+- IssueRaw → ISSUE_AUTHORED / ISSUE_COMMENTED 변환
 - 한 PR에 여러 역할 시 Activity 생성 규칙
-- DailyStats 수치 정확성 (activities와 일치)
+- DailyStats 수치 정확성 (activities와 일치, commit/issue 카운터 포함)
+- commits.json/issues.json optional 로딩 (하위 호환)
 - 빈 입력 처리
 
 **SummarizerService:**
@@ -713,6 +762,9 @@ AppConfig ◄──────────────────────�
 - `pr_authored`: PR `created_at` 날짜
 - `pr_reviewed`: Review `submitted_at` 날짜
 - `pr_commented`: Comment `created_at` 날짜
+- `commit`: Commit `committed_at` 날짜
+- `issue_authored`: Issue `created_at` 날짜
+- `issue_commented`: Issue comment `created_at` 날짜
 
 동일 PR이 여러 날짜에 다른 kind로 등장할 수 있다. 이것은 의도된 동작이다 — 각 날짜의 활동 스냅샷을 보여주는 것이 목적.
 

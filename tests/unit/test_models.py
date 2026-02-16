@@ -4,14 +4,18 @@ from git_recap.models import (
     Activity,
     ActivityKind,
     Comment,
+    CommitRaw,
     DailyStats,
     FileChange,
+    IssueRaw,
     Job,
     JobStatus,
     PRRaw,
     Review,
     activity_from_dict,
+    commit_raw_from_dict,
     daily_stats_from_dict,
+    issue_raw_from_dict,
     load_json,
     load_jsonl,
     pr_raw_from_dict,
@@ -139,11 +143,17 @@ class TestActivityKind:
         assert ActivityKind.PR_AUTHORED.value == "pr_authored"
         assert ActivityKind.PR_REVIEWED.value == "pr_reviewed"
         assert ActivityKind.PR_COMMENTED.value == "pr_commented"
+        assert ActivityKind.COMMIT.value == "commit"
+        assert ActivityKind.ISSUE_AUTHORED.value == "issue_authored"
+        assert ActivityKind.ISSUE_COMMENTED.value == "issue_commented"
 
     def test_from_string(self):
         assert ActivityKind("pr_authored") == ActivityKind.PR_AUTHORED
         assert ActivityKind("pr_reviewed") == ActivityKind.PR_REVIEWED
         assert ActivityKind("pr_commented") == ActivityKind.PR_COMMENTED
+        assert ActivityKind("commit") == ActivityKind.COMMIT
+        assert ActivityKind("issue_authored") == ActivityKind.ISSUE_AUTHORED
+        assert ActivityKind("issue_commented") == ActivityKind.ISSUE_COMMENTED
 
 
 class TestActivity:
@@ -274,3 +284,210 @@ class TestSerializationUtils:
         assert isinstance(loaded, list)
         assert len(loaded) == 1
         assert loaded[0]["title"] == "Add user authentication"
+
+
+# ── CommitRaw 테스트 ──
+
+
+def _make_sample_commit_raw() -> CommitRaw:
+    return CommitRaw(
+        sha="abc123def456",
+        url="https://github.example.com/org/repo/commit/abc123def456",
+        api_url="https://github.example.com/api/v3/repos/org/repo/commits/abc123def456",
+        message="feat: add new feature\n\nDetailed description",
+        author="testuser",
+        repo="org/repo",
+        committed_at="2025-02-16T10:00:00Z",
+        files=[
+            FileChange("src/feature.py", 20, 5, "modified"),
+            FileChange("tests/test_feature.py", 15, 0, "added"),
+        ],
+    )
+
+
+class TestCommitRaw:
+    def test_creation_minimal(self):
+        commit = CommitRaw(
+            sha="abc123",
+            url="https://example.com/commit/abc123",
+            api_url="https://example.com/api/commits/abc123",
+            message="fix bug",
+            author="user",
+            repo="org/repo",
+            committed_at="2025-02-16T10:00:00Z",
+        )
+        assert commit.files == []
+        assert commit.sha == "abc123"
+
+    def test_roundtrip_json(self, tmp_path):
+        """CommitRaw → JSON → dict → CommitRaw 왕복 변환."""
+        commit = _make_sample_commit_raw()
+        path = tmp_path / "commits.json"
+        save_json([commit], path)
+        loaded = load_json(path)
+        restored = commit_raw_from_dict(loaded[0])
+        assert restored.sha == commit.sha
+        assert restored.message == commit.message
+        assert restored.author == commit.author
+        assert restored.repo == commit.repo
+        assert restored.committed_at == commit.committed_at
+        assert len(restored.files) == 2
+        assert restored.files[0].filename == "src/feature.py"
+        assert restored.files[0].additions == 20
+
+
+# ── IssueRaw 테스트 ──
+
+
+def _make_sample_issue_raw() -> IssueRaw:
+    return IssueRaw(
+        url="https://github.example.com/org/repo/issues/10",
+        api_url="https://github.example.com/api/v3/repos/org/repo/issues/10",
+        number=10,
+        title="Bug: login fails",
+        body="Steps to reproduce...",
+        state="open",
+        created_at="2025-02-16T09:00:00Z",
+        updated_at="2025-02-16T15:00:00Z",
+        closed_at=None,
+        repo="org/repo",
+        labels=["bug", "priority-high"],
+        author="testuser",
+        comments=[
+            Comment("other", "I can reproduce", "2025-02-16T10:00:00Z",
+                    "https://github.example.com/org/repo/issues/10#comment-1"),
+        ],
+    )
+
+
+class TestIssueRaw:
+    def test_creation_minimal(self):
+        issue = IssueRaw(
+            url="https://example.com/issues/1",
+            api_url="https://example.com/api/issues/1",
+            number=1,
+            title="Test issue",
+            body="",
+            state="open",
+            created_at="2025-02-16T10:00:00Z",
+            updated_at="2025-02-16T10:00:00Z",
+            closed_at=None,
+            repo="org/repo",
+        )
+        assert issue.labels == []
+        assert issue.author == ""
+        assert issue.comments == []
+
+    def test_roundtrip_json(self, tmp_path):
+        """IssueRaw → JSON → dict → IssueRaw 왕복 변환."""
+        issue = _make_sample_issue_raw()
+        path = tmp_path / "issues.json"
+        save_json([issue], path)
+        loaded = load_json(path)
+        restored = issue_raw_from_dict(loaded[0])
+        assert restored.number == issue.number
+        assert restored.title == issue.title
+        assert restored.state == issue.state
+        assert restored.closed_at is None
+        assert restored.labels == ["bug", "priority-high"]
+        assert restored.author == "testuser"
+        assert len(restored.comments) == 1
+        assert restored.comments[0].author == "other"
+
+    def test_closed_issue_roundtrip(self, tmp_path):
+        issue = IssueRaw(
+            url="u", api_url="a", number=2, title="t", body="b",
+            state="closed", created_at="2025-01-01T00:00:00Z",
+            updated_at="2025-01-02T00:00:00Z",
+            closed_at="2025-01-02T00:00:00Z", repo="org/repo",
+        )
+        path = tmp_path / "issue.json"
+        save_json([issue], path)
+        loaded = load_json(path)
+        restored = issue_raw_from_dict(loaded[0])
+        assert restored.closed_at == "2025-01-02T00:00:00Z"
+
+
+class TestActivityWithSha:
+    def test_sha_default_empty(self):
+        act = Activity(
+            ts="2025-02-16T10:00:00Z",
+            kind=ActivityKind.PR_AUTHORED,
+            repo="org/repo",
+            pr_number=1,
+            title="PR",
+            url="u",
+            summary="s",
+        )
+        assert act.sha == ""
+
+    def test_sha_roundtrip(self, tmp_path):
+        act = Activity(
+            ts="2025-02-16T10:00:00Z",
+            kind=ActivityKind.COMMIT,
+            repo="org/repo",
+            pr_number=0,
+            title="feat: add",
+            url="u",
+            summary="s",
+            sha="abc123",
+        )
+        path = tmp_path / "act.jsonl"
+        save_jsonl([act], path)
+        loaded = load_jsonl(path)
+        restored = activity_from_dict(loaded[0])
+        assert restored.sha == "abc123"
+        assert restored.kind == ActivityKind.COMMIT
+
+    def test_backward_compat_no_sha(self):
+        """옛 데이터(sha 없음)로 from_dict 호출 시 정상 동작."""
+        d = {
+            "ts": "t", "kind": "pr_authored", "repo": "r",
+            "pr_number": 1, "title": "t", "url": "u", "summary": "s",
+        }
+        act = activity_from_dict(d)
+        assert act.sha == ""
+
+
+class TestDailyStatsExtended:
+    def test_new_fields_defaults(self):
+        stats = DailyStats(date="2025-02-16")
+        assert stats.commit_count == 0
+        assert stats.issue_authored_count == 0
+        assert stats.issue_commented_count == 0
+        assert stats.commits == []
+        assert stats.authored_issues == []
+
+    def test_new_fields_roundtrip(self, tmp_path):
+        stats = DailyStats(
+            date="2025-02-16",
+            commit_count=3,
+            issue_authored_count=1,
+            issue_commented_count=2,
+            commits=[{"url": "u", "title": "t", "repo": "r", "sha": "abc"}],
+            authored_issues=[{"url": "u", "title": "t", "repo": "r"}],
+        )
+        path = tmp_path / "stats.json"
+        save_json(stats, path)
+        loaded = load_json(path)
+        restored = daily_stats_from_dict(loaded)
+        assert restored.commit_count == 3
+        assert restored.issue_authored_count == 1
+        assert restored.issue_commented_count == 2
+        assert restored.commits == [{"url": "u", "title": "t", "repo": "r", "sha": "abc"}]
+        assert restored.authored_issues == [{"url": "u", "title": "t", "repo": "r"}]
+
+    def test_backward_compat_no_new_fields(self):
+        """옛 데이터(새 필드 없음)로 from_dict 호출 시 정상 동작."""
+        d = {
+            "date": "2025-02-16",
+            "authored_count": 1,
+            "reviewed_count": 0,
+            "commented_count": 0,
+        }
+        stats = daily_stats_from_dict(d)
+        assert stats.commit_count == 0
+        assert stats.issue_authored_count == 0
+        assert stats.issue_commented_count == 0
+        assert stats.commits == []
+        assert stats.authored_issues == []

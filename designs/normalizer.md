@@ -2,7 +2,7 @@
 
 ## 목적
 
-Fetcher가 수집한 raw PR 데이터(`prs.json`)를 정규화된 Activity 목록과
+Fetcher가 수집한 raw 데이터(`prs.json`, `commits.json`, `issues.json`)를 정규화된 Activity 목록과
 일일 통계(DailyStats)로 변환한다. 이 단계에서 활동 유형 분류, 날짜 필터링,
 auto_summary 생성, 수치 계산이 모두 이루어진다.
 
@@ -16,8 +16,8 @@ auto_summary 생성, 수치 계산이 모두 이루어진다.
 
 - `git_recap.config.AppConfig`
 - `git_recap.exceptions.NormalizeError`
-- `git_recap.models` — PRRaw, Activity, ActivityKind, DailyStats,
-  pr_raw_from_dict, load_json, save_json, save_jsonl
+- `git_recap.models` — PRRaw, CommitRaw, IssueRaw, Activity, ActivityKind, DailyStats,
+  pr_raw_from_dict, commit_raw_from_dict, issue_raw_from_dict, load_json, save_json, save_jsonl
 
 ---
 
@@ -32,8 +32,9 @@ from pathlib import Path
 from git_recap.config import AppConfig
 from git_recap.exceptions import NormalizeError
 from git_recap.models import (
-    Activity, ActivityKind, DailyStats, PRRaw,
-    pr_raw_from_dict, load_json, save_json, save_jsonl,
+    Activity, ActivityKind, CommitRaw, DailyStats, IssueRaw, PRRaw,
+    commit_raw_from_dict, issue_raw_from_dict, load_json, pr_raw_from_dict,
+    save_json, save_jsonl,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,21 +47,23 @@ class NormalizerService:
 
     def normalize(self, target_date: str) -> tuple[Path, Path]:
         """
-        Raw PR 데이터를 Activity 목록과 통계로 변환.
+        Raw PR/Commit/Issue 데이터를 Activity 목록과 통계로 변환.
 
         Args:
             target_date: "YYYY-MM-DD"
 
         Input:
-            data/raw/{Y}/{M}/{D}/prs.json
+            data/raw/{Y}/{M}/{D}/prs.json (필수)
+            data/raw/{Y}/{M}/{D}/commits.json (optional, 하위 호환)
+            data/raw/{Y}/{M}/{D}/issues.json (optional, 하위 호환)
 
         Returns:
             (activities_path, stats_path)
 
         Raises:
-            NormalizeError: 입력 파일 없음 또는 파싱 실패
+            NormalizeError: prs.json 없음 또는 파싱 실패
         """
-        # 1. raw 로드
+        # 1. raw 로드 — PR (필수)
         raw_path = self._config.date_raw_dir(target_date) / "prs.json"
         if not raw_path.exists():
             raise NormalizeError(f"Raw file not found: {raw_path}")
@@ -72,8 +75,32 @@ class NormalizerService:
 
         prs = [pr_raw_from_dict(d) for d in raw_data]
 
-        # 2. PRRaw → Activity 변환
-        activities = self._convert_activities(prs, target_date)
+        # Commit/Issue 로드 (optional — 없으면 빈 리스트, 하위 호환)
+        raw_dir = self._config.date_raw_dir(target_date)
+
+        commits_path = raw_dir / "commits.json"
+        commits: list[CommitRaw] = []
+        if commits_path.exists():
+            try:
+                commits = [commit_raw_from_dict(d) for d in load_json(commits_path)]
+            except Exception:
+                logger.warning("Failed to parse %s, skipping commits", commits_path)
+
+        issues_path = raw_dir / "issues.json"
+        issues: list[IssueRaw] = []
+        if issues_path.exists():
+            try:
+                issues = [issue_raw_from_dict(d) for d in load_json(issues_path)]
+            except Exception:
+                logger.warning("Failed to parse %s, skipping issues", issues_path)
+
+        # 2. 각 소스 → Activity 변환
+        pr_activities = self._convert_activities(prs, target_date)
+        commit_activities = self._convert_commit_activities(commits, target_date)
+        issue_activities = self._convert_issue_activities(issues, target_date)
+
+        activities = pr_activities + commit_activities + issue_activities
+        activities.sort(key=lambda a: a.ts)
 
         # 3. DailyStats 계산
         stats = self._compute_stats(activities, target_date)
@@ -153,6 +180,89 @@ class NormalizerService:
 
         # 시간순 정렬
         activities.sort(key=lambda a: a.ts)
+        return activities
+```
+
+### Commit → Activity 변환
+
+```python
+    def _convert_commit_activities(
+        self, commits: list[CommitRaw], target_date: str
+    ) -> list[Activity]:
+        """Commit 목록에서 COMMIT Activity를 생성."""
+        activities: list[Activity] = []
+        for commit in commits:
+            if not self._matches_date(commit.committed_at, target_date):
+                continue
+
+            # 제목: commit message 첫 줄, 120자 truncate
+            first_line = commit.message.split("\n", 1)[0]
+            title = first_line[:120] + ("…" if len(first_line) > 120 else "")
+
+            total_adds = sum(f.additions for f in commit.files)
+            total_dels = sum(f.deletions for f in commit.files)
+            file_names = [f.filename for f in commit.files]
+
+            activities.append(Activity(
+                ts=commit.committed_at,
+                kind=ActivityKind.COMMIT,
+                repo=commit.repo,
+                pr_number=0,
+                title=title,
+                url=commit.url,
+                summary=f"commit: {title} ({commit.repo}) +{total_adds}/-{total_dels}",
+                sha=commit.sha,
+                files=file_names,
+                additions=total_adds,
+                deletions=total_dels,
+            ))
+        return activities
+```
+
+### Issue → Activity 변환
+
+```python
+    def _convert_issue_activities(
+        self, issues: list[IssueRaw], target_date: str
+    ) -> list[Activity]:
+        """Issue 목록에서 ISSUE_AUTHORED / ISSUE_COMMENTED Activity를 생성."""
+        activities: list[Activity] = []
+        for issue in issues:
+            # ISSUE_AUTHORED: author가 본인이고 created_at이 target_date인 경우
+            if (
+                issue.author.lower() == self._username.lower()
+                and self._matches_date(issue.created_at, target_date)
+            ):
+                activities.append(Activity(
+                    ts=issue.created_at,
+                    kind=ActivityKind.ISSUE_AUTHORED,
+                    repo=issue.repo,
+                    pr_number=issue.number,
+                    title=issue.title,
+                    url=issue.url,
+                    summary=f"issue_authored: {issue.title} ({issue.repo})",
+                    labels=issue.labels,
+                ))
+
+            # ISSUE_COMMENTED: 본인의 comment가 target_date에 존재하는 경우
+            user_comments = [
+                c for c in issue.comments
+                if c.author.lower() == self._username.lower()
+                and self._matches_date(c.created_at, target_date)
+            ]
+            if user_comments:
+                earliest = min(user_comments, key=lambda c: c.created_at)
+                activities.append(Activity(
+                    ts=earliest.created_at,
+                    kind=ActivityKind.ISSUE_COMMENTED,
+                    repo=issue.repo,
+                    pr_number=issue.number,
+                    title=issue.title,
+                    url=issue.url,
+                    summary=f"issue_commented: {issue.title} ({issue.repo})",
+                    labels=issue.labels,
+                    evidence_urls=[c.url for c in user_comments],
+                ))
         return activities
 ```
 
@@ -245,10 +355,19 @@ class NormalizerService:
         authored = [a for a in activities if a.kind == ActivityKind.PR_AUTHORED]
         reviewed = [a for a in activities if a.kind == ActivityKind.PR_REVIEWED]
         commented = [a for a in activities if a.kind == ActivityKind.PR_COMMENTED]
+        commits = [a for a in activities if a.kind == ActivityKind.COMMIT]
+        issue_authored = [a for a in activities if a.kind == ActivityKind.ISSUE_AUTHORED]
+        issue_commented = [a for a in activities if a.kind == ActivityKind.ISSUE_COMMENTED]
 
-        # authored PR의 additions/deletions만 합산 (reviewed/commented는 남의 코드)
-        total_adds = sum(a.additions for a in authored)
-        total_dels = sum(a.deletions for a in authored)
+        # authored PR + commit의 additions/deletions 합산
+        total_adds = (
+            sum(a.additions for a in authored)
+            + sum(a.additions for a in commits)
+        )
+        total_dels = (
+            sum(a.deletions for a in authored)
+            + sum(a.deletions for a in commits)
+        )
 
         repos = sorted(set(a.repo for a in activities))
 
@@ -268,6 +387,17 @@ class NormalizerService:
                 {"url": a.url, "title": a.title, "repo": a.repo}
                 for a in reviewed
             ],
+            commit_count=len(commits),
+            issue_authored_count=len(issue_authored),
+            issue_commented_count=len(issue_commented),
+            commits=[
+                {"url": a.url, "title": a.title, "repo": a.repo, "sha": a.sha}
+                for a in commits
+            ],
+            authored_issues=[
+                {"url": a.url, "title": a.title, "repo": a.repo}
+                for a in issue_authored
+            ],
         )
 ```
 
@@ -281,11 +411,16 @@ class NormalizerService:
 |---|---|---|
 | `pr.author == username` | PR_AUTHORED | `pr.created_at` |
 | `review.author == username` AND `pr.author != username` | PR_REVIEWED | `review.submitted_at` |
-| `comment.author == username` | PR_COMMENTED | 가장 이른 comment의 `created_at` |
+| `comment.author == username` (PR) | PR_COMMENTED | 가장 이른 comment의 `created_at` |
+| commit의 `committed_at` | COMMIT | `committed_at` |
+| `issue.author == username` | ISSUE_AUTHORED | `issue.created_at` |
+| `comment.author == username` (Issue) | ISSUE_COMMENTED | 가장 이른 comment의 `created_at` |
 
 - **self-review 제외**: 자기가 만든 PR에 대한 review는 PR_AUTHORED에 이미 포함
 - **PR당 1개 review activity**: 여러 review를 남겨도 하나의 PR_REVIEWED로 집계
 - **PR당 1개 comment activity**: 여러 comment를 남겨도 하나의 PR_COMMENTED, evidence_urls에 모든 URL 포함
+- **Commit title**: message 첫 줄에서 120자 truncate
+- **Issue activity**: 한 Issue에서 ISSUE_AUTHORED + ISSUE_COMMENTED 둘 다 가능
 
 ### 날짜 필터링 (D-4)
 
@@ -296,8 +431,8 @@ class NormalizerService:
 
 ### DailyStats의 additions/deletions
 
-- authored PR의 line count만 합산
-- reviewed/commented PR의 변경량은 남의 코드이므로 "내가 쓴 코드량"에 포함하지 않음
+- authored PR + commit의 line count 합산
+- reviewed/commented PR, issue의 변경량은 남의 코드이므로 "내가 쓴 코드량"에 포함하지 않음
 
 ---
 
@@ -372,12 +507,40 @@ class TestMatchesDate:
         assert NormalizerService._matches_date("2025-02-15T23:59:59Z", "2025-02-16") is False
 
 
+class TestConvertCommitActivities:
+    def test_commit_activity(self):
+        """CommitRaw → COMMIT Activity 생성."""
+
+    def test_commit_title_truncate(self):
+        """120자 초과 commit message → truncate + '…'."""
+
+    def test_commit_date_filtering(self):
+        """target_date에 해당하지 않는 commit은 제외."""
+
+    def test_commit_sha_preserved(self):
+        """Activity.sha에 commit SHA가 보존."""
+
+
+class TestConvertIssueActivities:
+    def test_issue_authored(self):
+        """author == username → ISSUE_AUTHORED Activity 생성."""
+
+    def test_issue_commented(self):
+        """사용자 comment → ISSUE_COMMENTED Activity 생성."""
+
+    def test_issue_both_kinds(self):
+        """한 Issue에서 authored + commented 둘 다 생성 가능."""
+
+    def test_issue_date_filtering(self):
+        """target_date에 해당하지 않는 activity는 제외."""
+
+
 class TestComputeStats:
     def test_counts(self):
-        """authored/reviewed/commented count 정확."""
+        """authored/reviewed/commented/commit/issue count 정확."""
 
-    def test_additions_only_from_authored(self):
-        """additions/deletions는 authored PR만 합산."""
+    def test_additions_from_authored_and_commits(self):
+        """additions/deletions는 authored PR + commit 합산."""
 
     def test_repos_touched(self):
         """활동한 repo 목록 (중복 제거, 정렬)."""
@@ -388,13 +551,19 @@ class TestComputeStats:
     def test_reviewed_prs_list(self):
         """reviewed_prs에 url, title, repo 포함."""
 
+    def test_commits_list(self):
+        """commits에 url, title, repo, sha 포함."""
+
+    def test_authored_issues_list(self):
+        """authored_issues에 url, title, repo 포함."""
+
     def test_empty_activities(self):
         """빈 activities → 모든 수치 0."""
 
 
 class TestNormalize:
     def test_full_pipeline(self, test_config):
-        """prs.json → activities.jsonl + stats.json 생성."""
+        """prs.json + commits.json + issues.json → activities.jsonl + stats.json 생성."""
 
     def test_raw_file_not_found(self, test_config):
         """raw 파일 없으면 NormalizeError."""
@@ -404,6 +573,15 @@ class TestNormalize:
 
     def test_idempotent(self, test_config):
         """같은 입력으로 두 번 실행해도 동일 결과."""
+
+    def test_missing_commits_json(self, test_config):
+        """commits.json 없어도 정상 동작 (하위 호환)."""
+
+    def test_missing_issues_json(self, test_config):
+        """issues.json 없어도 정상 동작 (하위 호환)."""
+
+    def test_invalid_commits_json(self, test_config):
+        """잘못된 commits.json → 경고 로그 + commit 스킵."""
 ```
 
 ---
@@ -417,3 +595,7 @@ class TestNormalize:
 | 2.3 | `_make_activity()` + `_convert_activities()` 구현 (kind 분류, 날짜 필터링, self-review 제외) | TestConvertActivities |
 | 2.4 | `_compute_stats()` 구현 (수치 계산, authored만 line count) | TestComputeStats |
 | 2.5 | `normalize()` 통합 (로드 → 변환 → 저장) | TestNormalize |
+| 2.6 | `_convert_commit_activities()` 구현 (COMMIT kind, title truncate) | TestConvertCommitActivities |
+| 2.7 | `_convert_issue_activities()` 구현 (ISSUE_AUTHORED + ISSUE_COMMENTED) | TestConvertIssueActivities |
+| 2.8 | `_compute_stats()` 확장 (commit/issue 카운터 + 리스트) | TestComputeStats |
+| 2.9 | `normalize()` commits.json/issues.json optional 로딩 (하위 호환) | TestNormalize |
