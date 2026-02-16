@@ -1,0 +1,43 @@
+[project]
+name = "git-recap"
+version = "0.1.0"
+description = "GHES activity summarizer with LLM"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "typer>=0.12",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "openai>=1.0",
+    "anthropic>=0.30",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "respx>=0.21",
+    "coverage>=7.0",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+git-recap = "git_recap.cli.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/git_recap"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

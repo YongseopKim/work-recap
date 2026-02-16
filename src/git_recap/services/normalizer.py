@@ -1,0 +1,212 @@
+"""Raw PR 데이터를 정규화된 Activity + DailyStats로 변환하는 서비스."""
+
+import logging
+from pathlib import Path
+
+from git_recap.config import AppConfig
+from git_recap.exceptions import NormalizeError
+from git_recap.models import (
+    Activity,
+    ActivityKind,
+    DailyStats,
+    PRRaw,
+    load_json,
+    pr_raw_from_dict,
+    save_json,
+    save_jsonl,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class NormalizerService:
+    def __init__(self, config: AppConfig) -> None:
+        self._config = config
+        self._username = config.username
+
+    def normalize(self, target_date: str) -> tuple[Path, Path]:
+        """
+        Raw PR 데이터를 Activity 목록과 통계로 변환.
+
+        Args:
+            target_date: "YYYY-MM-DD"
+
+        Returns:
+            (activities_path, stats_path)
+
+        Raises:
+            NormalizeError: 입력 파일 없음 또는 파싱 실패
+        """
+        raw_path = self._config.date_raw_dir(target_date) / "prs.json"
+        if not raw_path.exists():
+            raise NormalizeError(f"Raw file not found: {raw_path}")
+
+        try:
+            raw_data = load_json(raw_path)
+        except Exception as e:
+            raise NormalizeError(f"Failed to parse {raw_path}: {e}") from e
+
+        prs = [pr_raw_from_dict(d) for d in raw_data]
+
+        activities = self._convert_activities(prs, target_date)
+        stats = self._compute_stats(activities, target_date)
+
+        out_dir = self._config.date_normalized_dir(target_date)
+        activities_path = out_dir / "activities.jsonl"
+        stats_path = out_dir / "stats.json"
+
+        save_jsonl(activities, activities_path)
+        save_json(stats, stats_path)
+
+        logger.info(
+            "Normalized %d activities for %s → %s",
+            len(activities), target_date, out_dir,
+        )
+        return activities_path, stats_path
+
+    # ── Activity 변환 ──
+
+    def _convert_activities(
+        self, prs: list[PRRaw], target_date: str
+    ) -> list[Activity]:
+        """
+        PR 목록에서 사용자의 활동을 추출.
+
+        규칙:
+          - author == username → PR_AUTHORED (ts = created_at)
+          - reviews에 username → PR_REVIEWED (ts = submitted_at), self-review 제외
+          - comments에 username → PR_COMMENTED (ts = earliest created_at)
+          - 각 activity의 ts가 target_date에 해당하지 않으면 제외
+        """
+        activities: list[Activity] = []
+
+        for pr in prs:
+            is_author = pr.author.lower() == self._username.lower()
+
+            # PR_AUTHORED
+            if is_author and self._matches_date(pr.created_at, target_date):
+                activities.append(
+                    self._make_activity(pr, ActivityKind.PR_AUTHORED, pr.created_at)
+                )
+
+            # PR_REVIEWED (self-review 제외)
+            if not is_author:
+                for review in pr.reviews:
+                    if (
+                        review.author.lower() == self._username.lower()
+                        and self._matches_date(review.submitted_at, target_date)
+                    ):
+                        activities.append(
+                            self._make_activity(
+                                pr, ActivityKind.PR_REVIEWED, review.submitted_at,
+                                evidence_urls=[review.url],
+                            )
+                        )
+                        break  # PR당 1개 review activity
+
+            # PR_COMMENTED
+            user_comments = [
+                c for c in pr.comments
+                if c.author.lower() == self._username.lower()
+                and self._matches_date(c.created_at, target_date)
+            ]
+            if user_comments:
+                earliest = min(user_comments, key=lambda c: c.created_at)
+                activities.append(
+                    self._make_activity(
+                        pr, ActivityKind.PR_COMMENTED, earliest.created_at,
+                        evidence_urls=[c.url for c in user_comments],
+                    )
+                )
+
+        activities.sort(key=lambda a: a.ts)
+        return activities
+
+    def _make_activity(
+        self,
+        pr: PRRaw,
+        kind: ActivityKind,
+        ts: str,
+        evidence_urls: list[str] | None = None,
+    ) -> Activity:
+        total_adds = sum(f.additions for f in pr.files)
+        total_dels = sum(f.deletions for f in pr.files)
+        file_names = [f.filename for f in pr.files]
+
+        return Activity(
+            ts=ts,
+            kind=kind,
+            repo=pr.repo,
+            pr_number=pr.number,
+            title=pr.title,
+            url=pr.url,
+            summary=self._auto_summary(pr, kind, total_adds, total_dels),
+            files=file_names,
+            additions=total_adds,
+            deletions=total_dels,
+            labels=pr.labels,
+            evidence_urls=evidence_urls or [],
+        )
+
+    # ── Auto Summary ──
+
+    @staticmethod
+    def _auto_summary(pr: PRRaw, kind: ActivityKind, adds: int, dels: int) -> str:
+        """1줄 자동 요약. body 없으면 파일 경로 기반 fallback (D-2)."""
+        if pr.body and pr.body.strip():
+            return f"{kind.value}: {pr.title} ({pr.repo}) +{adds}/-{dels}"
+
+        dirs = set()
+        for f in pr.files:
+            parts = f.filename.split("/")
+            if len(parts) > 1:
+                dirs.add(parts[0])
+            else:
+                dirs.add(f.filename)
+
+        dir_hint = ", ".join(sorted(dirs)[:3])
+        if len(dirs) > 3:
+            dir_hint += " 외"
+
+        return (
+            f"{kind.value}: [{dir_hint}] "
+            f"{len(pr.files)}개 파일 변경 ({pr.repo}) +{adds}/-{dels}"
+        )
+
+    # ── 날짜 필터링 ──
+
+    @staticmethod
+    def _matches_date(iso_timestamp: str, target_date: str) -> bool:
+        """ISO 8601 타임스탬프의 날짜 부분이 target_date와 일치하는지 확인."""
+        return iso_timestamp[:10] == target_date
+
+    # ── DailyStats 계산 ──
+
+    @staticmethod
+    def _compute_stats(activities: list[Activity], target_date: str) -> DailyStats:
+        authored = [a for a in activities if a.kind == ActivityKind.PR_AUTHORED]
+        reviewed = [a for a in activities if a.kind == ActivityKind.PR_REVIEWED]
+        commented = [a for a in activities if a.kind == ActivityKind.PR_COMMENTED]
+
+        total_adds = sum(a.additions for a in authored)
+        total_dels = sum(a.deletions for a in authored)
+
+        repos = sorted(set(a.repo for a in activities))
+
+        return DailyStats(
+            date=target_date,
+            authored_count=len(authored),
+            reviewed_count=len(reviewed),
+            commented_count=len(commented),
+            total_additions=total_adds,
+            total_deletions=total_dels,
+            repos_touched=repos,
+            authored_prs=[
+                {"url": a.url, "title": a.title, "repo": a.repo}
+                for a in authored
+            ],
+            reviewed_prs=[
+                {"url": a.url, "title": a.title, "repo": a.repo}
+                for a in reviewed
+            ],
+        )

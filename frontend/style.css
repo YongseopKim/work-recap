@@ -1,0 +1,115 @@
+/* git-recap custom styles — Pico CSS 보충 */
+
+/* Tab navigation */
+nav ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  gap: 0;
+}
+
+nav ul li {
+  margin: 0;
+}
+
+.tab-link {
+  display: inline-block;
+  padding: 0.5rem 1.25rem;
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  color: var(--pico-muted-color);
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.tab-link:hover {
+  color: var(--pico-primary);
+}
+
+.tab-link.active {
+  color: var(--pico-primary);
+  border-bottom-color: var(--pico-primary);
+  font-weight: 600;
+}
+
+/* Tab content visibility */
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+/* Utility */
+.hidden {
+  display: none !important;
+}
+
+/* Status indicators */
+.status-accepted,
+.status-running {
+  color: var(--pico-primary);
+}
+
+.status-completed {
+  color: #2e7d32;
+}
+
+.status-failed {
+  color: #c62828;
+}
+
+.status-icon {
+  margin-right: 0.25rem;
+}
+
+/* Error notice */
+.notice.error {
+  background: #fbe9e7;
+  color: #c62828;
+  padding: 1rem;
+  border-radius: var(--pico-border-radius);
+  margin-top: 1rem;
+}
+
+/* Markdown body */
+.markdown-body {
+  line-height: 1.7;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.5rem;
+}
+
+.markdown-body code {
+  background: var(--pico-code-background-color);
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.markdown-body pre {
+  padding: 1rem;
+  overflow-x: auto;
+}
+
+/* Button loading state */
+button[aria-busy="true"] {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+/* View summary link in pipeline status */
+.view-summary-link {
+  cursor: pointer;
+  color: var(--pico-primary);
+  text-decoration: underline;
+}

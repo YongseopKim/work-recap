@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>git-recap</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="container">
+    <h1>git-recap</h1>
+    <nav>
+      <ul>
+        <li><a href="#" class="tab-link active" data-tab="pipeline">Pipeline</a></li>
+        <li><a href="#" class="tab-link" data-tab="summaries">Summaries</a></li>
+        <li><a href="#" class="tab-link" data-tab="ask">Ask</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main class="container">
+
+    <!-- Pipeline Tab -->
+    <section id="tab-pipeline" class="tab-content active">
+      <h2>Pipeline</h2>
+
+      <article>
+        <h3>Single Date</h3>
+        <div class="grid">
+          <label>
+            Date
+            <input type="date" id="pipeline-date">
+          </label>
+          <label>
+            &nbsp;
+            <button id="btn-run" class="primary">Run</button>
+          </label>
+        </div>
+      </article>
+
+      <article>
+        <h3>Date Range</h3>
+        <div class="grid">
+          <label>
+            Since
+            <input type="date" id="pipeline-since">
+          </label>
+          <label>
+            Until
+            <input type="date" id="pipeline-until">
+          </label>
+          <label>
+            &nbsp;
+            <button id="btn-run-range" class="primary">Run Range</button>
+          </label>
+        </div>
+      </article>
+
+      <article id="pipeline-status" class="hidden">
+        <h3>Status</h3>
+        <div id="pipeline-status-content"></div>
+      </article>
+    </section>
+
+    <!-- Summaries Tab -->
+    <section id="tab-summaries" class="tab-content">
+      <h2>Summaries</h2>
+
+      <article>
+        <div class="grid">
+          <label>
+            Type
+            <select id="summary-type">
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          </label>
+
+          <div id="summary-inputs">
+            <!-- 동적으로 채워짐 -->
+          </div>
+
+          <label>
+            &nbsp;
+            <button id="btn-view-summary" class="primary">View</button>
+          </label>
+        </div>
+      </article>
+
+      <article id="summary-viewer" class="hidden">
+        <div id="summary-content" class="markdown-body"></div>
+      </article>
+
+      <div id="summary-error" class="hidden notice error"></div>
+    </section>
+
+    <!-- Ask Tab -->
+    <section id="tab-ask" class="tab-content">
+      <h2>Ask</h2>
+
+      <article>
+        <label>
+          Question
+          <input type="text" id="ask-question" placeholder="e.g. What were my key achievements this month?">
+        </label>
+        <div class="grid">
+          <label>
+            Months of context
+            <input type="number" id="ask-months" value="3" min="1" max="24">
+          </label>
+          <label>
+            &nbsp;
+            <button id="btn-ask" class="primary">Ask</button>
+          </label>
+        </div>
+      </article>
+
+      <article id="ask-status" class="hidden">
+        <h3>Status</h3>
+        <div id="ask-status-content"></div>
+      </article>
+
+      <article id="ask-result" class="hidden">
+        <h3>Answer</h3>
+        <div id="ask-result-content" class="markdown-body"></div>
+      </article>
+    </section>
+
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
