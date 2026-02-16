@@ -8,8 +8,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install (editable, with dev deps)
 pip install -e ".[dev]"
 
-# Run all tests (296 tests)
+# Run unit tests (296 tests, integration excluded by default)
 pytest
+
+# Run integration tests (require .env with real credentials)
+pytest -m integration -x -v
 
 # Run a single test file
 pytest tests/unit/test_fetcher.py -v
@@ -73,11 +76,11 @@ data/state/                         → checkpoints.json, jobs/
 
 ## Testing patterns
 
-- Tests are in `tests/unit/`. `conftest.py` provides `tmp_data_dir` and `test_config` fixtures (isolated temp directories, dummy env).
+- **Unit tests** are in `tests/unit/`. `conftest.py` provides `tmp_data_dir` and `test_config` fixtures (isolated temp directories, dummy env). All unit tests use `.env.test` automatically (autouse fixture overrides `AppConfig.model_config`).
+- **Integration tests** are in `tests/integration/`. They use real `.env` credentials to call GitHub API and LLM API. Excluded from default `pytest` runs via `addopts = "-m 'not integration'"`. Run with `pytest -m integration -x -v`. Tests share a class-scoped temp `data_dir` to avoid polluting real `data/`. Use `INTEGRATION_TEST_DATE=YYYY-MM-DD` to override the default test date (3 days ago).
 - HTTP mocking: `respx` for `httpx` requests (GHESClient tests).
 - `unittest.mock.patch` for service-level mocking. Patch targets must be module-level imports (not local imports inside functions).
 - `pytest-asyncio` for async tests (API routes).
-- All tests use `.env.test` automatically (autouse fixture overrides `AppConfig.model_config`).
 
 ## Important conventions
 

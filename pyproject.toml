@@ -37,6 +37,10 @@ packages = ["src/git_recap"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "integration: real API integration tests (require .env)",
+]
+addopts = "-m 'not integration'"
 
 [tool.ruff]
 line-length = 100
