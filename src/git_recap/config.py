@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,7 +16,9 @@ class AppConfig(BaseSettings):
     # GHES 연결
     ghes_url: str
     ghes_token: str
-    username: str
+    username: str = Field(
+        validation_alias=AliasChoices("username", "ghes_username"),
+    )
 
     # 파일 경로
     data_dir: Path = Path("data")

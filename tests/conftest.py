@@ -3,6 +3,14 @@ from pathlib import Path
 from git_recap.config import AppConfig
 
 
+@pytest.fixture(autouse=True)
+def _use_test_env(monkeypatch):
+    """모든 테스트에서 .env 대신 .env.test를 사용하도록 강제."""
+    monkeypatch.setattr(
+        AppConfig, "model_config", {**AppConfig.model_config, "env_file": ".env.test"}
+    )
+
+
 @pytest.fixture
 def tmp_data_dir(tmp_path: Path) -> Path:
     """테스트용 격리된 data 디렉토리."""

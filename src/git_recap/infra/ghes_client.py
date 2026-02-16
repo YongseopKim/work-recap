@@ -19,7 +19,10 @@ class GHESClient:
 
     def __init__(self, base_url: str, token: str) -> None:
         self._base_url = base_url.rstrip("/")
-        self._api_base = f"{self._base_url}/api/v3"
+        if "api.github.com" in self._base_url:
+            self._api_base = self._base_url
+        else:
+            self._api_base = f"{self._base_url}/api/v3"
         self._client = httpx.Client(
             base_url=self._api_base,
             headers={
