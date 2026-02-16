@@ -21,7 +21,11 @@ def mocks():
     normalizer = Mock(spec=NormalizerService)
     summarizer = Mock(spec=SummarizerService)
 
-    fetcher.fetch.return_value = Path("/data/raw/2025/02/16/prs.json")
+    fetcher.fetch.return_value = {
+        "prs": Path("/data/raw/2025/02/16/prs.json"),
+        "commits": Path("/data/raw/2025/02/16/commits.json"),
+        "issues": Path("/data/raw/2025/02/16/issues.json"),
+    }
     normalizer.normalize.return_value = (
         Path("/data/normalized/2025/02/16/activities.jsonl"),
         Path("/data/normalized/2025/02/16/stats.json"),
@@ -112,7 +116,7 @@ class TestRunRange:
         def fetch_side_effect(date_str):
             if date_str == "2025-02-15":
                 raise FetchError("GHES down")
-            return Path(f"/data/raw/{date_str}/prs.json")
+            return {"prs": Path(f"/data/raw/{date_str}/prs.json")}
 
         mocks["fetcher"].fetch.side_effect = fetch_side_effect
 

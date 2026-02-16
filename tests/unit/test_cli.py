@@ -26,6 +26,17 @@ def _mock_config():
     )
 
 
+def _fetch_result(**overrides):
+    """기본 fetch 반환값 dict."""
+    base = {
+        "prs": Path("/data/raw/prs.json"),
+        "commits": Path("/data/raw/commits.json"),
+        "issues": Path("/data/raw/issues.json"),
+    }
+    base.update(overrides)
+    return base
+
+
 @pytest.fixture(autouse=True)
 def patch_config(monkeypatch):
     """모든 CLI 테스트에서 _get_config를 mock."""
@@ -50,26 +61,25 @@ def patch_llm(monkeypatch):
     return mock_llm
 
 
-# ── Tests ──
+# ── Fetch 기본 ──
 
 
 class TestFetch:
     @patch("git_recap.cli.main.FetcherService")
     def test_fetch_with_date(self, mock_cls):
-        mock_cls.return_value.fetch.return_value = Path("/data/raw/prs.json")
+        mock_cls.return_value.fetch.return_value = _fetch_result()
         result = runner.invoke(app, ["fetch", "2025-02-16"])
         assert result.exit_code == 0
         assert "Fetched" in result.output
-        mock_cls.return_value.fetch.assert_called_once_with("2025-02-16")
+        mock_cls.return_value.fetch.assert_called_once_with("2025-02-16", types=None)
 
     @patch("git_recap.cli.main.FetcherService")
     def test_fetch_default_today(self, mock_cls):
-        mock_cls.return_value.fetch.return_value = Path("/data/raw/prs.json")
+        mock_cls.return_value.fetch.return_value = _fetch_result()
         result = runner.invoke(app, ["fetch"])
         assert result.exit_code == 0
-        # 오늘 날짜로 호출됨
-        call_args = mock_cls.return_value.fetch.call_args[0][0]
-        assert len(call_args) == 10  # YYYY-MM-DD
+        call_args = mock_cls.return_value.fetch.call_args
+        assert len(call_args[0][0]) == 10  # YYYY-MM-DD
 
     @patch("git_recap.cli.main.FetcherService")
     def test_fetch_error(self, mock_cls):
@@ -77,6 +87,186 @@ class TestFetch:
         result = runner.invoke(app, ["fetch", "2025-02-16"])
         assert result.exit_code == 1
         assert "Error" in result.output
+
+
+# ── Fetch 타입 필터 ──
+
+
+class TestFetchTypeFilter:
+    @patch("git_recap.cli.main.FetcherService")
+    def test_type_prs(self, mock_cls):
+        mock_cls.return_value.fetch.return_value = {"prs": Path("/data/prs.json")}
+        result = runner.invoke(app, ["fetch", "--type", "prs", "2025-02-16"])
+        assert result.exit_code == 0
+        mock_cls.return_value.fetch.assert_called_once_with(
+            "2025-02-16", types={"prs"}
+        )
+
+    @patch("git_recap.cli.main.FetcherService")
+    def test_type_commits(self, mock_cls):
+        mock_cls.return_value.fetch.return_value = {"commits": Path("/data/commits.json")}
+        result = runner.invoke(app, ["fetch", "--type", "commits", "2025-02-16"])
+        assert result.exit_code == 0
+        mock_cls.return_value.fetch.assert_called_once_with(
+            "2025-02-16", types={"commits"}
+        )
+
+    @patch("git_recap.cli.main.FetcherService")
+    def test_type_issues(self, mock_cls):
+        mock_cls.return_value.fetch.return_value = {"issues": Path("/data/issues.json")}
+        result = runner.invoke(app, ["fetch", "--type", "issues", "2025-02-16"])
+        assert result.exit_code == 0
+        mock_cls.return_value.fetch.assert_called_once_with(
+            "2025-02-16", types={"issues"}
+        )
+
+    def test_type_invalid(self):
+        result = runner.invoke(app, ["fetch", "--type", "invalid", "2025-02-16"])
+        assert result.exit_code == 1
+        assert "Invalid type" in result.output
+
+
+# ── Fetch 날짜 범위 ──
+
+
+class TestFetchDateRange:
+    @patch("git_recap.cli.main.FetcherService")
+    def test_since_until(self, mock_cls):
+        mock_cls.return_value.fetch.return_value = _fetch_result()
+        result = runner.invoke(app, [
+            "fetch", "--since", "2025-02-14", "--until", "2025-02-16",
+        ])
+        assert result.exit_code == 0
+        assert mock_cls.return_value.fetch.call_count == 3
+        assert "3 day(s)" in result.output
+
+    def test_since_without_until(self):
+        result = runner.invoke(app, ["fetch", "--since", "2025-02-14"])
+        assert result.exit_code == 1
+        assert "--since" in result.output and "--until" in result.output
+
+    def test_until_without_since(self):
+        result = runner.invoke(app, ["fetch", "--until", "2025-02-16"])
+        assert result.exit_code == 1
+        assert "--since" in result.output and "--until" in result.output
+
+
+# ── Fetch Weekly ──
+
+
+class TestFetchWeekly:
+    @patch("git_recap.cli.main.FetcherService")
+    def test_weekly_option(self, mock_cls):
+        mock_cls.return_value.fetch.return_value = _fetch_result()
+        result = runner.invoke(app, ["fetch", "--weekly", "2026-7"])
+        assert result.exit_code == 0
+        assert mock_cls.return_value.fetch.call_count == 7  # Mon-Sun
+
+
+# ── Fetch Monthly ──
+
+
+class TestFetchMonthly:
+    @patch("git_recap.cli.main.FetcherService")
+    def test_monthly_option(self, mock_cls):
+        mock_cls.return_value.fetch.return_value = _fetch_result()
+        result = runner.invoke(app, ["fetch", "--monthly", "2026-2"])
+        assert result.exit_code == 0
+        assert mock_cls.return_value.fetch.call_count == 28  # Feb 2026
+
+
+# ── Fetch Yearly ──
+
+
+class TestFetchYearly:
+    @patch("git_recap.cli.main.FetcherService")
+    def test_yearly_option(self, mock_cls):
+        mock_cls.return_value.fetch.return_value = _fetch_result()
+        result = runner.invoke(app, ["fetch", "--yearly", "2026"])
+        assert result.exit_code == 0
+        assert mock_cls.return_value.fetch.call_count == 365
+
+
+# ── Fetch Catch-up ──
+
+
+class TestFetchCatchUp:
+    @patch("git_recap.cli.main.FetcherService")
+    def test_no_args_no_checkpoint(self, mock_cls):
+        """인자 없고 checkpoint 없으면 오늘만 fetch."""
+        mock_cls.return_value.fetch.return_value = _fetch_result()
+        result = runner.invoke(app, ["fetch"])
+        assert result.exit_code == 0
+        assert mock_cls.return_value.fetch.call_count == 1
+
+    @patch("git_recap.cli.main.date_utils")
+    @patch("git_recap.cli.main._read_last_fetch_date")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_no_args_with_checkpoint(self, mock_cls, mock_read, mock_du):
+        """인자 없고 checkpoint 있으면 catch-up."""
+        mock_read.return_value = "2026-02-14"
+        mock_du.catchup_range.return_value = ("2026-02-15", "2026-02-17")
+        mock_du.date_range.return_value = ["2026-02-15", "2026-02-16", "2026-02-17"]
+        mock_cls.return_value.fetch.return_value = _fetch_result()
+        result = runner.invoke(app, ["fetch"])
+        assert result.exit_code == 0
+        assert mock_cls.return_value.fetch.call_count == 3
+
+    @patch("git_recap.cli.main.date_utils")
+    @patch("git_recap.cli.main._read_last_fetch_date")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_type_with_catchup(self, mock_cls, mock_read, mock_du):
+        """--type + catch-up 결합."""
+        mock_read.return_value = "2026-02-15"
+        mock_du.catchup_range.return_value = ("2026-02-16", "2026-02-17")
+        mock_du.date_range.return_value = ["2026-02-16", "2026-02-17"]
+        mock_cls.return_value.fetch.return_value = {"issues": Path("/data/issues.json")}
+        result = runner.invoke(app, ["fetch", "--type", "issues"])
+        assert result.exit_code == 0
+        mock_cls.return_value.fetch.assert_any_call("2026-02-16", types={"issues"})
+
+
+# ── Fetch 상호 배타 ──
+
+
+class TestFetchMutualExclusion:
+    def test_target_date_with_since_until(self):
+        result = runner.invoke(app, [
+            "fetch", "2025-02-16", "--since", "2025-02-14", "--until", "2025-02-16",
+        ])
+        assert result.exit_code == 1
+
+    def test_weekly_with_monthly(self):
+        result = runner.invoke(app, [
+            "fetch", "--weekly", "2026-7", "--monthly", "2026-2",
+        ])
+        assert result.exit_code == 1
+
+
+# ── Fetch 출력 ──
+
+
+class TestFetchOutput:
+    @patch("git_recap.cli.main.FetcherService")
+    def test_output_shows_all_types(self, mock_cls):
+        mock_cls.return_value.fetch.return_value = _fetch_result()
+        result = runner.invoke(app, ["fetch", "2025-02-16"])
+        assert result.exit_code == 0
+        assert "prs" in result.output
+        assert "commits" in result.output
+        assert "issues" in result.output
+
+    @patch("git_recap.cli.main.FetcherService")
+    def test_output_shows_date_count(self, mock_cls):
+        mock_cls.return_value.fetch.return_value = _fetch_result()
+        result = runner.invoke(app, [
+            "fetch", "--since", "2025-02-14", "--until", "2025-02-16",
+        ])
+        assert result.exit_code == 0
+        assert "3 day(s)" in result.output
+
+
+# ── Normalize ──
 
 
 class TestNormalize:

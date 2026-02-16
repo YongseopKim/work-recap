@@ -1,5 +1,6 @@
 """git-recap CLI — Typer 기반."""
 
+import json
 from datetime import date
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import typer
 
 from git_recap.config import AppConfig
 from git_recap.exceptions import GitRecapError
+from git_recap.services import date_utils
 from git_recap.services.fetcher import FetcherService
 from git_recap.services.normalizer import NormalizerService
 from git_recap.services.orchestrator import OrchestratorService
@@ -15,6 +17,8 @@ from git_recap.services.summarizer import SummarizerService
 app = typer.Typer(help="GHES activity summarizer with LLM")
 summarize_app = typer.Typer(help="Generate summaries")
 app.add_typer(summarize_app, name="summarize")
+
+VALID_TYPES = {"prs", "commits", "issues"}
 
 
 def _get_config() -> AppConfig:
@@ -38,24 +42,116 @@ def _handle_error(e: GitRecapError) -> None:
     raise typer.Exit(code=1)
 
 
+def _read_last_fetch_date(config: AppConfig) -> str | None:
+    cp_path = config.checkpoints_path
+    if not cp_path.exists():
+        return None
+    with open(cp_path, encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("last_fetch_date")
+
+
+def _parse_weekly(value: str) -> tuple[int, int]:
+    parts = value.split("-")
+    return int(parts[0]), int(parts[1])
+
+
+def _parse_monthly(value: str) -> tuple[int, int]:
+    parts = value.split("-")
+    return int(parts[0]), int(parts[1])
+
+
 # ── 개별 서비스 커맨드 ──
 
 
 @app.command()
 def fetch(
     target_date: str = typer.Argument(
-        default=None, help="Target date (YYYY-MM-DD). Default: today"
+        default=None, help="Target date (YYYY-MM-DD). Default: today or catch-up"
     ),
+    type: str = typer.Option(
+        None, "--type", "-t", help="prs, commits, or issues"
+    ),
+    since: str = typer.Option(None, help="Range start (YYYY-MM-DD)"),
+    until: str = typer.Option(None, help="Range end (YYYY-MM-DD)"),
+    weekly: str = typer.Option(None, help="YEAR-WEEK, e.g. 2026-7"),
+    monthly: str = typer.Option(None, help="YEAR-MONTH, e.g. 2026-2"),
+    yearly: int = typer.Option(None, help="Year, e.g. 2026"),
 ) -> None:
-    """Fetch PR data from GHES for a specific date."""
-    target_date = target_date or date.today().isoformat()
-    config = _get_config()
+    """Fetch PR/Commit/Issue data from GHES."""
+    # 1. --type 검증
+    types: set[str] | None = None
+    if type is not None:
+        if type not in VALID_TYPES:
+            typer.echo(f"Invalid type: {type}. Must be one of {VALID_TYPES}", err=True)
+            raise typer.Exit(code=1)
+        types = {type}
 
+    # 2. 상호 배타 검증
+    range_opts = sum([
+        target_date is not None,
+        since is not None or until is not None,
+        weekly is not None,
+        monthly is not None,
+        yearly is not None,
+    ])
+    if range_opts > 1:
+        typer.echo(
+            "Error: Only one of target_date, --since/--until, --weekly, "
+            "--monthly, --yearly can be specified.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    # since/until 쌍 검증
+    if (since is None) != (until is None):
+        typer.echo("Error: --since and --until must be used together.", err=True)
+        raise typer.Exit(code=1)
+
+    # 3. 날짜 범위 결정
+    if since and until:
+        dates = date_utils.date_range(since, until)
+    elif weekly:
+        year, week = _parse_weekly(weekly)
+        s, u = date_utils.weekly_range(year, week)
+        dates = date_utils.date_range(s, u)
+    elif monthly:
+        year, month = _parse_monthly(monthly)
+        s, u = date_utils.monthly_range(year, month)
+        dates = date_utils.date_range(s, u)
+    elif yearly is not None:
+        s, u = date_utils.yearly_range(yearly)
+        dates = date_utils.date_range(s, u)
+    elif target_date:
+        dates = [target_date]
+    else:
+        # catch-up 모드: checkpoint 있으면 이후 날짜들, 없으면 오늘만
+        config = _get_config()
+        last = _read_last_fetch_date(config)
+        if last:
+            s, u = date_utils.catchup_range(last)
+            dates = date_utils.date_range(s, u)
+            if not dates:
+                typer.echo("Already up to date.")
+                return
+        else:
+            dates = [date.today().isoformat()]
+
+    # 4. Fetch 실행
+    config = _get_config()
     try:
         with _get_ghes_client(config) as client:
             service = FetcherService(config, client)
-            path = service.fetch(target_date)
-        typer.echo(f"Fetched → {path}")
+            all_results: list[dict[str, Path]] = []
+            for d in dates:
+                result = service.fetch(d, types=types)
+                all_results.append(result)
+
+        # 5. 결과 출력
+        typer.echo(f"Fetched {len(dates)} day(s)")
+        for d, result in zip(dates, all_results):
+            for type_name, path in sorted(result.items()):
+                typer.echo(f"  {d} {type_name}: {path}")
     except GitRecapError as e:
         _handle_error(e)
 

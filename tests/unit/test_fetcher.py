@@ -301,20 +301,21 @@ class TestFetch:
             "total_count": 1, "items": [item]
         }
 
-        result_path = fetcher.fetch("2025-02-16")
+        result = fetcher.fetch("2025-02-16")
 
-        assert result_path.exists()
-        data = load_json(result_path)
+        assert isinstance(result, dict)
+        assert result["prs"].exists()
+        data = load_json(result["prs"])
         assert isinstance(data, list)
         assert len(data) == 1
         assert data[0]["title"] == "Test PR"
 
     def test_empty_result(self, fetcher, mock_client, test_config):
         mock_client.search_issues.return_value = {"total_count": 0, "items": []}
-        result_path = fetcher.fetch("2025-02-16")
+        result = fetcher.fetch("2025-02-16")
 
-        assert result_path.exists()
-        data = load_json(result_path)
+        assert result["prs"].exists()
+        data = load_json(result["prs"])
         assert data == []
 
     def test_enrich_failure_skips_pr(self, fetcher, mock_client, test_config):
@@ -325,17 +326,23 @@ class TestFetch:
         }
         mock_client.get_pr.side_effect = FetchError("timeout")
 
-        result_path = fetcher.fetch("2025-02-16")
-        data = load_json(result_path)
+        result = fetcher.fetch("2025-02-16")
+        data = load_json(result["prs"])
         assert data == []
 
     def test_output_path_matches_date(self, fetcher, mock_client, test_config):
         mock_client.search_issues.return_value = {"total_count": 0, "items": []}
-        result_path = fetcher.fetch("2025-02-16")
-        assert "2025" in str(result_path)
-        assert "02" in str(result_path)
-        assert "16" in str(result_path)
-        assert result_path.name == "prs.json"
+        result = fetcher.fetch("2025-02-16")
+        prs_path = result["prs"]
+        assert "2025" in str(prs_path)
+        assert "02" in str(prs_path)
+        assert "16" in str(prs_path)
+        assert prs_path.name == "prs.json"
+
+    def test_returns_dict_with_all_keys(self, fetcher, mock_client, test_config):
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        result = fetcher.fetch("2025-02-16")
+        assert set(result.keys()) == {"prs", "commits", "issues"}
 
 
 class TestCheckpoint:
@@ -594,13 +601,85 @@ class TestFetchIntegration:
         mock_client.get_issue.return_value = _make_issue_detail()
         mock_client.get_issue_comments.return_value = []
 
-        result_path = fetcher.fetch("2025-02-16")
+        result = fetcher.fetch("2025-02-16")
 
-        raw_dir = test_config.date_raw_dir("2025-02-16")
-        prs = load_json(raw_dir / "prs.json")
-        commits = load_json(raw_dir / "commits.json")
-        issues = load_json(raw_dir / "issues.json")
+        assert "prs" in result
+        assert "commits" in result
+        assert "issues" in result
+
+        prs = load_json(result["prs"])
+        commits = load_json(result["commits"])
+        issues = load_json(result["issues"])
 
         assert len(prs) == 1
         assert len(commits) == 1
         assert len(issues) == 1
+
+
+# ── 타입 필터링 테스트 ──
+
+
+class TestFetchWithTypes:
+    def test_fetch_only_prs(self, fetcher, mock_client, test_config):
+        """types={"prs"} → commits/issues 미호출."""
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        result = fetcher.fetch("2025-02-16", types={"prs"})
+        assert "prs" in result
+        assert "commits" not in result
+        assert "issues" not in result
+        mock_client.search_commits.assert_not_called()
+
+    def test_fetch_only_commits(self, fetcher, mock_client, test_config):
+        """types={"commits"} → PR/Issue 미호출."""
+        mock_client.search_commits.return_value = {"total_count": 0, "items": []}
+        result = fetcher.fetch("2025-02-16", types={"commits"})
+        assert "commits" in result
+        assert "prs" not in result
+        assert "issues" not in result
+        mock_client.search_issues.assert_not_called()
+
+    def test_fetch_only_issues(self, fetcher, mock_client, test_config):
+        """types={"issues"} → PR/Commit 미호출."""
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        result = fetcher.fetch("2025-02-16", types={"issues"})
+        assert "issues" in result
+        assert "prs" not in result
+        assert "commits" not in result
+        mock_client.search_commits.assert_not_called()
+        # search_issues IS called (for issue search), but not for PR search
+
+    def test_fetch_two_types(self, fetcher, mock_client, test_config):
+        """types={"prs", "issues"} → commits 미호출."""
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        result = fetcher.fetch("2025-02-16", types={"prs", "issues"})
+        assert "prs" in result
+        assert "issues" in result
+        assert "commits" not in result
+        mock_client.search_commits.assert_not_called()
+
+    def test_fetch_all_default(self, fetcher, mock_client, test_config):
+        """types=None → 3개 모두 호출 (하위호환)."""
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        result = fetcher.fetch("2025-02-16")
+        assert set(result.keys()) == {"prs", "commits", "issues"}
+
+    def test_returns_only_requested_keys(self, fetcher, mock_client, test_config):
+        """types={"prs"} → "prs" 키만 포함."""
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        result = fetcher.fetch("2025-02-16", types={"prs"})
+        assert set(result.keys()) == {"prs"}
+
+    def test_checkpoint_updated(self, fetcher, mock_client, test_config):
+        """타입 필터링해도 checkpoint 업데이트."""
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        fetcher.fetch("2025-02-16", types={"prs"})
+        cp_path = test_config.checkpoints_path
+        assert cp_path.exists()
+        data = load_json(cp_path)
+        assert data["last_fetch_date"] == "2025-02-16"
+
+    def test_fetch_returns_path_values(self, fetcher, mock_client, test_config):
+        """반환값의 value가 Path 인스턴스."""
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        result = fetcher.fetch("2025-02-16", types={"prs"})
+        assert isinstance(result["prs"], Path)

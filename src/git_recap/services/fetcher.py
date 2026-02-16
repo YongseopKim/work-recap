@@ -37,44 +37,48 @@ class FetcherService:
         self._client = ghes_client
         self._username = config.username
 
-    def fetch(self, target_date: str) -> Path:
+    def fetch(
+        self, target_date: str, types: set[str] | None = None
+    ) -> dict[str, Path]:
         """
         지정 날짜의 PR/Commit/Issue 활동을 수집하여 파일로 저장.
 
         Args:
             target_date: "YYYY-MM-DD"
+            types: 수집할 타입 {"prs", "commits", "issues"}. None이면 전부.
 
         Returns:
-            저장된 파일 경로 (data/raw/{Y}/{M}/{D}/prs.json)
+            타입별 저장 경로 dict (예: {"prs": Path, "commits": Path})
         """
-        # PR 파이프라인 (기존)
-        pr_map = self._search_prs(target_date)
+        active = types or {"prs", "commits", "issues"}
+        results: dict[str, Path] = {}
 
-        prs: list[PRRaw] = []
-        for pr_api_url, pr_basic in pr_map.items():
-            try:
-                enriched = self._enrich(pr_basic)
-                prs.append(enriched)
-            except FetchError:
-                logger.warning("Failed to enrich PR %s, skipping", pr_api_url)
+        if "prs" in active:
+            pr_map = self._search_prs(target_date)
+            prs: list[PRRaw] = []
+            for pr_api_url, pr_basic in pr_map.items():
+                try:
+                    enriched = self._enrich(pr_basic)
+                    prs.append(enriched)
+                except FetchError:
+                    logger.warning("Failed to enrich PR %s, skipping", pr_api_url)
+            results["prs"] = self._save(target_date, prs)
 
-        output_path = self._save(target_date, prs)
+        if "commits" in active:
+            commits = self._fetch_commits(target_date)
+            results["commits"] = self._save_commits(target_date, commits)
 
-        # Commit 파이프라인
-        commits = self._fetch_commits(target_date)
-        self._save_commits(target_date, commits)
-
-        # Issue 파이프라인
-        issues = self._fetch_issues(target_date)
-        self._save_issues(target_date, issues)
+        if "issues" in active:
+            issues = self._fetch_issues(target_date)
+            results["issues"] = self._save_issues(target_date, issues)
 
         self._update_checkpoint(target_date)
 
         logger.info(
-            "Fetched %d PRs, %d commits, %d issues for %s → %s",
-            len(prs), len(commits), len(issues), target_date, output_path,
+            "Fetched %s for %s → %s",
+            ", ".join(active), target_date, results,
         )
-        return output_path
+        return results
 
     # ── 3축 검색 + dedup ──
 
