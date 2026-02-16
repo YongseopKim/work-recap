@@ -288,6 +288,115 @@ class TestNormalize:
         assert result.exit_code == 1
 
 
+# ── Normalize 날짜 범위 ──
+
+
+class TestNormalizeDateRange:
+    @patch("git_recap.cli.main.NormalizerService")
+    def test_normalize_since_until(self, mock_cls):
+        mock_cls.return_value.normalize.return_value = (
+            Path("/data/activities.jsonl"),
+            Path("/data/stats.json"),
+        )
+        result = runner.invoke(app, [
+            "normalize", "--since", "2025-02-14", "--until", "2025-02-16",
+        ])
+        assert result.exit_code == 0
+        assert mock_cls.return_value.normalize.call_count == 3
+        assert "3 day(s)" in result.output
+
+    @patch("git_recap.cli.main.NormalizerService")
+    def test_normalize_weekly(self, mock_cls):
+        mock_cls.return_value.normalize.return_value = (
+            Path("/data/activities.jsonl"),
+            Path("/data/stats.json"),
+        )
+        result = runner.invoke(app, ["normalize", "--weekly", "2026-7"])
+        assert result.exit_code == 0
+        assert mock_cls.return_value.normalize.call_count == 7
+
+    @patch("git_recap.cli.main.NormalizerService")
+    def test_normalize_monthly(self, mock_cls):
+        mock_cls.return_value.normalize.return_value = (
+            Path("/data/activities.jsonl"),
+            Path("/data/stats.json"),
+        )
+        result = runner.invoke(app, ["normalize", "--monthly", "2026-2"])
+        assert result.exit_code == 0
+        assert mock_cls.return_value.normalize.call_count == 28
+
+    @patch("git_recap.cli.main.NormalizerService")
+    def test_normalize_yearly(self, mock_cls):
+        mock_cls.return_value.normalize.return_value = (
+            Path("/data/activities.jsonl"),
+            Path("/data/stats.json"),
+        )
+        result = runner.invoke(app, ["normalize", "--yearly", "2026"])
+        assert result.exit_code == 0
+        assert mock_cls.return_value.normalize.call_count == 365
+
+    def test_normalize_since_without_until(self):
+        result = runner.invoke(app, ["normalize", "--since", "2025-02-14"])
+        assert result.exit_code == 1
+        assert "--since" in result.output and "--until" in result.output
+
+    def test_normalize_mutual_exclusion(self):
+        result = runner.invoke(app, [
+            "normalize", "2025-02-16", "--weekly", "2026-7",
+        ])
+        assert result.exit_code == 1
+
+    @patch("git_recap.cli.main.NormalizerService")
+    def test_normalize_output_shows_date_count(self, mock_cls):
+        mock_cls.return_value.normalize.return_value = (
+            Path("/data/activities.jsonl"),
+            Path("/data/stats.json"),
+        )
+        result = runner.invoke(app, [
+            "normalize", "--since", "2025-02-14", "--until", "2025-02-16",
+        ])
+        assert result.exit_code == 0
+        assert "Normalized 3 day(s)" in result.output
+        assert "2025-02-14" in result.output
+        assert "2025-02-15" in result.output
+        assert "2025-02-16" in result.output
+
+
+# ── Summarize Daily 날짜 범위 ──
+
+
+class TestSummarizeDailyDateRange:
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_summarize_daily_since_until(self, mock_cls):
+        mock_cls.return_value.daily.return_value = Path("/data/daily.md")
+        result = runner.invoke(app, [
+            "summarize", "daily", "--since", "2025-02-14", "--until", "2025-02-16",
+        ])
+        assert result.exit_code == 0
+        assert mock_cls.return_value.daily.call_count == 3
+        assert "3 day(s)" in result.output
+
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_summarize_daily_weekly(self, mock_cls):
+        mock_cls.return_value.daily.return_value = Path("/data/daily.md")
+        result = runner.invoke(app, ["summarize", "daily", "--weekly", "2026-7"])
+        assert result.exit_code == 0
+        assert mock_cls.return_value.daily.call_count == 7
+
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_summarize_daily_monthly(self, mock_cls):
+        mock_cls.return_value.daily.return_value = Path("/data/daily.md")
+        result = runner.invoke(app, ["summarize", "daily", "--monthly", "2026-2"])
+        assert result.exit_code == 0
+        assert mock_cls.return_value.daily.call_count == 28
+
+    def test_summarize_daily_mutual_exclusion(self):
+        result = runner.invoke(app, [
+            "summarize", "daily", "2025-02-16", "--weekly", "2026-7",
+        ])
+        assert result.exit_code == 1
+
+
 class TestSummarize:
     @patch("git_recap.cli.main.SummarizerService")
     def test_summarize_daily(self, mock_cls):

@@ -23,7 +23,7 @@ LLM 기반으로 일/주/월/년 단위 업무 요약을 자동 생성하는 개
 | FR-2 | Raw 데이터를 정규화된 Activity 포맷으로 변환 | Normalizer |
 | FR-3 | Activity + 스크립트 수치 기반 daily/weekly/monthly/yearly summary 생성 | Summarizer |
 | FR-4 | 상위 summary는 하위 summary를 input으로 사용 | Summarizer |
-| FR-5 | CLI에서 fetch/normalize/summarize를 개별 또는 파이프라인으로 실행 | CLI |
+| FR-5 | CLI에서 fetch/normalize/summarize를 개별 또는 파이프라인으로 실행. fetch/normalize/summarize daily는 공통 날짜 범위 옵션(--since/--until, --weekly, --monthly, --yearly) 지원 | CLI |
 | FR-6 | 웹 페이지에서 BE API를 통해 동일 기능 실행 | API + Frontend |
 | FR-7 | 자유 질문 → 최근 summary 기반 LLM 응답 | Summarizer |
 
@@ -216,6 +216,7 @@ git-recap/
 │   ├── models.py                  # 서비스 간 데이터 계약
 │   ├── services/
 │   │   ├── __init__.py
+│   │   ├── date_utils.py
 │   │   ├── fetcher.py
 │   │   ├── normalizer.py
 │   │   ├── summarizer.py
@@ -242,13 +243,19 @@ git-recap/
 │   │   └── stats_sample.json
 │   ├── unit/
 │   │   ├── test_models.py
+│   │   ├── test_config.py
+│   │   ├── test_exceptions.py
 │   │   ├── test_fetcher.py
 │   │   ├── test_normalizer.py
 │   │   ├── test_summarizer.py
-│   │   └── test_orchestrator.py
+│   │   ├── test_orchestrator.py
+│   │   ├── test_cli.py
+│   │   ├── test_api.py
+│   │   ├── test_date_utils.py
+│   │   ├── test_ghes_client.py
+│   │   └── test_llm_client.py
 │   └── integration/
-│       ├── test_pipeline.py       # fetch → normalize → summarize 통합
-│       └── test_api.py            # FastAPI TestClient
+│       └── test_pipeline.py       # fetch → normalize → summarize 통합
 └── frontend/
     └── ...
 ```
@@ -405,15 +412,16 @@ class Job:
 class FetcherService:
     def __init__(self, config: AppConfig, ghes_client: GHESClient) -> None: ...
 
-    def fetch(self, target_date: str) -> Path:
+    def fetch(self, target_date: str, *, types: set[str] | None = None) -> dict[str, Path]:
         """
         지정 날짜의 PR/Commit/Issue 활동을 GHES에서 수집하여 파일로 저장.
 
         Args:
             target_date: "YYYY-MM-DD" 형식
+            types: 수집할 타입 ({"prs", "commits", "issues"}). None이면 전체.
 
         Returns:
-            저장된 파일 경로 (data/raw/{Y}/{M}/{D}/prs.json)
+            타입별 저장된 파일 경로 dict (e.g. {"prs": Path(...), "commits": Path(...), ...})
 
         Raises:
             FetchError: GHES API 호출 실패 시
@@ -843,10 +851,13 @@ author/commenter 쿼리 결과의 PR에서 reviews를 enrich한 후 사용자 re
 
 | Task | 설명 | 검증 기준 |
 |---|---|---|
-| T-5.1 | Typer 기본 구조 + 개별 command | 각 서비스 독립 호출 |
-| T-5.2 | run command + --since/--until | 파이프라인 실행 |
-| T-5.3 | ask command | 자유 질문 응답 출력 |
-| T-5.4 | 에러 출력 + exit code | stderr + exit(1) |
+| T-5.1 | Typer 기본 구조 + 헬퍼 (`_get_config`, `_handle_error`, `_resolve_dates`) | 각 서비스 독립 호출 |
+| T-5.2 | fetch command (단일 날짜 + --type + 날짜 범위 + catch-up) | TestFetch, TypeFilter, DateRange, CatchUp |
+| T-5.3 | normalize command + 날짜 범위 | TestNormalize, NormalizeDateRange |
+| T-5.4 | summarize 서브커맨드 (daily + 날짜 범위, weekly, monthly, yearly) | TestSummarize, SummarizeDailyDateRange |
+| T-5.5 | run command + --since/--until | TestRun |
+| T-5.6 | ask command | TestAsk |
+| T-5.7 | 에러 출력 + exit code | stderr + exit(1) |
 
 ### Phase 6: BE API
 

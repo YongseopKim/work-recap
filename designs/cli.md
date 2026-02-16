@@ -21,6 +21,7 @@ Typer 기반 CLI로 각 서비스를 개별 또는 파이프라인으로 실행�
 - `git_recap.services.normalizer.NormalizerService`
 - `git_recap.services.summarizer.SummarizerService`
 - `git_recap.services.orchestrator.OrchestratorService`
+- `git_recap.services.date_utils`
 - `git_recap.exceptions.GitRecapError`
 
 ---
@@ -28,39 +29,62 @@ Typer 기반 CLI로 각 서비스를 개별 또는 파이프라인으로 실행�
 ## 커맨드 구조
 
 ```
-git-recap fetch [DATE]                     # Fetcher만 실행
-git-recap normalize [DATE]                 # Normalizer만 실행
-git-recap summarize daily [DATE]           # Daily summary 생성
+git-recap fetch [DATE] [--type TYPE] [--since/--until | --weekly | --monthly | --yearly]
+git-recap normalize [DATE] [--since/--until | --weekly | --monthly | --yearly]
+git-recap summarize daily [DATE] [--since/--until | --weekly | --monthly | --yearly]
 git-recap summarize weekly YEAR WEEK       # Weekly summary 생성
 git-recap summarize monthly YEAR MONTH     # Monthly summary 생성
 git-recap summarize yearly YEAR            # Yearly summary 생성
 git-recap run [DATE]                       # 전체 파이프라인 (단일 날짜)
 git-recap run --since SINCE --until UNTIL  # 기간 범위 backfill
-git-recap ask QUESTION                     # 자유 질문
+git-recap ask QUESTION [--months N]        # 자유 질문
 ```
 
-DATE 기본값: 오늘 날짜
+DATE 기본값: 오늘 날짜 (fetch는 catch-up 모드 지원)
+
+### 공통 날짜 범위 옵션
+
+fetch, normalize, summarize daily는 아래 날짜 범위 옵션을 공유한다 (상호 배타):
+
+| 옵션 | 형식 | 설명 |
+|---|---|---|
+| `[DATE]` | YYYY-MM-DD | 단일 날짜 |
+| `--since/--until` | YYYY-MM-DD | 시작~종료 범위 (inclusive, 쌍으로 사용) |
+| `--weekly` | YEAR-WEEK | ISO 주 번호 (월~일) |
+| `--monthly` | YEAR-MONTH | 해당 월 전체 |
+| `--yearly` | YEAR | 해당 연도 전체 |
+
+fetch 전용: `--type TYPE` (prs, commits, issues), 인자 없으면 catch-up 모드
 
 ---
 
 ## 상세 구현
 
 ```python
-import sys
+"""git-recap CLI — Typer 기반."""
+
+import json
 from datetime import date
+from pathlib import Path
 
 import typer
 
 from git_recap.config import AppConfig
 from git_recap.exceptions import GitRecapError
+from git_recap.services import date_utils
+from git_recap.services.fetcher import FetcherService
+from git_recap.services.normalizer import NormalizerService
+from git_recap.services.orchestrator import OrchestratorService
+from git_recap.services.summarizer import SummarizerService
 
 app = typer.Typer(help="GHES activity summarizer with LLM")
 summarize_app = typer.Typer(help="Generate summaries")
 app.add_typer(summarize_app, name="summarize")
 
+VALID_TYPES = {"prs", "commits", "issues"}
+
 
 def _get_config() -> AppConfig:
-    """AppConfig 로드. .env 파일에서 자동 로딩."""
     return AppConfig()
 
 
@@ -80,25 +104,127 @@ def _handle_error(e: GitRecapError) -> None:
     raise typer.Exit(code=1)
 
 
+def _read_last_fetch_date(config: AppConfig) -> str | None:
+    """checkpoint 파일에서 마지막 fetch 날짜를 읽는다."""
+    cp_path = config.checkpoints_path
+    if not cp_path.exists():
+        return None
+    with open(cp_path, encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("last_fetch_date")
+
+
+def _parse_weekly(value: str) -> tuple[int, int]:
+    parts = value.split("-")
+    return int(parts[0]), int(parts[1])
+
+
+def _parse_monthly(value: str) -> tuple[int, int]:
+    parts = value.split("-")
+    return int(parts[0]), int(parts[1])
+
+
+def _resolve_dates(
+    target_date: str | None,
+    since: str | None,
+    until: str | None,
+    weekly: str | None,
+    monthly: str | None,
+    yearly: int | None,
+) -> list[str] | None:
+    """공통 날짜 범위 헬퍼. 상호 배타 검증 + 날짜 리스트 반환. 인자 모두 None이면 None."""
+    range_opts = sum([
+        target_date is not None,
+        since is not None or until is not None,
+        weekly is not None,
+        monthly is not None,
+        yearly is not None,
+    ])
+    if range_opts > 1:
+        typer.echo(
+            "Error: Only one of target_date, --since/--until, --weekly, "
+            "--monthly, --yearly can be specified.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    if (since is None) != (until is None):
+        typer.echo("Error: --since and --until must be used together.", err=True)
+        raise typer.Exit(code=1)
+
+    if since and until:
+        return date_utils.date_range(since, until)
+    elif weekly:
+        year, week = _parse_weekly(weekly)
+        s, u = date_utils.weekly_range(year, week)
+        return date_utils.date_range(s, u)
+    elif monthly:
+        year, month = _parse_monthly(monthly)
+        s, u = date_utils.monthly_range(year, month)
+        return date_utils.date_range(s, u)
+    elif yearly is not None:
+        s, u = date_utils.yearly_range(yearly)
+        return date_utils.date_range(s, u)
+    elif target_date:
+        return [target_date]
+    else:
+        return None
+
+
 # ── 개별 서비스 커맨드 ──
 
 @app.command()
 def fetch(
     target_date: str = typer.Argument(
-        default=None, help="Target date (YYYY-MM-DD). Default: today"
+        default=None, help="Target date (YYYY-MM-DD). Default: today or catch-up"
     ),
+    type: str = typer.Option(
+        None, "--type", "-t", help="prs, commits, or issues"
+    ),
+    since: str = typer.Option(None, help="Range start (YYYY-MM-DD)"),
+    until: str = typer.Option(None, help="Range end (YYYY-MM-DD)"),
+    weekly: str = typer.Option(None, help="YEAR-WEEK, e.g. 2026-7"),
+    monthly: str = typer.Option(None, help="YEAR-MONTH, e.g. 2026-2"),
+    yearly: int = typer.Option(None, help="Year, e.g. 2026"),
 ) -> None:
-    """Fetch PR data from GHES for a specific date."""
-    target_date = target_date or date.today().isoformat()
+    """Fetch PR/Commit/Issue data from GHES."""
+    # 1. --type 검증
+    types: set[str] | None = None
+    if type is not None:
+        if type not in VALID_TYPES:
+            typer.echo(f"Invalid type: {type}. Must be one of {VALID_TYPES}", err=True)
+            raise typer.Exit(code=1)
+        types = {type}
+
+    # 2. 날짜 범위 결정
+    dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
+    if dates is None:
+        # catch-up 모드: checkpoint 있으면 이후 날짜들, 없으면 오늘만
+        config = _get_config()
+        last = _read_last_fetch_date(config)
+        if last:
+            s, u = date_utils.catchup_range(last)
+            dates = date_utils.date_range(s, u)
+            if not dates:
+                typer.echo("Already up to date.")
+                return
+        else:
+            dates = [date.today().isoformat()]
+
+    # 3. Fetch 실행
     config = _get_config()
-
     try:
-        from git_recap.services.fetcher import FetcherService
-
         with _get_ghes_client(config) as client:
             service = FetcherService(config, client)
-            path = service.fetch(target_date)
-        typer.echo(f"Fetched → {path}")
+            all_results: list[dict[str, Path]] = []
+            for d in dates:
+                result = service.fetch(d, types=types)
+                all_results.append(result)
+
+        typer.echo(f"Fetched {len(dates)} day(s)")
+        for d, result in zip(dates, all_results):
+            for type_name, path in sorted(result.items()):
+                typer.echo(f"  {d} {type_name}: {path}")
     except GitRecapError as e:
         _handle_error(e)
 
@@ -108,17 +234,29 @@ def normalize(
     target_date: str = typer.Argument(
         default=None, help="Target date (YYYY-MM-DD). Default: today"
     ),
+    since: str = typer.Option(None, help="Range start (YYYY-MM-DD)"),
+    until: str = typer.Option(None, help="Range end (YYYY-MM-DD)"),
+    weekly: str = typer.Option(None, help="YEAR-WEEK, e.g. 2026-7"),
+    monthly: str = typer.Option(None, help="YEAR-MONTH, e.g. 2026-2"),
+    yearly: int = typer.Option(None, help="Year, e.g. 2026"),
 ) -> None:
     """Normalize raw PR data into activities and stats."""
-    target_date = target_date or date.today().isoformat()
+    dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
+    if dates is None:
+        dates = [date.today().isoformat()]
+
     config = _get_config()
 
     try:
-        from git_recap.services.normalizer import NormalizerService
-
         service = NormalizerService(config)
-        act_path, stats_path = service.normalize(target_date)
-        typer.echo(f"Normalized → {act_path}, {stats_path}")
+        results: list[tuple[str, Path, Path]] = []
+        for d in dates:
+            act_path, stats_path = service.normalize(d)
+            results.append((d, act_path, stats_path))
+
+        typer.echo(f"Normalized {len(dates)} day(s)")
+        for d, act_path, stats_path in results:
+            typer.echo(f"  {d}: {act_path}, {stats_path}")
     except GitRecapError as e:
         _handle_error(e)
 
@@ -130,18 +268,33 @@ def summarize_daily(
     target_date: str = typer.Argument(
         default=None, help="Target date (YYYY-MM-DD). Default: today"
     ),
+    since: str = typer.Option(None, help="Range start (YYYY-MM-DD)"),
+    until: str = typer.Option(None, help="Range end (YYYY-MM-DD)"),
+    weekly: str = typer.Option(None, help="YEAR-WEEK, e.g. 2026-7"),
+    monthly: str = typer.Option(None, help="YEAR-MONTH, e.g. 2026-2"),
+    yearly: int = typer.Option(None, help="Year, e.g. 2026"),
 ) -> None:
     """Generate daily summary."""
-    target_date = target_date or date.today().isoformat()
+    dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
+    if dates is None:
+        dates = [date.today().isoformat()]
+
     config = _get_config()
 
     try:
-        from git_recap.services.summarizer import SummarizerService
-
         llm = _get_llm_client(config)
         service = SummarizerService(config, llm)
-        path = service.daily(target_date)
-        typer.echo(f"Daily summary → {path}")
+        results: list[tuple[str, Path]] = []
+        for d in dates:
+            path = service.daily(d)
+            results.append((d, path))
+
+        if len(dates) > 1:
+            typer.echo(f"Daily summary {len(dates)} day(s)")
+            for d, path in results:
+                typer.echo(f"  {d}: {path}")
+        else:
+            typer.echo(f"Daily summary → {results[0][1]}")
     except GitRecapError as e:
         _handle_error(e)
 
@@ -155,8 +308,6 @@ def summarize_weekly(
     config = _get_config()
 
     try:
-        from git_recap.services.summarizer import SummarizerService
-
         llm = _get_llm_client(config)
         service = SummarizerService(config, llm)
         path = service.weekly(year, week)
@@ -174,8 +325,6 @@ def summarize_monthly(
     config = _get_config()
 
     try:
-        from git_recap.services.summarizer import SummarizerService
-
         llm = _get_llm_client(config)
         service = SummarizerService(config, llm)
         path = service.monthly(year, month)
@@ -192,8 +341,6 @@ def summarize_yearly(
     config = _get_config()
 
     try:
-        from git_recap.services.summarizer import SummarizerService
-
         llm = _get_llm_client(config)
         service = SummarizerService(config, llm)
         path = service.yearly(year)
@@ -216,11 +363,6 @@ def run(
     config = _get_config()
 
     try:
-        from git_recap.services.fetcher import FetcherService
-        from git_recap.services.normalizer import NormalizerService
-        from git_recap.services.orchestrator import OrchestratorService
-        from git_recap.services.summarizer import SummarizerService
-
         ghes = _get_ghes_client(config)
         llm = _get_llm_client(config)
         fetcher = FetcherService(config, ghes)
@@ -233,17 +375,17 @@ def run(
             succeeded = sum(1 for r in results if r["status"] == "success")
             typer.echo(f"Range complete: {succeeded}/{len(results)} succeeded")
             for r in results:
-                status = "✓" if r["status"] == "success" else "✗"
+                status_mark = "✓" if r["status"] == "success" else "✗"
                 msg = r.get("path", r.get("error", ""))
-                typer.echo(f"  {status} {r['date']}: {msg}")
+                typer.echo(f"  {status_mark} {r['date']}: {msg}")
+            ghes.close()
             if succeeded < len(results):
                 raise typer.Exit(code=1)
         else:
             target_date = target_date or date.today().isoformat()
             path = orchestrator.run_daily(target_date)
+            ghes.close()
             typer.echo(f"Pipeline complete → {path}")
-
-        ghes.close()
     except GitRecapError as e:
         _handle_error(e)
 
@@ -259,8 +401,6 @@ def ask(
     config = _get_config()
 
     try:
-        from git_recap.services.summarizer import SummarizerService
-
         llm = _get_llm_client(config)
         service = SummarizerService(config, llm)
         answer = service.query(question, months_back=months)
@@ -284,6 +424,9 @@ def ask(
   → 결과 출력 또는 에러 처리
 ```
 
+서비스 import는 모듈 레벨에서 수행한다 (`@patch`가 동작하려면 모듈 레벨 이름이 필요).
+GHESClient, LLMClient만 `_get_*_client()` 헬퍼 내에서 로컬 import — 이들은 mock 대상이 헬퍼 함수 자체이므로 문제없음.
+
 테스트에서는 `_get_config`, `_get_ghes_client`, `_get_llm_client`를 monkeypatch하여
 실제 .env 파일이나 외부 API 없이 CLI 동작을 검증한다.
 
@@ -294,54 +437,130 @@ def ask(
 ### test_cli.py
 
 `typer.testing.CliRunner`를 사용하여 CLI 커맨드를 검증한다.
-서비스는 monkeypatch로 mock한다.
+서비스는 `@patch` + monkeypatch로 mock한다.
 
 ```python
 """tests/unit/test_cli.py"""
 
 class TestFetch:
-    def test_fetch_with_date(self, runner, mock_services):
+    def test_fetch_with_date(self):
         """git-recap fetch 2025-02-16 → FetcherService.fetch 호출."""
-
-    def test_fetch_default_today(self, runner, mock_services):
-        """날짜 미지정 시 오늘 날짜 사용."""
-
-    def test_fetch_error(self, runner, mock_services):
+    def test_fetch_default_today(self):
+        """날짜 미지정 + checkpoint 없음 → 오늘 날짜 사용."""
+    def test_fetch_error(self):
         """FetchError → exit code 1 + stderr 메시지."""
 
+class TestFetchTypeFilter:
+    def test_type_prs(self):
+        """--type prs → types={"prs"} 전달."""
+    def test_type_commits(self):
+        """--type commits → types={"commits"} 전달."""
+    def test_type_issues(self):
+        """--type issues → types={"issues"} 전달."""
+    def test_type_invalid(self):
+        """--type invalid → exit code 1."""
+
+class TestFetchDateRange:
+    def test_since_until(self):
+        """--since/--until → 3일, fetch 3회 호출."""
+    def test_since_without_until(self):
+        """--since만 → exit 1."""
+    def test_until_without_since(self):
+        """--until만 → exit 1."""
+
+class TestFetchWeekly:
+    def test_weekly_option(self):
+        """--weekly 2026-7 → 7일 호출."""
+
+class TestFetchMonthly:
+    def test_monthly_option(self):
+        """--monthly 2026-2 → 28일 호출."""
+
+class TestFetchYearly:
+    def test_yearly_option(self):
+        """--yearly 2026 → 365일 호출."""
+
+class TestFetchCatchUp:
+    def test_no_args_no_checkpoint(self):
+        """인자 없고 checkpoint 없으면 오늘만 fetch."""
+    def test_no_args_with_checkpoint(self):
+        """인자 없고 checkpoint 있으면 catch-up (이후 날짜들)."""
+    def test_type_with_catchup(self):
+        """--type + catch-up 결합."""
+
+class TestFetchMutualExclusion:
+    def test_target_date_with_since_until(self):
+        """target_date + --since/--until → exit 1."""
+    def test_weekly_with_monthly(self):
+        """--weekly + --monthly → exit 1."""
+
+class TestFetchOutput:
+    def test_output_shows_all_types(self):
+        """단일 날짜 출력에 prs, commits, issues 표시."""
+    def test_output_shows_date_count(self):
+        """범위 출력에 날짜 수 표시."""
+
 class TestNormalize:
-    def test_normalize_with_date(self, runner, mock_services):
+    def test_normalize_with_date(self):
         """git-recap normalize 2025-02-16 → 성공 메시지."""
+    def test_normalize_error(self):
+        """NormalizeError → exit code 1."""
+
+class TestNormalizeDateRange:
+    def test_normalize_since_until(self):
+        """--since/--until → 3일, normalize 3회 호출."""
+    def test_normalize_weekly(self):
+        """--weekly → 7일 호출."""
+    def test_normalize_monthly(self):
+        """--monthly → 28일 호출."""
+    def test_normalize_yearly(self):
+        """--yearly → 365일 호출."""
+    def test_normalize_since_without_until(self):
+        """--since만 → exit 1."""
+    def test_normalize_mutual_exclusion(self):
+        """target_date + --weekly → exit 1."""
+    def test_normalize_output_shows_date_count(self):
+        """출력에 날짜 수와 각 날짜 표시."""
+
+class TestSummarizeDailyDateRange:
+    def test_summarize_daily_since_until(self):
+        """--since/--until → 3일, daily 3회 호출."""
+    def test_summarize_daily_weekly(self):
+        """--weekly → 7일 호출."""
+    def test_summarize_daily_monthly(self):
+        """--monthly → 28일 호출."""
+    def test_summarize_daily_mutual_exclusion(self):
+        """target_date + --weekly → exit 1."""
 
 class TestSummarize:
-    def test_summarize_daily(self, runner, mock_services):
-        """git-recap summarize daily 2025-02-16."""
-
-    def test_summarize_weekly(self, runner, mock_services):
+    def test_summarize_daily(self):
+        """git-recap summarize daily 2025-02-16 → 단일 날짜 출력."""
+    def test_summarize_weekly(self):
         """git-recap summarize weekly 2025 7."""
-
-    def test_summarize_monthly(self, runner, mock_services):
+    def test_summarize_monthly(self):
         """git-recap summarize monthly 2025 2."""
-
-    def test_summarize_yearly(self, runner, mock_services):
+    def test_summarize_yearly(self):
         """git-recap summarize yearly 2025."""
+    def test_summarize_error(self):
+        """SummarizeError → exit code 1."""
 
 class TestRun:
-    def test_run_single_date(self, runner, mock_services):
+    def test_run_single_date(self):
         """git-recap run 2025-02-16 → 파이프라인 완료 메시지."""
-
-    def test_run_range(self, runner, mock_services):
+    def test_run_range(self):
         """git-recap run --since X --until Y → 범위 결과."""
-
-    def test_run_error(self, runner, mock_services):
+    def test_run_range_partial_failure(self):
+        """일부 날짜 실패 → exit code 1 + 결과 표시."""
+    def test_run_error(self):
         """파이프라인 에러 → exit code 1."""
 
 class TestAsk:
-    def test_ask_question(self, runner, mock_services):
+    def test_ask_question(self):
         """git-recap ask "질문" → LLM 응답 출력."""
-
-    def test_ask_error(self, runner, mock_services):
+    def test_ask_error(self):
         """context 없으면 exit code 1."""
+    def test_ask_with_months_option(self):
+        """--months 옵션 전달."""
 ```
 
 ---
@@ -351,7 +570,13 @@ class TestAsk:
 | # | 작업 | 테스트 |
 |---|---|---|
 | 5.1 | Typer app 기본 구조 + `_get_config`, `_handle_error` 헬퍼 | - |
-| 5.2 | `fetch`, `normalize` 개별 커맨드 | TestFetch, TestNormalize |
-| 5.3 | `summarize` 서브커맨드 (daily/weekly/monthly/yearly) | TestSummarize |
-| 5.4 | `run` 커맨드 (단일 날짜 + --since/--until) | TestRun |
-| 5.5 | `ask` 커맨드 | TestAsk |
+| 5.2 | `fetch` 커맨드 (단일 날짜) | TestFetch |
+| 5.3 | `fetch` --type 옵션 | TestFetchTypeFilter |
+| 5.4 | `fetch` 날짜 범위 (--since/--until, --weekly, --monthly, --yearly) | TestFetchDateRange, Weekly, Monthly, Yearly |
+| 5.5 | `fetch` catch-up 모드 (checkpoint 기반) | TestFetchCatchUp |
+| 5.6 | `fetch` 상호 배타 검증 | TestFetchMutualExclusion |
+| 5.7 | `_resolve_dates()` 공통 헬퍼 추출 | (fetch/normalize/summarize daily에서 공유) |
+| 5.8 | `normalize` 커맨드 + 날짜 범위 | TestNormalize, TestNormalizeDateRange |
+| 5.9 | `summarize` 서브커맨드 (daily + 날짜 범위, weekly, monthly, yearly) | TestSummarize, TestSummarizeDailyDateRange |
+| 5.10 | `run` 커맨드 (단일 날짜 + --since/--until) | TestRun |
+| 5.11 | `ask` 커맨드 | TestAsk |

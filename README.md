@@ -46,13 +46,25 @@ LLM_MODEL=gpt-4o-mini
 ### CLI
 
 ```bash
-# 개별 단계 실행
-git-recap fetch 2025-02-16              # GHES에서 PR 데이터 수집
+# 개별 단계 실행 (단일 날짜)
+git-recap fetch 2025-02-16              # GHES에서 PR/Commit/Issue 데이터 수집
 git-recap normalize 2025-02-16          # Activity + Stats로 변환
 git-recap summarize daily 2025-02-16    # Daily summary 생성
 git-recap summarize weekly 2025 7       # Weekly summary 생성
 git-recap summarize monthly 2025 2      # Monthly summary 생성
 git-recap summarize yearly 2025         # Yearly summary 생성
+
+# 날짜 범위 옵션 (fetch, normalize, summarize daily 공통)
+git-recap fetch --since 2025-02-01 --until 2025-02-16   # 기간 범위
+git-recap fetch --weekly 2025-7                          # ISO 주 단위
+git-recap fetch --monthly 2025-2                         # 월 단위
+git-recap fetch --yearly 2025                            # 연 단위
+git-recap normalize --since 2025-02-01 --until 2025-02-16
+git-recap summarize daily --weekly 2025-7
+
+# fetch 전용 옵션
+git-recap fetch --type prs 2025-02-16   # PR만 수집 (prs, commits, issues)
+git-recap fetch                         # catch-up: checkpoint 이후 ~ 오늘
 
 # 전체 파이프라인 (fetch → normalize → summarize)
 git-recap run 2025-02-16                # 단일 날짜
@@ -137,6 +149,7 @@ git-recap/
 │   │   ├── ghes_client.py      # GHES REST API 클라이언트 (retry, rate limit)
 │   │   └── llm_client.py       # LLM 클라이언트 (OpenAI, Anthropic)
 │   ├── services/
+│   │   ├── date_utils.py       # 날짜 범위 유틸리티 (weekly, monthly, yearly, catch-up)
 │   │   ├── fetcher.py          # PR/Commit/Issue 데이터 수집 (검색, dedup, enrich)
 │   │   ├── normalizer.py       # Activity 변환 + 통계 계산
 │   │   ├── summarizer.py       # LLM 요약 생성 (Jinja2 템플릿)
@@ -162,7 +175,7 @@ git-recap/
 │   ├── yearly.md
 │   └── query.md
 ├── designs/                    # 모듈별 상세 설계 문서
-├── tests/unit/                 # 191개 단위 테스트
+├── tests/unit/                 # 296개 단위 테스트
 ├── pyproject.toml
 └── .env.example
 ```

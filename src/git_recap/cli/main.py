@@ -61,6 +61,53 @@ def _parse_monthly(value: str) -> tuple[int, int]:
     return int(parts[0]), int(parts[1])
 
 
+def _resolve_dates(
+    target_date: str | None,
+    since: str | None,
+    until: str | None,
+    weekly: str | None,
+    monthly: str | None,
+    yearly: int | None,
+) -> list[str] | None:
+    """상호 배타 검증 + 날짜 리스트 반환. 인자 모두 None이면 None."""
+    range_opts = sum([
+        target_date is not None,
+        since is not None or until is not None,
+        weekly is not None,
+        monthly is not None,
+        yearly is not None,
+    ])
+    if range_opts > 1:
+        typer.echo(
+            "Error: Only one of target_date, --since/--until, --weekly, "
+            "--monthly, --yearly can be specified.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    if (since is None) != (until is None):
+        typer.echo("Error: --since and --until must be used together.", err=True)
+        raise typer.Exit(code=1)
+
+    if since and until:
+        return date_utils.date_range(since, until)
+    elif weekly:
+        year, week = _parse_weekly(weekly)
+        s, u = date_utils.weekly_range(year, week)
+        return date_utils.date_range(s, u)
+    elif monthly:
+        year, month = _parse_monthly(monthly)
+        s, u = date_utils.monthly_range(year, month)
+        return date_utils.date_range(s, u)
+    elif yearly is not None:
+        s, u = date_utils.yearly_range(yearly)
+        return date_utils.date_range(s, u)
+    elif target_date:
+        return [target_date]
+    else:
+        return None
+
+
 # ── 개별 서비스 커맨드 ──
 
 
@@ -87,44 +134,9 @@ def fetch(
             raise typer.Exit(code=1)
         types = {type}
 
-    # 2. 상호 배타 검증
-    range_opts = sum([
-        target_date is not None,
-        since is not None or until is not None,
-        weekly is not None,
-        monthly is not None,
-        yearly is not None,
-    ])
-    if range_opts > 1:
-        typer.echo(
-            "Error: Only one of target_date, --since/--until, --weekly, "
-            "--monthly, --yearly can be specified.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-    # since/until 쌍 검증
-    if (since is None) != (until is None):
-        typer.echo("Error: --since and --until must be used together.", err=True)
-        raise typer.Exit(code=1)
-
-    # 3. 날짜 범위 결정
-    if since and until:
-        dates = date_utils.date_range(since, until)
-    elif weekly:
-        year, week = _parse_weekly(weekly)
-        s, u = date_utils.weekly_range(year, week)
-        dates = date_utils.date_range(s, u)
-    elif monthly:
-        year, month = _parse_monthly(monthly)
-        s, u = date_utils.monthly_range(year, month)
-        dates = date_utils.date_range(s, u)
-    elif yearly is not None:
-        s, u = date_utils.yearly_range(yearly)
-        dates = date_utils.date_range(s, u)
-    elif target_date:
-        dates = [target_date]
-    else:
+    # 2. 날짜 범위 결정
+    dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
+    if dates is None:
         # catch-up 모드: checkpoint 있으면 이후 날짜들, 없으면 오늘만
         config = _get_config()
         last = _read_last_fetch_date(config)
@@ -137,7 +149,7 @@ def fetch(
         else:
             dates = [date.today().isoformat()]
 
-    # 4. Fetch 실행
+    # 3. Fetch 실행
     config = _get_config()
     try:
         with _get_ghes_client(config) as client:
@@ -161,15 +173,29 @@ def normalize(
     target_date: str = typer.Argument(
         default=None, help="Target date (YYYY-MM-DD). Default: today"
     ),
+    since: str = typer.Option(None, help="Range start (YYYY-MM-DD)"),
+    until: str = typer.Option(None, help="Range end (YYYY-MM-DD)"),
+    weekly: str = typer.Option(None, help="YEAR-WEEK, e.g. 2026-7"),
+    monthly: str = typer.Option(None, help="YEAR-MONTH, e.g. 2026-2"),
+    yearly: int = typer.Option(None, help="Year, e.g. 2026"),
 ) -> None:
     """Normalize raw PR data into activities and stats."""
-    target_date = target_date or date.today().isoformat()
+    dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
+    if dates is None:
+        dates = [date.today().isoformat()]
+
     config = _get_config()
 
     try:
         service = NormalizerService(config)
-        act_path, stats_path = service.normalize(target_date)
-        typer.echo(f"Normalized → {act_path}, {stats_path}")
+        results: list[tuple[str, Path, Path]] = []
+        for d in dates:
+            act_path, stats_path = service.normalize(d)
+            results.append((d, act_path, stats_path))
+
+        typer.echo(f"Normalized {len(dates)} day(s)")
+        for d, act_path, stats_path in results:
+            typer.echo(f"  {d}: {act_path}, {stats_path}")
     except GitRecapError as e:
         _handle_error(e)
 
@@ -182,16 +208,33 @@ def summarize_daily(
     target_date: str = typer.Argument(
         default=None, help="Target date (YYYY-MM-DD). Default: today"
     ),
+    since: str = typer.Option(None, help="Range start (YYYY-MM-DD)"),
+    until: str = typer.Option(None, help="Range end (YYYY-MM-DD)"),
+    weekly: str = typer.Option(None, help="YEAR-WEEK, e.g. 2026-7"),
+    monthly: str = typer.Option(None, help="YEAR-MONTH, e.g. 2026-2"),
+    yearly: int = typer.Option(None, help="Year, e.g. 2026"),
 ) -> None:
     """Generate daily summary."""
-    target_date = target_date or date.today().isoformat()
+    dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
+    if dates is None:
+        dates = [date.today().isoformat()]
+
     config = _get_config()
 
     try:
         llm = _get_llm_client(config)
         service = SummarizerService(config, llm)
-        path = service.daily(target_date)
-        typer.echo(f"Daily summary → {path}")
+        results: list[tuple[str, Path]] = []
+        for d in dates:
+            path = service.daily(d)
+            results.append((d, path))
+
+        if len(dates) > 1:
+            typer.echo(f"Daily summary {len(dates)} day(s)")
+            for d, path in results:
+                typer.echo(f"  {d}: {path}")
+        else:
+            typer.echo(f"Daily summary → {results[0][1]}")
     except GitRecapError as e:
         _handle_error(e)
 
