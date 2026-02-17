@@ -593,7 +593,7 @@ class TestSummarize:
         result = runner.invoke(app, ["summarize", "weekly", "2025", "7"])
         assert result.exit_code == 0
         assert "Weekly summary" in result.output
-        mock_cls.return_value.weekly.assert_called_once_with(2025, 7)
+        mock_cls.return_value.weekly.assert_called_once_with(2025, 7, force=False)
 
     @patch("git_recap.cli.main.SummarizerService")
     def test_summarize_monthly(self, mock_cls):
@@ -601,7 +601,7 @@ class TestSummarize:
         result = runner.invoke(app, ["summarize", "monthly", "2025", "2"])
         assert result.exit_code == 0
         assert "Monthly summary" in result.output
-        mock_cls.return_value.monthly.assert_called_once_with(2025, 2)
+        mock_cls.return_value.monthly.assert_called_once_with(2025, 2, force=False)
 
     @patch("git_recap.cli.main.SummarizerService")
     def test_summarize_yearly(self, mock_cls):
@@ -609,7 +609,7 @@ class TestSummarize:
         result = runner.invoke(app, ["summarize", "yearly", "2025"])
         assert result.exit_code == 0
         assert "Yearly summary" in result.output
-        mock_cls.return_value.yearly.assert_called_once_with(2025)
+        mock_cls.return_value.yearly.assert_called_once_with(2025, force=False)
 
     @patch("git_recap.cli.main.SummarizerService")
     def test_summarize_error(self, mock_cls):
@@ -628,7 +628,7 @@ class TestRun:
         result = runner.invoke(app, ["run", "2025-02-16"])
         assert result.exit_code == 0
         assert "Pipeline complete" in result.output
-        mock_orch.return_value.run_daily.assert_called_once_with("2025-02-16")
+        mock_orch.return_value.run_daily.assert_called_once_with("2025-02-16", types=None)
 
     @patch("git_recap.cli.main.OrchestratorService")
     @patch("git_recap.cli.main.SummarizerService")
@@ -721,7 +721,7 @@ class TestRun:
         assert result.exit_code == 0
         assert "3 succeeded" in result.output
         mock_orch.return_value.run_range.assert_called_once_with(
-            "2026-02-15", "2026-02-17", force=False
+            "2026-02-15", "2026-02-17", force=False, types=None
         )
 
     @patch("git_recap.cli.main.date_utils")
@@ -840,7 +840,7 @@ class TestRunForce:
         assert result.exit_code == 0
         assert "2 succeeded" in result.output
         mock_orch.return_value.run_range.assert_called_once_with(
-            "2025-02-14", "2025-02-15", force=True
+            "2025-02-14", "2025-02-15", force=True, types=None
         )
 
     @patch("git_recap.cli.main.OrchestratorService")
@@ -865,7 +865,7 @@ class TestRunForce:
         )
         assert result.exit_code == 0
         mock_orch.return_value.run_range.assert_called_once_with(
-            "2025-02-14", "2025-02-14", force=True
+            "2025-02-14", "2025-02-14", force=True, types=None
         )
 
     @patch("git_recap.cli.main.OrchestratorService")
@@ -1175,3 +1175,128 @@ class TestSummarizeDailyRangeOutput:
             ["summarize", "daily", "--since", "2025-02-14", "--until", "2025-02-15"],
         )
         assert result.exit_code == 1
+
+
+# ── Summarize Weekly/Monthly/Yearly --force 테스트 ──
+
+
+class TestSummarizeWeeklyForce:
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_force_flag(self, mock_cls):
+        """--force → force=True 전달."""
+        mock_cls.return_value.weekly.return_value = Path("/data/weekly.md")
+        result = runner.invoke(app, ["summarize", "weekly", "2025", "7", "--force"])
+        assert result.exit_code == 0
+        mock_cls.return_value.weekly.assert_called_once_with(2025, 7, force=True)
+
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_force_short_flag(self, mock_cls):
+        """-f 단축 플래그."""
+        mock_cls.return_value.weekly.return_value = Path("/data/weekly.md")
+        result = runner.invoke(app, ["summarize", "weekly", "2025", "7", "-f"])
+        assert result.exit_code == 0
+        mock_cls.return_value.weekly.assert_called_once_with(2025, 7, force=True)
+
+
+class TestSummarizeMonthlyForce:
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_force_flag(self, mock_cls):
+        """--force → force=True 전달."""
+        mock_cls.return_value.monthly.return_value = Path("/data/monthly.md")
+        result = runner.invoke(app, ["summarize", "monthly", "2025", "2", "--force"])
+        assert result.exit_code == 0
+        mock_cls.return_value.monthly.assert_called_once_with(2025, 2, force=True)
+
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_force_short_flag(self, mock_cls):
+        """-f 단축 플래그."""
+        mock_cls.return_value.monthly.return_value = Path("/data/monthly.md")
+        result = runner.invoke(app, ["summarize", "monthly", "2025", "2", "-f"])
+        assert result.exit_code == 0
+        mock_cls.return_value.monthly.assert_called_once_with(2025, 2, force=True)
+
+
+class TestSummarizeYearlyForce:
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_force_flag(self, mock_cls):
+        """--force → force=True 전달."""
+        mock_cls.return_value.yearly.return_value = Path("/data/yearly.md")
+        result = runner.invoke(app, ["summarize", "yearly", "2025", "--force"])
+        assert result.exit_code == 0
+        mock_cls.return_value.yearly.assert_called_once_with(2025, force=True)
+
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_force_short_flag(self, mock_cls):
+        """-f 단축 플래그."""
+        mock_cls.return_value.yearly.return_value = Path("/data/yearly.md")
+        result = runner.invoke(app, ["summarize", "yearly", "2025", "-f"])
+        assert result.exit_code == 0
+        mock_cls.return_value.yearly.assert_called_once_with(2025, force=True)
+
+
+# ── Run --type 테스트 ──
+
+
+class TestRunTypeFilter:
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_type_prs_single_date(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        """run --type prs → run_daily에 types={\"prs\"} 전달."""
+        mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
+        result = runner.invoke(app, ["run", "--type", "prs", "2025-02-16"])
+        assert result.exit_code == 0
+        mock_orch.return_value.run_daily.assert_called_once_with("2025-02-16", types={"prs"})
+
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_type_with_range(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        """run --type commits --since/--until → run_range에 types 전달."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2025-02-14", "status": "success", "path": "/p1"},
+            {"date": "2025-02-15", "status": "success", "path": "/p2"},
+        ]
+        result = runner.invoke(
+            app,
+            ["run", "--type", "commits", "--since", "2025-02-14", "--until", "2025-02-15"],
+        )
+        assert result.exit_code == 0
+        mock_orch.return_value.run_range.assert_called_once_with(
+            "2025-02-14", "2025-02-15", force=False, types={"commits"}
+        )
+
+    def test_type_invalid(self):
+        """잘못된 타입 → exit code 1."""
+        result = runner.invoke(app, ["run", "--type", "invalid", "2025-02-16"])
+        assert result.exit_code == 1
+        assert "Invalid type" in result.output
+
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_type_with_force(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        """--type + --force 결합."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2025-02-14", "status": "success", "path": "/p1"},
+        ]
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--type",
+                "issues",
+                "--since",
+                "2025-02-14",
+                "--until",
+                "2025-02-14",
+                "--force",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_orch.return_value.run_range.assert_called_once_with(
+            "2025-02-14", "2025-02-14", force=True, types={"issues"}
+        )

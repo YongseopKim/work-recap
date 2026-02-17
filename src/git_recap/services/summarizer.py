@@ -81,8 +81,13 @@ class SummarizerService:
 
         return results
 
-    def weekly(self, year: int, week: int) -> Path:
+    def weekly(self, year: int, week: int, force: bool = False) -> Path:
         """Weekly summary 생성."""
+        output_path = self._config.weekly_summary_path(year, week)
+        if not force and output_path.exists():
+            logger.info("Weekly summary already exists, skipping: %s", output_path)
+            return output_path
+
         daily_contents = self._collect_daily_for_week(year, week)
         if not daily_contents:
             raise SummarizeError(f"No daily summaries found for {year}-W{week:02d}")
@@ -92,14 +97,18 @@ class SummarizerService:
 
         response = self._llm.chat(system_prompt, user_content)
 
-        output_path = self._config.weekly_summary_path(year, week)
         self._save_markdown(output_path, response)
 
         logger.info("Generated weekly summary: %s", output_path)
         return output_path
 
-    def monthly(self, year: int, month: int) -> Path:
+    def monthly(self, year: int, month: int, force: bool = False) -> Path:
         """Monthly summary 생성."""
+        output_path = self._config.monthly_summary_path(year, month)
+        if not force and output_path.exists():
+            logger.info("Monthly summary already exists, skipping: %s", output_path)
+            return output_path
+
         weekly_contents = self._collect_weekly_for_month(year, month)
         if not weekly_contents:
             raise SummarizeError(f"No weekly summaries found for {year}-{month:02d}")
@@ -109,14 +118,18 @@ class SummarizerService:
 
         response = self._llm.chat(system_prompt, user_content)
 
-        output_path = self._config.monthly_summary_path(year, month)
         self._save_markdown(output_path, response)
 
         logger.info("Generated monthly summary: %s", output_path)
         return output_path
 
-    def yearly(self, year: int) -> Path:
+    def yearly(self, year: int, force: bool = False) -> Path:
         """Yearly summary 생성."""
+        output_path = self._config.yearly_summary_path(year)
+        if not force and output_path.exists():
+            logger.info("Yearly summary already exists, skipping: %s", output_path)
+            return output_path
+
         monthly_contents = []
         for m in range(1, 13):
             path = self._config.monthly_summary_path(year, m)
@@ -131,7 +144,6 @@ class SummarizerService:
 
         response = self._llm.chat(system_prompt, user_content)
 
-        output_path = self._config.yearly_summary_path(year)
         self._save_markdown(output_path, response)
 
         logger.info("Generated yearly summary: %s", output_path)

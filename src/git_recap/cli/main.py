@@ -361,6 +361,7 @@ def summarize_daily(
 def summarize_weekly(
     year: int = typer.Argument(help="Year"),
     week: int = typer.Argument(help="ISO week number"),
+    force: bool = typer.Option(False, "--force", "-f", help="Re-generate even if exists"),
 ) -> None:
     """Generate weekly summary."""
     config = _get_config()
@@ -368,7 +369,7 @@ def summarize_weekly(
     try:
         llm = _get_llm_client(config)
         service = SummarizerService(config, llm)
-        path = service.weekly(year, week)
+        path = service.weekly(year, week, force=force)
         typer.echo(f"Weekly summary → {path}")
     except GitRecapError as e:
         _handle_error(e)
@@ -378,6 +379,7 @@ def summarize_weekly(
 def summarize_monthly(
     year: int = typer.Argument(help="Year"),
     month: int = typer.Argument(help="Month (1-12)"),
+    force: bool = typer.Option(False, "--force", "-f", help="Re-generate even if exists"),
 ) -> None:
     """Generate monthly summary."""
     config = _get_config()
@@ -385,7 +387,7 @@ def summarize_monthly(
     try:
         llm = _get_llm_client(config)
         service = SummarizerService(config, llm)
-        path = service.monthly(year, month)
+        path = service.monthly(year, month, force=force)
         typer.echo(f"Monthly summary → {path}")
     except GitRecapError as e:
         _handle_error(e)
@@ -394,6 +396,7 @@ def summarize_monthly(
 @summarize_app.command("yearly")
 def summarize_yearly(
     year: int = typer.Argument(help="Year"),
+    force: bool = typer.Option(False, "--force", "-f", help="Re-generate even if exists"),
 ) -> None:
     """Generate yearly summary."""
     config = _get_config()
@@ -401,7 +404,7 @@ def summarize_yearly(
     try:
         llm = _get_llm_client(config)
         service = SummarizerService(config, llm)
-        path = service.yearly(year)
+        path = service.yearly(year, force=force)
         typer.echo(f"Yearly summary → {path}")
     except GitRecapError as e:
         _handle_error(e)
@@ -415,6 +418,7 @@ def run(
     target_date: str = typer.Argument(
         default=None, help="Target date (YYYY-MM-DD). Default: today or catch-up"
     ),
+    type: str = typer.Option(None, "--type", "-t", help="prs, commits, or issues"),
     since: str = typer.Option(None, help="Range start (YYYY-MM-DD)"),
     until: str = typer.Option(None, help="Range end (YYYY-MM-DD)"),
     weekly: str = typer.Option(None, help="YEAR-WEEK, e.g. 2026-7"),
@@ -423,6 +427,14 @@ def run(
     force: bool = typer.Option(False, "--force", "-f", help="Re-run even if data exists"),
 ) -> None:
     """Run full pipeline (fetch → normalize → summarize)."""
+    # --type 검증
+    types: set[str] | None = None
+    if type is not None:
+        if type not in VALID_TYPES:
+            typer.echo(f"Invalid type: {type}. Must be one of {VALID_TYPES}", err=True)
+            raise typer.Exit(code=1)
+        types = {type}
+
     dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
     endpoints = _resolve_range_endpoints(target_date, since, until, weekly, monthly, yearly)
 
@@ -454,7 +466,7 @@ def run(
 
         range_ep = endpoints or catchup_endpoints
         if range_ep:
-            results = orchestrator.run_range(range_ep[0], range_ep[1], force=force)
+            results = orchestrator.run_range(range_ep[0], range_ep[1], force=force, types=types)
             succeeded = sum(1 for r in results if r["status"] == "success")
             skipped = sum(1 for r in results if r["status"] == "skipped")
             failed = sum(1 for r in results if r["status"] == "failed")
@@ -467,7 +479,7 @@ def run(
             if failed > 0:
                 raise typer.Exit(code=1)
         else:
-            path = orchestrator.run_daily(dates[0])
+            path = orchestrator.run_daily(dates[0], types=types)
             ghes.close()
             typer.echo(f"Pipeline complete → {path}")
     except GitRecapError as e:

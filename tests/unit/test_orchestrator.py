@@ -66,7 +66,7 @@ class TestRunDaily:
         """fetch → normalize → summarize 순서로 호출."""
         orchestrator.run_daily("2025-02-16")
 
-        mocks["fetcher"].fetch.assert_called_once_with("2025-02-16")
+        mocks["fetcher"].fetch.assert_called_once_with("2025-02-16", types=None)
         mocks["normalizer"].normalize.assert_called_once_with("2025-02-16")
         mocks["summarizer"].daily.assert_called_once_with("2025-02-16")
 
@@ -79,7 +79,7 @@ class TestRunDaily:
         # 이미 호출됐으므로 다시 실행
         orchestrator.run_daily("2025-02-16")
         assert manager.mock_calls == [
-            call.fetch("2025-02-16"),
+            call.fetch("2025-02-16", types=None),
             call.normalize("2025-02-16"),
             call.summarize("2025-02-16"),
         ]
@@ -252,14 +252,14 @@ class TestRunRangeOptimized:
         orchestrator_with_config.run_range("2025-02-14", "2025-02-15")
 
         mocks["fetcher"].fetch_range.assert_called_once_with(
-            "2025-02-14", "2025-02-15", force=False
+            "2025-02-14", "2025-02-15", types=None, force=False
         )
         mocks["fetcher"].fetch.assert_not_called()
 
     def test_calls_phases_in_order(self, orchestrator_with_config, mocks):
         """fetch_range → normalize_range → daily_range in sequence."""
         call_order = []
-        mocks["fetcher"].fetch_range.side_effect = lambda s, u, force=False: (
+        mocks["fetcher"].fetch_range.side_effect = lambda s, u, types=None, force=False: (
             call_order.append("fetch_range") or []
         )
         mocks["normalizer"].normalize_range.side_effect = lambda s, u, force=False: (
@@ -497,7 +497,9 @@ class TestRunRangeForcePassthrough:
         )
         orchestrator.run_range("2025-02-14", "2025-02-14", force=True)
 
-        mocks["fetcher"].fetch_range.assert_called_once_with("2025-02-14", "2025-02-14", force=True)
+        mocks["fetcher"].fetch_range.assert_called_once_with(
+            "2025-02-14", "2025-02-14", types=None, force=True
+        )
         mocks["normalizer"].normalize_range.assert_called_once_with(
             "2025-02-14", "2025-02-14", force=True
         )
@@ -517,11 +519,65 @@ class TestRunRangeForcePassthrough:
         orchestrator.run_range("2025-02-14", "2025-02-14")
 
         mocks["fetcher"].fetch_range.assert_called_once_with(
-            "2025-02-14", "2025-02-14", force=False
+            "2025-02-14", "2025-02-14", types=None, force=False
         )
         mocks["normalizer"].normalize_range.assert_called_once_with(
             "2025-02-14", "2025-02-14", force=False
         )
         mocks["summarizer"].daily_range.assert_called_once_with(
             "2025-02-14", "2025-02-14", force=False
+        )
+
+
+class TestRunDailyTypesPassthrough:
+    """Tests that types is passed through to fetcher in run_daily."""
+
+    def test_types_passed_to_fetch(self, orchestrator, mocks):
+        """types={\"prs\"} → fetch에 types 전달."""
+        orchestrator.run_daily("2025-02-16", types={"prs"})
+        mocks["fetcher"].fetch.assert_called_once_with("2025-02-16", types={"prs"})
+
+    def test_types_none_by_default(self, orchestrator, mocks):
+        """types 미지정 → None 전달."""
+        orchestrator.run_daily("2025-02-16")
+        mocks["fetcher"].fetch.assert_called_once_with("2025-02-16", types=None)
+
+
+class TestRunRangeTypesPassthrough:
+    """Tests that types is passed through to fetcher in run_range."""
+
+    def test_types_passed_to_fetch_range(self, mocks, mock_config):
+        """types={\"commits\"} → fetch_range에 types 전달."""
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+
+        orchestrator = OrchestratorService(
+            mocks["fetcher"], mocks["normalizer"], mocks["summarizer"], config=mock_config
+        )
+        orchestrator.run_range("2025-02-14", "2025-02-14", types={"commits"})
+
+        mocks["fetcher"].fetch_range.assert_called_once_with(
+            "2025-02-14", "2025-02-14", types={"commits"}, force=False
+        )
+
+    def test_types_with_force(self, mocks, mock_config):
+        """types + force 동시 전달."""
+        mocks["fetcher"].fetch_range.return_value = []
+        mocks["normalizer"].normalize_range.return_value = []
+        mocks["summarizer"].daily_range.return_value = []
+
+        orchestrator = OrchestratorService(
+            mocks["fetcher"], mocks["normalizer"], mocks["summarizer"], config=mock_config
+        )
+        orchestrator.run_range("2025-02-14", "2025-02-14", force=True, types={"issues"})
+
+        mocks["fetcher"].fetch_range.assert_called_once_with(
+            "2025-02-14", "2025-02-14", types={"issues"}, force=True
         )

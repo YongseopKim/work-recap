@@ -340,6 +340,25 @@ class TestWeekly:
         with pytest.raises(SummarizeError, match="No daily summaries found"):
             summarizer.weekly(2099, 1)
 
+    def test_skip_if_exists(self, summarizer, mock_llm, test_config):
+        """이미 존재하면 LLM 호출 없이 skip."""
+        _save_daily_summary(test_config, "2025-02-10", "# Mon content")
+        _save_weekly_summary(test_config, 2025, 7, "# Existing weekly")
+
+        path = summarizer.weekly(2025, 7)
+        assert path.exists()
+        mock_llm.chat.assert_not_called()
+
+    def test_force_regenerates(self, summarizer, mock_llm, test_config):
+        """force=True → 기존 파일 있어도 재생성."""
+        _save_daily_summary(test_config, "2025-02-10", "# Mon content")
+        _save_weekly_summary(test_config, 2025, 7, "# Old weekly")
+
+        path = summarizer.weekly(2025, 7, force=True)
+        assert path.exists()
+        mock_llm.chat.assert_called_once()
+        assert path.read_text(encoding="utf-8") == "# LLM Generated Summary\n\nMock content."
+
 
 class TestCollectDailyForWeek:
     def test_iso_week_calculation(self, summarizer, test_config):
@@ -375,6 +394,25 @@ class TestMonthly:
         with pytest.raises(SummarizeError, match="No weekly summaries found"):
             summarizer.monthly(2099, 1)
 
+    def test_skip_if_exists(self, summarizer, mock_llm, test_config):
+        """이미 존재하면 LLM 호출 없이 skip."""
+        _save_weekly_summary(test_config, 2025, 5)
+        _save_monthly_summary(test_config, 2025, 2, "# Existing monthly")
+
+        path = summarizer.monthly(2025, 2)
+        assert path.exists()
+        mock_llm.chat.assert_not_called()
+
+    def test_force_regenerates(self, summarizer, mock_llm, test_config):
+        """force=True → 기존 파일 있어도 재생성."""
+        _save_weekly_summary(test_config, 2025, 5)
+        _save_monthly_summary(test_config, 2025, 2, "# Old monthly")
+
+        path = summarizer.monthly(2025, 2, force=True)
+        assert path.exists()
+        mock_llm.chat.assert_called_once()
+        assert path.read_text(encoding="utf-8") == "# LLM Generated Summary\n\nMock content."
+
 
 class TestCollectWeeklyForMonth:
     def test_february_2025(self, summarizer, test_config):
@@ -404,6 +442,30 @@ class TestYearly:
     def test_no_monthly_found(self, summarizer):
         with pytest.raises(SummarizeError, match="No monthly summaries found"):
             summarizer.yearly(2099)
+
+    def test_skip_if_exists(self, summarizer, mock_llm, test_config):
+        """이미 존재하면 LLM 호출 없이 skip."""
+        _save_monthly_summary(test_config, 2025, 1)
+        # Pre-create yearly summary
+        yearly_path = test_config.yearly_summary_path(2025)
+        yearly_path.parent.mkdir(parents=True, exist_ok=True)
+        yearly_path.write_text("# Existing yearly", encoding="utf-8")
+
+        path = summarizer.yearly(2025)
+        assert path.exists()
+        mock_llm.chat.assert_not_called()
+
+    def test_force_regenerates(self, summarizer, mock_llm, test_config):
+        """force=True → 기존 파일 있어도 재생성."""
+        _save_monthly_summary(test_config, 2025, 1)
+        yearly_path = test_config.yearly_summary_path(2025)
+        yearly_path.parent.mkdir(parents=True, exist_ok=True)
+        yearly_path.write_text("# Old yearly", encoding="utf-8")
+
+        path = summarizer.yearly(2025, force=True)
+        assert path.exists()
+        mock_llm.chat.assert_called_once()
+        assert path.read_text(encoding="utf-8") == "# LLM Generated Summary\n\nMock content."
 
 
 class TestQuery:

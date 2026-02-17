@@ -32,7 +32,7 @@ class OrchestratorService:
         self._summarizer = summarizer
         self._config = config
 
-    def run_daily(self, target_date: str) -> Path:
+    def run_daily(self, target_date: str, types: set[str] | None = None) -> Path:
         """
         단일 날짜 전체 파이프라인: fetch → normalize → summarize(daily).
 
@@ -43,7 +43,7 @@ class OrchestratorService:
             StepFailedError: 어느 단계에서든 실패 시
         """
         try:
-            self._fetcher.fetch(target_date)
+            self._fetcher.fetch(target_date, types=types)
         except FetchError as e:
             raise StepFailedError("fetch", e) from e
 
@@ -60,7 +60,9 @@ class OrchestratorService:
         logger.info("Pipeline completed for %s → %s", target_date, summary_path)
         return summary_path
 
-    def run_range(self, since: str, until: str, force: bool = False) -> list[dict]:
+    def run_range(
+        self, since: str, until: str, force: bool = False, types: set[str] | None = None
+    ) -> list[dict]:
         """
         기간 범위 backfill using bulk operations.
 
@@ -75,7 +77,7 @@ class OrchestratorService:
         if start > end:
             return []
 
-        fetch_results = self._fetcher.fetch_range(since, until, force=force)
+        fetch_results = self._fetcher.fetch_range(since, until, types=types, force=force)
         normalize_results = self._normalizer.normalize_range(since, until, force=force)
         summarize_results = self._summarizer.daily_range(since, until, force=force)
 
