@@ -1103,3 +1103,64 @@ class TestNormalizeRange:
         assert len(results) == 1
         assert "date" in results[0]
         assert "status" in results[0]
+
+
+# ── DailyStateStore cascade 테스트 ──
+
+
+class TestNormalizerDailyStateIntegration:
+    """DailyStateStore cascade 동작 테스트."""
+
+    def test_cascade_reprocess_when_fetch_newer(self, test_config):
+        """fetch_ts > normalize_ts 이면 normalize_range가 재처리."""
+        from unittest.mock import MagicMock
+
+        mock_ds = MagicMock()
+        # is_normalize_stale returns True → cascade reprocess
+        mock_ds.is_normalize_stale.return_value = True
+        normalizer = NormalizerService(test_config, daily_state=mock_ds)
+
+        # raw 데이터 준비
+        _save_raw(
+            test_config,
+            [
+                _make_pr(
+                    author="testuser",
+                    created_at=f"{DATE}T09:00:00Z",
+                    updated_at=f"{DATE}T15:00:00Z",
+                )
+            ],
+        )
+
+        results = normalizer.normalize_range(DATE, DATE)
+        assert len(results) == 1
+        assert results[0]["status"] == "success"
+        # stale check 호출 검증
+        mock_ds.is_normalize_stale.assert_called_with(DATE)
+
+    def test_skip_when_normalize_fresh(self, test_config):
+        """normalize_ts >= fetch_ts 이면 skip."""
+        from unittest.mock import MagicMock
+
+        mock_ds = MagicMock()
+        mock_ds.is_normalize_stale.return_value = False  # fresh → skip
+        normalizer = NormalizerService(test_config, daily_state=mock_ds)
+
+        # raw 데이터 준비 (normalize가 호출되지 않으므로 실제 필요 없지만)
+        _save_raw(test_config, [_make_pr(author="testuser")])
+
+        results = normalizer.normalize_range(DATE, DATE)
+        assert len(results) == 1
+        assert results[0]["status"] == "skipped"
+
+    def test_set_timestamp_called_after_normalize(self, test_config):
+        """normalize 성공 후 daily_state.set_timestamp("normalize") 호출."""
+        from unittest.mock import MagicMock
+
+        mock_ds = MagicMock()
+        normalizer = NormalizerService(test_config, daily_state=mock_ds)
+
+        _save_raw(test_config, [_make_pr(author="testuser")])
+        normalizer.normalize(DATE)
+
+        mock_ds.set_timestamp.assert_called_once_with("normalize", DATE)

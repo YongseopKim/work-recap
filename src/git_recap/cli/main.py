@@ -8,6 +8,7 @@ import typer
 from git_recap.config import AppConfig
 from git_recap.exceptions import GitRecapError
 from git_recap.services import date_utils
+from git_recap.services.daily_state import DailyStateStore
 from git_recap.services.fetcher import FetcherService
 from git_recap.services.normalizer import NormalizerService
 from git_recap.services.orchestrator import OrchestratorService
@@ -197,7 +198,8 @@ def fetch(
     config = _get_config()
     try:
         with _get_ghes_client(config) as client:
-            service = FetcherService(config, client)
+            ds = DailyStateStore(config.daily_state_path)
+            service = FetcherService(config, client, daily_state=ds)
 
             # 다중 날짜 → fetch_range (월 단위 최적화)
             range_ep = endpoints or catchup_endpoints
@@ -280,7 +282,8 @@ def normalize(
     config = _get_config()
 
     try:
-        service = NormalizerService(config)
+        ds = DailyStateStore(config.daily_state_path)
+        service = NormalizerService(config, daily_state=ds)
 
         range_ep = endpoints or catchup_endpoints
         if range_ep:
@@ -336,7 +339,8 @@ def summarize_daily(
 
     try:
         llm = _get_llm_client(config)
-        service = SummarizerService(config, llm)
+        ds = DailyStateStore(config.daily_state_path)
+        service = SummarizerService(config, llm, daily_state=ds)
 
         range_ep = endpoints or catchup_endpoints
         if range_ep:
@@ -416,6 +420,7 @@ def run(
     weekly: str = typer.Option(None, help="YEAR-WEEK, e.g. 2026-7"),
     monthly: str = typer.Option(None, help="YEAR-MONTH, e.g. 2026-2"),
     yearly: int = typer.Option(None, help="Year, e.g. 2026"),
+    force: bool = typer.Option(False, "--force", "-f", help="Re-run even if data exists"),
 ) -> None:
     """Run full pipeline (fetch → normalize → summarize)."""
     dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
@@ -441,14 +446,15 @@ def run(
     try:
         ghes = _get_ghes_client(config)
         llm = _get_llm_client(config)
-        fetcher = FetcherService(config, ghes)
-        normalizer = NormalizerService(config)
-        summarizer = SummarizerService(config, llm)
+        ds = DailyStateStore(config.daily_state_path)
+        fetcher = FetcherService(config, ghes, daily_state=ds)
+        normalizer = NormalizerService(config, daily_state=ds)
+        summarizer = SummarizerService(config, llm, daily_state=ds)
         orchestrator = OrchestratorService(fetcher, normalizer, summarizer, config=config)
 
         range_ep = endpoints or catchup_endpoints
         if range_ep:
-            results = orchestrator.run_range(range_ep[0], range_ep[1])
+            results = orchestrator.run_range(range_ep[0], range_ep[1], force=force)
             succeeded = sum(1 for r in results if r["status"] == "success")
             typer.echo(f"Range complete: {succeeded}/{len(results)} succeeded")
             for r in results:

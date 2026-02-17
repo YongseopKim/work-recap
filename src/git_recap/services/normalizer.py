@@ -1,8 +1,14 @@
 """Raw PR/Commit/Issue 데이터를 정규화된 Activity + DailyStats로 변환하는 서비스."""
 
+from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from git_recap.services.daily_state import DailyStateStore
 
 from git_recap.config import AppConfig
 from git_recap.exceptions import NormalizeError
@@ -26,9 +32,10 @@ logger = logging.getLogger(__name__)
 
 
 class NormalizerService:
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(self, config: AppConfig, daily_state: DailyStateStore | None = None) -> None:
         self._config = config
         self._username = config.username
+        self._daily_state = daily_state
 
     def normalize(self, target_date: str) -> tuple[Path, Path]:
         """
@@ -119,7 +126,9 @@ class NormalizerService:
         return results
 
     def _is_date_normalized(self, date_str: str) -> bool:
-        """activities.jsonl + stats.json 모두 존재하면 True."""
+        """daily_state 있으면 timestamp cascade 체크, 없으면 파일 존재 체크."""
+        if self._daily_state is not None:
+            return not self._daily_state.is_normalize_stale(date_str)
         norm_dir = self._config.date_normalized_dir(date_str)
         return (norm_dir / "activities.jsonl").exists() and (norm_dir / "stats.json").exists()
 
@@ -136,6 +145,9 @@ class NormalizerService:
 
         with open(cp_path, "w", encoding="utf-8") as f:
             json.dump(checkpoints, f, indent=2)
+
+        if self._daily_state is not None:
+            self._daily_state.set_timestamp("normalize", target_date)
 
     # ── Activity 변환 ──
 

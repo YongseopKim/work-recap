@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install (editable, with dev deps)
 pip install -e ".[dev]"
 
-# Run unit tests (409 tests, integration excluded by default)
+# Run unit tests (477 tests, integration excluded by default)
 pytest
 
 # Run integration tests (require .env with real credentials)
@@ -56,14 +56,15 @@ Infrastructure (GHESClient: httpx, LLMClient: OpenAI/Anthropic)
 
 - `src/git_recap/config.py` — `AppConfig` (pydantic-settings), derives all data paths. Env vars from `.env`.
 - `src/git_recap/models.py` — Pydantic/dataclass models (`PRRaw`, `CommitRaw`, `IssueRaw`, `Activity`, `DailyStats`) + JSON/JSONL serialization utilities. `Activity` preserves text context: `body` (PR/commit/issue body), `review_bodies`, `comment_bodies`.
-- `src/git_recap/services/fetcher.py` — Searches GHES for PRs (3 axes: author/reviewed-by/commenter), commits, issues. Deduplicates, enriches, filters noise (bots, LGTM). `fetch(date)` returns `dict[str, Path]`. `fetch_range(since, until)` uses monthly chunked range queries for 30x fewer API calls, with skip/force/resilience. Updates `last_fetch_date` checkpoint.
-- `src/git_recap/services/normalizer.py` — Converts raw data → `Activity` records + `DailyStats`. Preserves body/review/comment text in Activity fields. Filters by actual timestamp (not search date). Self-reviews excluded. `normalize_range(since, until, force)` with skip/force/resilience. Updates `last_normalize_date` checkpoint.
-- `src/git_recap/services/summarizer.py` — Renders Jinja2 prompt templates (`prompts/`), calls LLM, saves markdown. `_format_activities` includes `body` (500 char), `review_bodies`/`comment_bodies` (각 200 char truncate) as text context for LLM. `daily_range(since, until, force)` with skip/force/resilience. Updates `last_summarize_date` checkpoint.
+- `src/git_recap/services/daily_state.py` — `DailyStateStore`: per-date timestamp tracking for fetch/normalize/summarize. Staleness rules: fetch stale if `fetched_at.date() <= target_date`; normalize stale if `fetch_ts > normalize_ts` (cascade); summarize stale if `normalize_ts > summarize_ts` (cascade). Persists to `data/state/daily_state.json`.
+- `src/git_recap/services/fetcher.py` — Searches GHES for PRs (3 axes: author/reviewed-by/commenter), commits, issues. Deduplicates, enriches, filters noise (bots, LGTM). `fetch(date)` returns `dict[str, Path]`. `fetch_range(since, until)` uses monthly chunked range queries for 30x fewer API calls, with skip/force/resilience. When `DailyStateStore` injected, uses `stale_dates()` to narrow API range. Updates `last_fetch_date` checkpoint + daily state.
+- `src/git_recap/services/normalizer.py` — Converts raw data → `Activity` records + `DailyStats`. Preserves body/review/comment text in Activity fields. Filters by actual timestamp (not search date). Self-reviews excluded. `normalize_range(since, until, force)` with skip/force/resilience. When `DailyStateStore` injected, uses cascade staleness (re-normalizes if fetch is newer). Updates `last_normalize_date` checkpoint + daily state.
+- `src/git_recap/services/summarizer.py` — Renders Jinja2 prompt templates (`prompts/`), calls LLM, saves markdown. `_format_activities` includes `body` (500 char), `review_bodies`/`comment_bodies` (각 200 char truncate) as text context for LLM. `daily_range(since, until, force)` with skip/force/resilience. When `DailyStateStore` injected, uses cascade staleness (re-summarizes if normalize is newer). Updates `last_summarize_date` checkpoint + daily state.
 - `src/git_recap/__main__.py` — `python -m git_recap` entry point.
 - `src/git_recap/infra/ghes_client.py` — HTTP client with retry (429 + 403 rate limit + 5xx), search API throttle (`search_interval=2.0s`), pagination. `search_interval` kwarg controls delay between Search API calls (30 req/min limit).
-- `src/git_recap/services/orchestrator.py` — Chains Fetch→Normalize→Summarize. `run_daily(date)` for single date. `run_range(since, until)` uses bulk `fetch_range`→`normalize_range`→`daily_range` for significantly fewer API calls. Accepts optional `config` kwarg for path derivation.
+- `src/git_recap/services/orchestrator.py` — Chains Fetch→Normalize→Summarize. `run_daily(date)` for single date. `run_range(since, until, force=False)` uses bulk `fetch_range`→`normalize_range`→`daily_range` for significantly fewer API calls. Passes `force` through to all 3 services. Accepts optional `config` kwarg for path derivation.
 - `src/git_recap/services/date_utils.py` — `date_range`, `weekly_range`, `monthly_range`, `yearly_range`, `catchup_range`, `monthly_chunks`.
-- `src/git_recap/cli/main.py` — Typer app. Subcommands: `fetch`, `normalize`, `summarize`, `run`, `ask`. `fetch`, `normalize`, `summarize daily`, `run` all support checkpoint catch-up and `--weekly/--monthly/--yearly` options. `fetch`, `normalize`, `summarize daily` also support `--force/-f`.
+- `src/git_recap/cli/main.py` — Typer app. Subcommands: `fetch`, `normalize`, `summarize`, `run`, `ask`. All four commands support checkpoint catch-up and `--weekly/--monthly/--yearly` options. All four commands support `--force/-f`. All inject `DailyStateStore` into services.
 - `src/git_recap/api/app.py` — FastAPI app. Routes in `api/routes/`. `StaticFiles` mount for `frontend/`.
 
 ### Data directory layout
@@ -76,7 +77,7 @@ data/summaries/{YYYY}/daily/        → {MM}-{DD}.md
 data/summaries/{YYYY}/weekly/       → W{NN}.md
 data/summaries/{YYYY}/monthly/      → {MM}.md
 data/summaries/{YYYY}/              → yearly.md
-data/state/                         → checkpoints.json (last_fetch/normalize/summarize_date), jobs/
+data/state/                         → checkpoints.json (last_fetch/normalize/summarize_date), daily_state.json (per-date timestamps), jobs/
 ```
 
 ### Checkpoint & catch-up
@@ -89,6 +90,23 @@ All four commands (fetch, normalize, summarize daily, run) share `data/state/che
   "last_summarize_date": "2026-02-17"
 }
 ```
+
+Per-date timestamps are tracked in `data/state/daily_state.json` via `DailyStateStore`:
+```json
+{
+  "2026-02-17": {
+    "fetch": "2026-02-18T08:00:00+00:00",
+    "normalize": "2026-02-18T08:01:00+00:00",
+    "summarize": "2026-02-18T08:02:00+00:00"
+  }
+}
+```
+
+**Staleness rules:**
+- **Fetch**: stale if `fetched_at.date() <= target_date` (same-day fetch may miss evening activity)
+- **Normalize (cascade)**: stale if `fetch_ts > normalize_ts` (re-fetched data needs re-normalizing)
+- **Summarize (cascade)**: stale if `normalize_ts > summarize_ts` (re-normalized data needs re-summarizing)
+- **Range optimization**: `fetch_range` narrows API range to `min(stale)..max(stale)` dates only
 
 Each service updates only its own key after successful processing. CLI catch-up flow (applies to `fetch`, `normalize`, `summarize daily`, `run`):
 - No args + checkpoint exists → `catchup_range(last_date)` → range method call

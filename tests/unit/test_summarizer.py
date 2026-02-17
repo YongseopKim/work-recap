@@ -548,3 +548,51 @@ class TestDailyRange:
         assert len(results) == 1
         assert "date" in results[0]
         assert "status" in results[0]
+
+
+# ── DailyStateStore cascade 테스트 ──
+
+
+class TestSummarizerDailyStateIntegration:
+    """DailyStateStore cascade 동작 테스트."""
+
+    def test_cascade_reprocess_when_normalize_newer(self, test_config, mock_llm, prompts_dir):
+        """normalize_ts > summarize_ts 이면 daily_range가 재처리."""
+        from unittest.mock import MagicMock
+
+        mock_ds = MagicMock()
+        mock_ds.is_summarize_stale.return_value = True  # cascade trigger
+        summarizer = SummarizerService(test_config, mock_llm, daily_state=mock_ds)
+
+        _save_normalized(test_config, DATE)
+
+        results = summarizer.daily_range(DATE, DATE)
+        assert len(results) == 1
+        assert results[0]["status"] == "success"
+        mock_ds.is_summarize_stale.assert_called_with(DATE)
+
+    def test_skip_when_summarize_fresh(self, test_config, mock_llm, prompts_dir):
+        """summarize_ts >= normalize_ts 이면 skip."""
+        from unittest.mock import MagicMock
+
+        mock_ds = MagicMock()
+        mock_ds.is_summarize_stale.return_value = False  # fresh → skip
+        summarizer = SummarizerService(test_config, mock_llm, daily_state=mock_ds)
+
+        _save_normalized(test_config, DATE)
+
+        results = summarizer.daily_range(DATE, DATE)
+        assert len(results) == 1
+        assert results[0]["status"] == "skipped"
+
+    def test_set_timestamp_called_after_daily(self, test_config, mock_llm, prompts_dir):
+        """daily() 성공 후 daily_state.set_timestamp("summarize") 호출."""
+        from unittest.mock import MagicMock
+
+        mock_ds = MagicMock()
+        summarizer = SummarizerService(test_config, mock_llm, daily_state=mock_ds)
+
+        _save_normalized(test_config, DATE)
+        summarizer.daily(DATE)
+
+        mock_ds.set_timestamp.assert_called_once_with("summarize", DATE)

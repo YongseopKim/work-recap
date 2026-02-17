@@ -1051,3 +1051,79 @@ class TestFetchRange:
         raw_dir = test_config.date_raw_dir("2025-02-14")
         prs = load_json(raw_dir / "prs.json")
         assert len(prs) == 1
+
+
+# ── DailyStateStore 통합 테스트 ──
+
+
+class TestFetcherDailyStateIntegration:
+    """DailyStateStore injection이 FetcherService에 미치는 영향 테스트."""
+
+    def test_is_date_fetched_uses_daily_state_when_injected(self, test_config, mock_client):
+        """daily_state가 있으면 _is_date_fetched가 timestamp 기반 체크 사용."""
+        from unittest.mock import MagicMock
+
+        mock_ds = MagicMock()
+        mock_ds.is_fetch_stale.return_value = False  # not stale → already fetched
+        fetcher = FetcherService(test_config, mock_client, daily_state=mock_ds)
+
+        # 파일이 없더라도 daily_state가 "not stale" → True (already fetched)
+        assert fetcher._is_date_fetched("2025-02-16") is True
+        mock_ds.is_fetch_stale.assert_called_once_with("2025-02-16")
+
+    def test_is_date_fetched_stale_returns_false(self, test_config, mock_client):
+        """daily_state에서 stale이면 _is_date_fetched가 False 반환."""
+        from unittest.mock import MagicMock
+
+        mock_ds = MagicMock()
+        mock_ds.is_fetch_stale.return_value = True  # stale → needs fetch
+        fetcher = FetcherService(test_config, mock_client, daily_state=mock_ds)
+
+        assert fetcher._is_date_fetched("2025-02-16") is False
+
+    def test_set_timestamp_called_after_fetch(self, test_config, mock_client):
+        """fetch 성공 후 daily_state.set_timestamp("fetch") 호출."""
+        from unittest.mock import MagicMock
+
+        mock_ds = MagicMock()
+        fetcher = FetcherService(test_config, mock_client, daily_state=mock_ds)
+
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        mock_client.search_commits.return_value = {"total_count": 0, "items": []}
+
+        fetcher.fetch("2025-02-16")
+
+        mock_ds.set_timestamp.assert_called_once_with("fetch", "2025-02-16")
+
+    def test_fetch_range_narrows_to_stale_dates(self, test_config, mock_client):
+        """daily_state가 있으면 fetch_range가 stale 날짜만 처리."""
+        from unittest.mock import MagicMock
+
+        mock_ds = MagicMock()
+        # 2025-02-14 is stale, 2025-02-15 is not, 2025-02-16 is stale
+        mock_ds.stale_dates.return_value = ["2025-02-14", "2025-02-16"]
+        fetcher = FetcherService(test_config, mock_client, daily_state=mock_ds)
+
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        mock_client.search_commits.return_value = {"total_count": 0, "items": []}
+
+        results = fetcher.fetch_range("2025-02-14", "2025-02-16")
+
+        statuses = {r["date"]: r["status"] for r in results}
+        assert statuses["2025-02-15"] == "skipped"
+        # 14 and 16 should be processed (success or at least attempted)
+        assert statuses["2025-02-14"] in ("success", "failed")
+        assert statuses["2025-02-16"] in ("success", "failed")
+
+    def test_fetch_range_all_fresh_skips_all(self, test_config, mock_client):
+        """daily_state에서 모든 날짜가 fresh면 전부 skipped."""
+        from unittest.mock import MagicMock
+
+        mock_ds = MagicMock()
+        mock_ds.stale_dates.return_value = []  # no stale dates
+        fetcher = FetcherService(test_config, mock_client, daily_state=mock_ds)
+
+        results = fetcher.fetch_range("2025-02-14", "2025-02-16")
+
+        assert len(results) == 3
+        assert all(r["status"] == "skipped" for r in results)

@@ -60,7 +60,7 @@ class OrchestratorService:
         logger.info("Pipeline completed for %s → %s", target_date, summary_path)
         return summary_path
 
-    def run_range(self, since: str, until: str) -> list[dict]:
+    def run_range(self, since: str, until: str, force: bool = False) -> list[dict]:
         """
         기간 범위 backfill using bulk operations.
 
@@ -75,9 +75,9 @@ class OrchestratorService:
         if start > end:
             return []
 
-        fetch_results = self._fetcher.fetch_range(since, until)
-        normalize_results = self._normalizer.normalize_range(since, until)
-        summarize_results = self._summarizer.daily_range(since, until)
+        fetch_results = self._fetcher.fetch_range(since, until, force=force)
+        normalize_results = self._normalizer.normalize_range(since, until, force=force)
+        summarize_results = self._summarizer.daily_range(since, until, force=force)
 
         results = self._merge_results(fetch_results, normalize_results, summarize_results)
 

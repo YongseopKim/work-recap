@@ -52,6 +52,10 @@ class AppConfig(BaseSettings):
         return self.state_dir / "checkpoints.json"
 
     @property
+    def daily_state_path(self) -> Path:
+        return self.state_dir / "daily_state.json"
+
+    @property
     def jobs_dir(self) -> Path:
         return self.state_dir / "jobs"
 

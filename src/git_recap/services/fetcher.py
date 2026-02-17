@@ -1,9 +1,15 @@
 """GHES PR/Commit/Issue 활동 수집 서비스."""
 
+from __future__ import annotations
+
 import json
 import logging
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from git_recap.services.daily_state import DailyStateStore
 
 from git_recap.config import AppConfig
 from git_recap.exceptions import FetchError
@@ -33,10 +39,16 @@ BOT_SUFFIXES = ["[bot]", "-bot"]
 
 
 class FetcherService:
-    def __init__(self, config: AppConfig, ghes_client: GHESClient) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        ghes_client: GHESClient,
+        daily_state: "DailyStateStore | None" = None,
+    ) -> None:
         self._config = config
         self._client = ghes_client
         self._username = config.username
+        self._daily_state = daily_state
 
     def fetch(self, target_date: str, types: set[str] | None = None) -> dict[str, Path]:
         """
@@ -90,10 +102,21 @@ class FetcherService:
     ) -> list[dict]:
         """월 단위 chunk 검색 → 날짜별 enrich/save. 실패 시 계속 진행."""
         active = types or {"prs", "commits", "issues"}
-        chunks = monthly_chunks(since, until)
         all_dates = date_range(since, until)
         results: list[dict] = []
         processed: set[str] = set()
+
+        # Determine stale dates for range narrowing
+        if not force and self._daily_state is not None:
+            stale = set(self._daily_state.stale_dates("fetch", all_dates))
+            if not stale:
+                return [{"date": d, "status": "skipped"} for d in all_dates]
+            # Narrow API range to min..max of stale dates
+            sorted_stale = sorted(stale)
+            chunks = monthly_chunks(sorted_stale[0], sorted_stale[-1])
+        else:
+            stale = None  # no narrowing, use per-date check
+            chunks = monthly_chunks(since, until)
 
         for chunk_start, chunk_end in chunks:
             try:
@@ -119,9 +142,15 @@ class FetcherService:
                         continue
                     processed.add(d)
                     try:
-                        if not force and self._is_date_fetched(d):
-                            results.append({"date": d, "status": "skipped"})
-                            continue
+                        if not force:
+                            if stale is not None:
+                                # Use pre-computed stale set
+                                if d not in stale:
+                                    results.append({"date": d, "status": "skipped"})
+                                    continue
+                            elif self._is_date_fetched(d):
+                                results.append({"date": d, "status": "skipped"})
+                                continue
 
                         bucket = buckets.get(d, {"prs": {}, "commits": [], "issues": {}})
                         self._save_date_from_bucket(d, bucket, active)
@@ -207,7 +236,9 @@ class FetcherService:
         return buckets
 
     def _is_date_fetched(self, date_str: str) -> bool:
-        """prs.json + commits.json + issues.json 3개 모두 존재하면 True."""
+        """daily_state 있으면 timestamp 기반, 없으면 파일 존재 체크."""
+        if self._daily_state is not None:
+            return not self._daily_state.is_fetch_stale(date_str)
         raw_dir = self._config.date_raw_dir(date_str)
         return all((raw_dir / f).exists() for f in ("prs.json", "commits.json", "issues.json"))
 
@@ -586,3 +617,6 @@ class FetcherService:
 
         with open(cp_path, "w", encoding="utf-8") as f:
             json.dump(checkpoints, f, indent=2)
+
+        if self._daily_state is not None:
+            self._daily_state.set_timestamp("fetch", target_date)

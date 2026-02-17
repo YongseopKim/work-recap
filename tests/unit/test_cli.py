@@ -720,7 +720,7 @@ class TestRun:
         assert result.exit_code == 0
         assert "3/3 succeeded" in result.output
         mock_orch.return_value.run_range.assert_called_once_with(
-            "2026-02-15", "2026-02-17"
+            "2026-02-15", "2026-02-17", force=False
         )
 
     @patch("git_recap.cli.main.date_utils")
@@ -746,8 +746,7 @@ class TestRun:
     @patch("git_recap.cli.main.FetcherService")
     def test_run_weekly(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         mock_orch.return_value.run_range.return_value = [
-            {"date": f"2026-02-0{i}", "status": "success", "path": f"/p{i}"}
-            for i in range(2, 9)
+            {"date": f"2026-02-0{i}", "status": "success", "path": f"/p{i}"} for i in range(2, 9)
         ]
         result = runner.invoke(app, ["run", "--weekly", "2026-7"])
         assert result.exit_code == 0
@@ -799,6 +798,74 @@ class TestAsk:
         result = runner.invoke(app, ["ask", "질문?", "--months", "6"])
         assert result.exit_code == 0
         mock_cls.return_value.query.assert_called_once_with("질문?", months_back=6)
+
+
+# ── Run --force 테스트 ──
+
+
+class TestRunForce:
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_force_single_date(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        """run --force 단일 날짜 → run_daily 호출 (force는 run_daily에 직접 전달 안 함)."""
+        mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
+        result = runner.invoke(app, ["run", "--force", "2025-02-16"])
+        assert result.exit_code == 0
+        assert "Pipeline complete" in result.output
+
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_force_with_range(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        """run --force --since/--until → run_range에 force=True 전달."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2025-02-14", "status": "success", "path": "/p1"},
+            {"date": "2025-02-15", "status": "success", "path": "/p2"},
+        ]
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--since",
+                "2025-02-14",
+                "--until",
+                "2025-02-15",
+                "--force",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "2/2 succeeded" in result.output
+        mock_orch.return_value.run_range.assert_called_once_with(
+            "2025-02-14", "2025-02-15", force=True
+        )
+
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_force_short_flag_with_range(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        """run -f --since/--until → run_range에 force=True 전달."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2025-02-14", "status": "success", "path": "/p1"},
+        ]
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--since",
+                "2025-02-14",
+                "--until",
+                "2025-02-14",
+                "-f",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_orch.return_value.run_range.assert_called_once_with(
+            "2025-02-14", "2025-02-14", force=True
+        )
 
 
 # ── Checkpoint 헬퍼 테스트 ──

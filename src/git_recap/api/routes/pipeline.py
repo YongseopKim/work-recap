@@ -9,6 +9,7 @@ from git_recap.config import AppConfig
 from git_recap.infra.ghes_client import GHESClient
 from git_recap.infra.llm_client import LLMClient
 from git_recap.models import JobStatus
+from git_recap.services.daily_state import DailyStateStore
 from git_recap.services.fetcher import FetcherService
 from git_recap.services.normalizer import NormalizerService
 from git_recap.services.orchestrator import OrchestratorService
@@ -34,9 +35,10 @@ def _run_pipeline_task(
     try:
         ghes = GHESClient(config.ghes_url, config.ghes_token)
         llm = LLMClient(config.llm_provider, config.llm_api_key, config.llm_model)
-        fetcher = FetcherService(config, ghes)
-        normalizer = NormalizerService(config)
-        summarizer = SummarizerService(config, llm)
+        ds = DailyStateStore(config.daily_state_path)
+        fetcher = FetcherService(config, ghes, daily_state=ds)
+        normalizer = NormalizerService(config, daily_state=ds)
+        summarizer = SummarizerService(config, llm, daily_state=ds)
         orchestrator = OrchestratorService(fetcher, normalizer, summarizer, config=config)
 
         path = orchestrator.run_daily(target_date)
@@ -59,9 +61,10 @@ def _run_range_task(
     try:
         ghes = GHESClient(config.ghes_url, config.ghes_token)
         llm = LLMClient(config.llm_provider, config.llm_api_key, config.llm_model)
-        fetcher = FetcherService(config, ghes)
-        normalizer = NormalizerService(config)
-        summarizer = SummarizerService(config, llm)
+        ds = DailyStateStore(config.daily_state_path)
+        fetcher = FetcherService(config, ghes, daily_state=ds)
+        normalizer = NormalizerService(config, daily_state=ds)
+        summarizer = SummarizerService(config, llm, daily_state=ds)
         orchestrator = OrchestratorService(fetcher, normalizer, summarizer, config=config)
 
         results = orchestrator.run_range(since, until)

@@ -251,19 +251,21 @@ class TestRunRangeOptimized:
 
         orchestrator_with_config.run_range("2025-02-14", "2025-02-15")
 
-        mocks["fetcher"].fetch_range.assert_called_once_with("2025-02-14", "2025-02-15")
+        mocks["fetcher"].fetch_range.assert_called_once_with(
+            "2025-02-14", "2025-02-15", force=False
+        )
         mocks["fetcher"].fetch.assert_not_called()
 
     def test_calls_phases_in_order(self, orchestrator_with_config, mocks):
         """fetch_range → normalize_range → daily_range in sequence."""
         call_order = []
-        mocks["fetcher"].fetch_range.side_effect = lambda s, u: (
+        mocks["fetcher"].fetch_range.side_effect = lambda s, u, force=False: (
             call_order.append("fetch_range") or []
         )
-        mocks["normalizer"].normalize_range.side_effect = lambda s, u: (
+        mocks["normalizer"].normalize_range.side_effect = lambda s, u, force=False: (
             call_order.append("normalize_range") or []
         )
-        mocks["summarizer"].daily_range.side_effect = lambda s, u: (
+        mocks["summarizer"].daily_range.side_effect = lambda s, u, force=False: (
             call_order.append("daily_range") or []
         )
 
@@ -414,3 +416,53 @@ class TestRunRangeOptimized:
         results = orchestrator_with_config.run_range("2025-02-17", "2025-02-16")
         assert results == []
         mocks["fetcher"].fetch_range.assert_not_called()
+
+
+class TestRunRangeForcePassthrough:
+    """Tests that force=True is passed through to all 3 services."""
+
+    def test_force_passed_to_all_services(self, mocks, mock_config):
+        """force=True → fetch_range, normalize_range, daily_range 모두 force=True 전달."""
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+
+        orchestrator = OrchestratorService(
+            mocks["fetcher"], mocks["normalizer"], mocks["summarizer"], config=mock_config
+        )
+        orchestrator.run_range("2025-02-14", "2025-02-14", force=True)
+
+        mocks["fetcher"].fetch_range.assert_called_once_with("2025-02-14", "2025-02-14", force=True)
+        mocks["normalizer"].normalize_range.assert_called_once_with(
+            "2025-02-14", "2025-02-14", force=True
+        )
+        mocks["summarizer"].daily_range.assert_called_once_with(
+            "2025-02-14", "2025-02-14", force=True
+        )
+
+    def test_force_false_by_default(self, mocks, mock_config):
+        """force 미지정 시 기본값 False 전달."""
+        mocks["fetcher"].fetch_range.return_value = []
+        mocks["normalizer"].normalize_range.return_value = []
+        mocks["summarizer"].daily_range.return_value = []
+
+        orchestrator = OrchestratorService(
+            mocks["fetcher"], mocks["normalizer"], mocks["summarizer"], config=mock_config
+        )
+        orchestrator.run_range("2025-02-14", "2025-02-14")
+
+        mocks["fetcher"].fetch_range.assert_called_once_with(
+            "2025-02-14", "2025-02-14", force=False
+        )
+        mocks["normalizer"].normalize_range.assert_called_once_with(
+            "2025-02-14", "2025-02-14", force=False
+        )
+        mocks["summarizer"].daily_range.assert_called_once_with(
+            "2025-02-14", "2025-02-14", force=False
+        )

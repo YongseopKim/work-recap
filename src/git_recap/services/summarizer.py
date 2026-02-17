@@ -1,9 +1,15 @@
 """Activity/Stats 데이터와 하위 summary를 LLM에 전달하여 markdown summary를 생성."""
 
+from __future__ import annotations
+
 import json
 import logging
 from datetime import date, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from git_recap.services.daily_state import DailyStateStore
 
 from jinja2 import Template
 
@@ -17,9 +23,15 @@ logger = logging.getLogger(__name__)
 
 
 class SummarizerService:
-    def __init__(self, config: AppConfig, llm_client: LLMClient) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        llm_client: LLMClient,
+        daily_state: DailyStateStore | None = None,
+    ) -> None:
         self._config = config
         self._llm = llm_client
+        self._daily_state = daily_state
 
     # ── Public API ──
 
@@ -196,7 +208,9 @@ class SummarizerService:
     # ── Checkpoint / Skip ──
 
     def _is_date_summarized(self, date_str: str) -> bool:
-        """daily summary 파일이 존재하면 True."""
+        """daily_state 있으면 timestamp cascade 체크, 없으면 파일 존재 체크."""
+        if self._daily_state is not None:
+            return not self._daily_state.is_summarize_stale(date_str)
         return self._config.daily_summary_path(date_str).exists()
 
     def _update_checkpoint(self, target_date: str) -> None:
@@ -212,6 +226,9 @@ class SummarizerService:
 
         with open(cp_path, "w", encoding="utf-8") as f:
             json.dump(checkpoints, f, indent=2)
+
+        if self._daily_state is not None:
+            self._daily_state.set_timestamp("summarize", target_date)
 
     # ── 유틸리티 ──
 
@@ -252,7 +269,9 @@ class SummarizerService:
                 parts = [rb[:200] + ("..." if len(rb) > 200 else "") for rb in act["review_bodies"]]
                 line += f"\n  Reviews: {' | '.join(parts)}"
             if act.get("comment_bodies"):
-                parts = [cb[:200] + ("..." if len(cb) > 200 else "") for cb in act["comment_bodies"]]
+                parts = [
+                    cb[:200] + ("..." if len(cb) > 200 else "") for cb in act["comment_bodies"]
+                ]
                 line += f"\n  Comments: {' | '.join(parts)}"
             lines.append(line)
 
