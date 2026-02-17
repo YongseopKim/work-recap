@@ -111,6 +111,11 @@ class FetcherService:
             stale = set(self._daily_state.stale_dates("fetch", all_dates))
             if not stale:
                 return [{"date": d, "status": "skipped"} for d in all_dates]
+            # Pre-skip non-stale dates
+            for d in all_dates:
+                if d not in stale:
+                    processed.add(d)
+                    results.append({"date": d, "status": "skipped"})
             # Narrow API range to min..max of stale dates
             sorted_stale = sorted(stale)
             chunks = monthly_chunks(sorted_stale[0], sorted_stale[-1])
