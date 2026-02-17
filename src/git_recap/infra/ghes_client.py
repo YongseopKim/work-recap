@@ -17,7 +17,7 @@ REQUEST_TIMEOUT = 30.0
 class GHESClient:
     """GHES REST API v3 HTTP client with retry and rate limit handling."""
 
-    def __init__(self, base_url: str, token: str) -> None:
+    def __init__(self, base_url: str, token: str, *, search_interval: float = 2.0) -> None:
         self._base_url = base_url.rstrip("/")
         if "api.github.com" in self._base_url:
             self._api_base = self._base_url
@@ -31,6 +31,8 @@ class GHESClient:
             },
             timeout=REQUEST_TIMEOUT,
         )
+        self._search_interval = search_interval
+        self._last_search_time: float = 0.0
 
     def close(self) -> None:
         self._client.close()
@@ -45,6 +47,7 @@ class GHESClient:
 
     def search_issues(self, query: str, page: int = 1, per_page: int = 30) -> dict:
         """Search API 호출. 429 시 자동 retry with backoff."""
+        self._throttle_search()
         return self._request_with_retry(
             "GET",
             "/search/issues",
@@ -53,9 +56,7 @@ class GHESClient:
 
     def get_pr(self, owner: str, repo: str, number: int) -> dict:
         """PR 상세 정보 조회."""
-        return self._request_with_retry(
-            "GET", f"/repos/{owner}/{repo}/pulls/{number}"
-        )
+        return self._request_with_retry("GET", f"/repos/{owner}/{repo}/pulls/{number}")
 
     def get_pr_files(self, owner: str, repo: str, number: int) -> list[dict]:
         """PR 변경 파일 목록. 페이지네이션 포함."""
@@ -63,12 +64,8 @@ class GHESClient:
 
     def get_pr_comments(self, owner: str, repo: str, number: int) -> list[dict]:
         """PR review comments + issue comments 통합."""
-        review_comments = self._paginate(
-            f"/repos/{owner}/{repo}/pulls/{number}/comments"
-        )
-        issue_comments = self._paginate(
-            f"/repos/{owner}/{repo}/issues/{number}/comments"
-        )
+        review_comments = self._paginate(f"/repos/{owner}/{repo}/pulls/{number}/comments")
+        issue_comments = self._paginate(f"/repos/{owner}/{repo}/issues/{number}/comments")
         return review_comments + issue_comments
 
     def get_pr_reviews(self, owner: str, repo: str, number: int) -> list[dict]:
@@ -77,6 +74,7 @@ class GHESClient:
 
     def search_commits(self, query: str, page: int = 1, per_page: int = 30) -> dict:
         """Commit Search API 호출. cloak-preview Accept 헤더 필요."""
+        self._throttle_search()
         return self._request_with_retry(
             "GET",
             "/search/commits",
@@ -86,15 +84,11 @@ class GHESClient:
 
     def get_commit(self, owner: str, repo: str, sha: str) -> dict:
         """Commit 상세 정보 조회."""
-        return self._request_with_retry(
-            "GET", f"/repos/{owner}/{repo}/commits/{sha}"
-        )
+        return self._request_with_retry("GET", f"/repos/{owner}/{repo}/commits/{sha}")
 
     def get_issue(self, owner: str, repo: str, number: int) -> dict:
         """Issue 상세 정보 조회."""
-        return self._request_with_retry(
-            "GET", f"/repos/{owner}/{repo}/issues/{number}"
-        )
+        return self._request_with_retry("GET", f"/repos/{owner}/{repo}/issues/{number}")
 
     def get_issue_comments(self, owner: str, repo: str, number: int) -> list[dict]:
         """Issue 코멘트 목록. 페이지네이션 포함."""
@@ -102,8 +96,21 @@ class GHESClient:
 
     # ── Internal ──
 
+    def _throttle_search(self) -> None:
+        """Rate-limit Search API calls to stay under 30 req/min."""
+        if self._search_interval <= 0:
+            return
+        now = time.monotonic()
+        elapsed = now - self._last_search_time
+        if self._last_search_time > 0 and elapsed < self._search_interval:
+            time.sleep(self._search_interval - elapsed)
+        self._last_search_time = time.monotonic()
+
     def _request_with_retry(
-        self, method: str, path: str, params: dict | None = None,
+        self,
+        method: str,
+        path: str,
+        params: dict | None = None,
         extra_headers: dict | None = None,
     ) -> dict | list:
         last_error: Exception | None = None
@@ -111,29 +118,48 @@ class GHESClient:
         for attempt in range(MAX_RETRIES + 1):
             try:
                 response = self._client.request(
-                    method, path, params=params, headers=extra_headers,
+                    method,
+                    path,
+                    params=params,
+                    headers=extra_headers,
                 )
 
                 if response.status_code == 429:
                     retry_after = self._get_retry_after(response)
                     logger.warning(
                         "Rate limited (429). Retry after %.1fs (attempt %d/%d)",
-                        retry_after, attempt + 1, MAX_RETRIES,
+                        retry_after,
+                        attempt + 1,
+                        MAX_RETRIES,
                     )
                     if attempt < MAX_RETRIES:
                         time.sleep(retry_after)
                         continue
-                    raise FetchError(
-                        f"Rate limit exceeded after {MAX_RETRIES} retries: {path}"
+                    raise FetchError(f"Rate limit exceeded after {MAX_RETRIES} retries: {path}")
+
+                if response.status_code == 403 and self._is_rate_limit_403(response):
+                    retry_after = self._get_retry_after(response)
+                    logger.warning(
+                        "Rate limited (403). Retry after %.1fs (attempt %d/%d)",
+                        retry_after,
+                        attempt + 1,
+                        MAX_RETRIES,
                     )
+                    if attempt < MAX_RETRIES:
+                        time.sleep(retry_after)
+                        continue
+                    raise FetchError(f"Rate limit exceeded after {MAX_RETRIES} retries: {path}")
 
                 if response.status_code >= 500:
                     logger.warning(
                         "Server error %d on %s (attempt %d/%d)",
-                        response.status_code, path, attempt + 1, MAX_RETRIES,
+                        response.status_code,
+                        path,
+                        attempt + 1,
+                        MAX_RETRIES,
                     )
                     if attempt < MAX_RETRIES:
-                        time.sleep(BACKOFF_BASE ** attempt)
+                        time.sleep(BACKOFF_BASE**attempt)
                         continue
                     raise FetchError(
                         f"Server error {response.status_code} after {MAX_RETRIES} retries: {path}"
@@ -150,15 +176,21 @@ class GHESClient:
                 last_error = e
                 logger.warning(
                     "HTTP error on %s (attempt %d/%d): %s",
-                    path, attempt + 1, MAX_RETRIES, e,
+                    path,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    e,
                 )
                 if attempt < MAX_RETRIES:
-                    time.sleep(BACKOFF_BASE ** attempt)
+                    time.sleep(BACKOFF_BASE**attempt)
                     continue
 
-        raise FetchError(
-            f"Request failed after {MAX_RETRIES} retries: {path}"
-        ) from last_error
+        raise FetchError(f"Request failed after {MAX_RETRIES} retries: {path}") from last_error
+
+    @staticmethod
+    def _is_rate_limit_403(response: httpx.Response) -> bool:
+        """Detect GitHub 403 responses that indicate rate limiting."""
+        return "rate limit" in response.text.lower()
 
     def _get_retry_after(self, response: httpx.Response) -> float:
         retry_after = response.headers.get("Retry-After")

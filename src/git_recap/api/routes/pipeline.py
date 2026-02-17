@@ -23,7 +23,10 @@ class RangeRequest(BaseModel):
 
 
 def _run_pipeline_task(
-    job_id: str, target_date: str, config: AppConfig, store: JobStore,
+    job_id: str,
+    target_date: str,
+    config: AppConfig,
+    store: JobStore,
 ) -> None:
     """BackgroundTask: 단일 날짜 파이프라인 실행."""
     store.update(job_id, JobStatus.RUNNING)
@@ -34,7 +37,7 @@ def _run_pipeline_task(
         fetcher = FetcherService(config, ghes)
         normalizer = NormalizerService(config)
         summarizer = SummarizerService(config, llm)
-        orchestrator = OrchestratorService(fetcher, normalizer, summarizer)
+        orchestrator = OrchestratorService(fetcher, normalizer, summarizer, config=config)
 
         path = orchestrator.run_daily(target_date)
         ghes.close()
@@ -44,7 +47,11 @@ def _run_pipeline_task(
 
 
 def _run_range_task(
-    job_id: str, since: str, until: str, config: AppConfig, store: JobStore,
+    job_id: str,
+    since: str,
+    until: str,
+    config: AppConfig,
+    store: JobStore,
 ) -> None:
     """BackgroundTask: 기간 범위 파이프라인 실행."""
     store.update(job_id, JobStatus.RUNNING)
@@ -55,7 +62,7 @@ def _run_range_task(
         fetcher = FetcherService(config, ghes)
         normalizer = NormalizerService(config)
         summarizer = SummarizerService(config, llm)
-        orchestrator = OrchestratorService(fetcher, normalizer, summarizer)
+        orchestrator = OrchestratorService(fetcher, normalizer, summarizer, config=config)
 
         results = orchestrator.run_range(since, until)
         ghes.close()

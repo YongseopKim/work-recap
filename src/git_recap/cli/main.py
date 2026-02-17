@@ -444,7 +444,7 @@ def run(
         fetcher = FetcherService(config, ghes)
         normalizer = NormalizerService(config)
         summarizer = SummarizerService(config, llm)
-        orchestrator = OrchestratorService(fetcher, normalizer, summarizer)
+        orchestrator = OrchestratorService(fetcher, normalizer, summarizer, config=config)
 
         range_ep = endpoints or catchup_endpoints
         if range_ep:

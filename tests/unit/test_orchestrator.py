@@ -32,12 +32,33 @@ def mocks():
     )
     summarizer.daily.return_value = Path("/data/summaries/2025/daily/02-16.md")
 
+    # Range method defaults
+    fetcher.fetch_range.return_value = []
+    normalizer.normalize_range.return_value = []
+    summarizer.daily_range.return_value = []
+
     return {"fetcher": fetcher, "normalizer": normalizer, "summarizer": summarizer}
+
+
+@pytest.fixture
+def mock_config():
+    config = Mock()
+    config.daily_summary_path.side_effect = lambda d: Path(
+        f"/data/summaries/{d[:4]}/daily/{d[5:7]}-{d[8:10]}.md"
+    )
+    return config
 
 
 @pytest.fixture
 def orchestrator(mocks):
     return OrchestratorService(mocks["fetcher"], mocks["normalizer"], mocks["summarizer"])
+
+
+@pytest.fixture
+def orchestrator_with_config(mocks, mock_config):
+    return OrchestratorService(
+        mocks["fetcher"], mocks["normalizer"], mocks["summarizer"], config=mock_config
+    )
 
 
 class TestRunDaily:
@@ -103,24 +124,52 @@ class TestRunDaily:
 
 
 class TestRunRange:
-    def test_processes_all_dates(self, orchestrator, mocks):
-        results = orchestrator.run_range("2025-02-14", "2025-02-16")
+    """Tests for optimized run_range using bulk fetch_range/normalize_range/daily_range."""
+
+    def test_processes_all_dates(self, orchestrator_with_config, mocks):
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+            {"date": "2025-02-16", "status": "success"},
+        ]
+
+        results = orchestrator_with_config.run_range("2025-02-14", "2025-02-16")
+
         assert len(results) == 3
         assert all(r["status"] == "success" for r in results)
         assert results[0]["date"] == "2025-02-14"
         assert results[1]["date"] == "2025-02-15"
         assert results[2]["date"] == "2025-02-16"
 
-    def test_failure_skips_and_continues(self, orchestrator, mocks):
-        """특정 날짜 실패해도 나머지 계속 처리."""
-        def fetch_side_effect(date_str):
-            if date_str == "2025-02-15":
-                raise FetchError("GHES down")
-            return {"prs": Path(f"/data/raw/{date_str}/prs.json")}
+    def test_failure_propagates_from_fetch(self, orchestrator_with_config, mocks):
+        """Fetch failure for a date → that date fails."""
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "failed", "error": "GHES down"},
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+            {"date": "2025-02-16", "status": "success"},
+        ]
 
-        mocks["fetcher"].fetch.side_effect = fetch_side_effect
-
-        results = orchestrator.run_range("2025-02-14", "2025-02-16")
+        results = orchestrator_with_config.run_range("2025-02-14", "2025-02-16")
 
         assert len(results) == 3
         assert results[0]["status"] == "success"
@@ -128,26 +177,240 @@ class TestRunRange:
         assert "fetch" in results[1]["error"]
         assert results[2]["status"] == "success"
 
-    def test_result_format(self, orchestrator, mocks):
-        results = orchestrator.run_range("2025-02-16", "2025-02-16")
+    def test_result_format(self, orchestrator_with_config, mocks):
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-16", "status": "success"},
+        ]
+
+        results = orchestrator_with_config.run_range("2025-02-16", "2025-02-16")
         r = results[0]
         assert "date" in r
         assert "status" in r
         assert "path" in r
 
-    def test_failed_result_format(self, orchestrator, mocks):
-        mocks["fetcher"].fetch.side_effect = FetchError("error")
-        results = orchestrator.run_range("2025-02-16", "2025-02-16")
+    def test_failed_result_format(self, orchestrator_with_config, mocks):
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-16", "status": "failed", "error": "GHES error"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-16", "status": "failed", "error": "no raw data"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-16", "status": "failed", "error": "no normalized data"},
+        ]
+
+        results = orchestrator_with_config.run_range("2025-02-16", "2025-02-16")
         r = results[0]
         assert r["status"] == "failed"
         assert "error" in r
         assert "path" not in r
 
-    def test_single_day(self, orchestrator, mocks):
-        results = orchestrator.run_range("2025-02-16", "2025-02-16")
+    def test_single_day(self, orchestrator_with_config, mocks):
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-16", "status": "success"},
+        ]
+
+        results = orchestrator_with_config.run_range("2025-02-16", "2025-02-16")
         assert len(results) == 1
 
-    def test_empty_range(self, orchestrator, mocks):
+    def test_empty_range(self, orchestrator_with_config, mocks):
         """since > until → 빈 결과."""
-        results = orchestrator.run_range("2025-02-17", "2025-02-16")
+        results = orchestrator_with_config.run_range("2025-02-17", "2025-02-16")
         assert results == []
+
+
+class TestRunRangeOptimized:
+    """Tests verifying that run_range uses bulk operations correctly."""
+
+    def test_uses_fetch_range_not_fetch(self, orchestrator_with_config, mocks):
+        """fetch_range is called, per-date fetch is NOT called."""
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+        ]
+
+        orchestrator_with_config.run_range("2025-02-14", "2025-02-15")
+
+        mocks["fetcher"].fetch_range.assert_called_once_with("2025-02-14", "2025-02-15")
+        mocks["fetcher"].fetch.assert_not_called()
+
+    def test_calls_phases_in_order(self, orchestrator_with_config, mocks):
+        """fetch_range → normalize_range → daily_range in sequence."""
+        call_order = []
+        mocks["fetcher"].fetch_range.side_effect = lambda s, u: (
+            call_order.append("fetch_range") or []
+        )
+        mocks["normalizer"].normalize_range.side_effect = lambda s, u: (
+            call_order.append("normalize_range") or []
+        )
+        mocks["summarizer"].daily_range.side_effect = lambda s, u: (
+            call_order.append("daily_range") or []
+        )
+
+        orchestrator_with_config.run_range("2025-02-14", "2025-02-15")
+
+        assert call_order == ["fetch_range", "normalize_range", "daily_range"]
+
+    def test_all_success_includes_path(self, orchestrator_with_config, mocks, mock_config):
+        """All phases succeed → result includes path from config."""
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+            {"date": "2025-02-16", "status": "success"},
+        ]
+
+        results = orchestrator_with_config.run_range("2025-02-14", "2025-02-16")
+
+        assert all(r["status"] == "success" for r in results)
+        assert results[0]["path"] == str(Path("/data/summaries/2025/daily/02-14.md"))
+        assert results[1]["path"] == str(Path("/data/summaries/2025/daily/02-15.md"))
+        assert results[2]["path"] == str(Path("/data/summaries/2025/daily/02-16.md"))
+
+    def test_fetch_failure_propagates(self, orchestrator_with_config, mocks):
+        """Fetch failure → error mentions 'fetch'."""
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "failed", "error": "GHES timeout"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+
+        results = orchestrator_with_config.run_range("2025-02-14", "2025-02-14")
+
+        assert results[0]["status"] == "failed"
+        assert "fetch" in results[0]["error"]
+
+    def test_normalize_failure_propagates(self, orchestrator_with_config, mocks):
+        """Normalize failure → error mentions 'normalize'."""
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "failed", "error": "parse error"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+
+        results = orchestrator_with_config.run_range("2025-02-14", "2025-02-14")
+
+        assert results[0]["status"] == "failed"
+        assert "normalize" in results[0]["error"]
+
+    def test_summarize_failure_propagates(self, orchestrator_with_config, mocks):
+        """Summarize failure → error mentions 'summarize'."""
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-14", "status": "failed", "error": "LLM error"},
+        ]
+
+        results = orchestrator_with_config.run_range("2025-02-14", "2025-02-14")
+
+        assert results[0]["status"] == "failed"
+        assert "summarize" in results[0]["error"]
+
+    def test_mixed_results(self, orchestrator_with_config, mocks):
+        """Multi-date with different failures per phase."""
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "failed", "error": "rate limit"},
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+            {"date": "2025-02-16", "status": "failed", "error": "bad data"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+            {"date": "2025-02-16", "status": "success"},
+        ]
+
+        results = orchestrator_with_config.run_range("2025-02-14", "2025-02-16")
+
+        assert results[0]["status"] == "success"
+        assert results[1]["status"] == "failed"
+        assert "fetch" in results[1]["error"]
+        assert results[2]["status"] == "failed"
+        assert "normalize" in results[2]["error"]
+
+    def test_result_format_success(self, orchestrator_with_config, mocks):
+        """Success result has date, status, path."""
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-16", "status": "success"},
+        ]
+
+        results = orchestrator_with_config.run_range("2025-02-16", "2025-02-16")
+        r = results[0]
+
+        assert r["date"] == "2025-02-16"
+        assert r["status"] == "success"
+        assert "path" in r
+        assert "error" not in r
+
+    def test_single_day_range(self, orchestrator_with_config, mocks):
+        """Range of 1 day works."""
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-16", "status": "success"},
+        ]
+
+        results = orchestrator_with_config.run_range("2025-02-16", "2025-02-16")
+        assert len(results) == 1
+        assert results[0]["status"] == "success"
+
+    def test_empty_range_results(self, orchestrator_with_config, mocks):
+        """Empty results when no dates in range."""
+        results = orchestrator_with_config.run_range("2025-02-17", "2025-02-16")
+        assert results == []
+        mocks["fetcher"].fetch_range.assert_not_called()
