@@ -1,5 +1,6 @@
 """git-recap CLI — Typer 기반."""
 
+import calendar
 import json
 import logging
 from datetime import date
@@ -7,7 +8,7 @@ from datetime import date
 import typer
 
 from git_recap.config import AppConfig
-from git_recap.exceptions import GitRecapError
+from git_recap.exceptions import GitRecapError, SummarizeError
 from git_recap.logging_config import setup_logging
 from git_recap.services import date_utils
 from git_recap.services.daily_state import DailyStateStore
@@ -106,6 +107,20 @@ def _parse_weekly(value: str) -> tuple[int, int]:
 def _parse_monthly(value: str) -> tuple[int, int]:
     parts = value.split("-")
     return int(parts[0]), int(parts[1])
+
+
+def _weeks_in_month(year: int, month: int) -> list[tuple[int, int]]:
+    """해당 월에 걸치는 모든 ISO (year, week) 튜플을 순서대로 반환."""
+    seen: set[tuple[int, int]] = set()
+    result: list[tuple[int, int]] = []
+    num_days = calendar.monthrange(year, month)[1]
+    for day in range(1, num_days + 1):
+        iso_y, iso_w, _ = date(year, month, day).isocalendar()
+        key = (iso_y, iso_w)
+        if key not in seen:
+            seen.add(key)
+            result.append(key)
+    return result
 
 
 def _resolve_dates(
@@ -577,6 +592,36 @@ def run(
                 msg = r.get("path", r.get("error", ""))
                 typer.echo(f"  {mark} {r['date']}: {msg}")
             ghes.close()
+
+            # Hierarchical summarization after daily pipeline
+            if failed == 0:
+                if weekly:
+                    yr, wk = _parse_weekly(weekly)
+                    path = summarizer.weekly(yr, wk, force=force)
+                    typer.echo(f"Weekly summary → {path}")
+                elif monthly:
+                    yr, mo = _parse_monthly(monthly)
+                    for wy, ww in _weeks_in_month(yr, mo):
+                        try:
+                            summarizer.weekly(wy, ww, force=force)
+                        except SummarizeError:
+                            pass
+                    path = summarizer.monthly(yr, mo, force=force)
+                    typer.echo(f"Monthly summary → {path}")
+                elif yearly is not None:
+                    for mo in range(1, 13):
+                        for wy, ww in _weeks_in_month(yearly, mo):
+                            try:
+                                summarizer.weekly(wy, ww, force=force)
+                            except SummarizeError:
+                                pass
+                        try:
+                            summarizer.monthly(yearly, mo, force=force)
+                        except SummarizeError:
+                            pass
+                    path = summarizer.yearly(yearly, force=force)
+                    typer.echo(f"Yearly summary → {path}")
+
             _print_token_usage(llm)
             if failed > 0:
                 raise typer.Exit(code=1)

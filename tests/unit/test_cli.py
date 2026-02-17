@@ -1668,3 +1668,211 @@ class TestWorkersOption:
         _, kwargs = mock_orch.return_value.run_range.call_args
         # Should use config.max_workers (default=5)
         assert kwargs.get("max_workers") == 5
+
+
+# ── _weeks_in_month 헬퍼 테스트 ──
+
+
+class TestWeeksInMonth:
+    def test_feb_2026(self):
+        """2026년 2월: ISO weeks 5-9."""
+        from git_recap.cli.main import _weeks_in_month
+
+        weeks = _weeks_in_month(2026, 2)
+        # Feb 2026: Sun Feb 1 (W05) → Sat Feb 28 (W09)
+        assert isinstance(weeks, list)
+        assert all(isinstance(w, tuple) and len(w) == 2 for w in weeks)
+        iso_weeks = [w[1] for w in weeks]
+        assert iso_weeks == sorted(iso_weeks), "weeks should be in order"
+        # All tuples should have year=2026
+        assert all(w[0] == 2026 for w in weeks)
+        # Should have 5 weeks (W05-W09)
+        assert len(weeks) == 5
+
+    def test_jan_2026(self):
+        """2026년 1월: starts on Thu, ISO weeks 1-5."""
+        from git_recap.cli.main import _weeks_in_month
+
+        weeks = _weeks_in_month(2026, 1)
+        # Jan 1 2026 = Thursday = W01
+        # Jan 31 2026 = Saturday = W05
+        assert len(weeks) == 5
+        assert weeks[0] == (2026, 1)
+        assert weeks[-1] == (2026, 5)
+
+    def test_dec_iso_year_boundary(self):
+        """12월 말 ISO 주가 다음 해로 넘어가는 경우."""
+        from git_recap.cli.main import _weeks_in_month
+
+        # Dec 2025: Dec 29-31 are in ISO week 1 of 2026
+        weeks = _weeks_in_month(2025, 12)
+        # Last entry should be (2026, 1) since Dec 29 Mon = W01 of 2026
+        assert weeks[-1] == (2026, 1)
+
+    def test_returns_unique_tuples(self):
+        """중복 없이 유니크한 (year, week) 튜플만 반환."""
+        from git_recap.cli.main import _weeks_in_month
+
+        weeks = _weeks_in_month(2026, 3)
+        assert len(weeks) == len(set(weeks))
+
+
+# ── Run --weekly/--monthly/--yearly 계층적 summarize 테스트 ──
+
+
+class TestRunHierarchicalSummarize:
+    @patch("git_recap.cli.main._weeks_in_month")
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_weekly_calls_summarize_weekly(
+        self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
+    ):
+        """run --weekly → daily pipeline + summarizer.weekly() called."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": f"2026-02-0{i}", "status": "success", "path": f"/p{i}"} for i in range(2, 9)
+        ]
+        mock_summ.return_value.weekly.return_value = Path("/data/weekly.md")
+        result = runner.invoke(app, ["run", "--weekly", "2026-7"])
+        assert result.exit_code == 0
+        mock_summ.return_value.weekly.assert_called_once_with(2026, 7, force=False)
+        assert "Weekly summary" in result.output
+
+    @patch("git_recap.cli.main._weeks_in_month")
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_weekly_force_passes_force(
+        self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
+    ):
+        """run --weekly --force → summarizer.weekly(force=True)."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2026-02-02", "status": "success", "path": "/p1"}
+        ]
+        mock_summ.return_value.weekly.return_value = Path("/data/weekly.md")
+        result = runner.invoke(app, ["run", "--weekly", "2026-7", "--force"])
+        assert result.exit_code == 0
+        mock_summ.return_value.weekly.assert_called_once_with(2026, 7, force=True)
+
+    @patch("git_recap.cli.main._weeks_in_month")
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_monthly_cascades_weekly_then_monthly(
+        self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
+    ):
+        """run --monthly → weekly summaries for each week, then monthly summary."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2026-01-01", "status": "success", "path": "/p1"},
+        ]
+        mock_wim.return_value = [(2026, 1), (2026, 2), (2026, 3), (2026, 4), (2026, 5)]
+        mock_summ.return_value.weekly.return_value = Path("/data/weekly.md")
+        mock_summ.return_value.monthly.return_value = Path("/data/monthly.md")
+        result = runner.invoke(app, ["run", "--monthly", "2026-1"])
+        assert result.exit_code == 0
+        assert mock_summ.return_value.weekly.call_count == 5
+        mock_summ.return_value.monthly.assert_called_once_with(2026, 1, force=False)
+        assert "Monthly summary" in result.output
+
+    @patch("git_recap.cli.main._weeks_in_month")
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_monthly_weekly_error_handled(
+        self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
+    ):
+        """run --monthly: SummarizeError from weekly doesn't crash."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2026-01-01", "status": "success", "path": "/p1"},
+        ]
+        mock_wim.return_value = [(2026, 1), (2026, 2)]
+        mock_summ.return_value.weekly.side_effect = SummarizeError("no data")
+        mock_summ.return_value.monthly.return_value = Path("/data/monthly.md")
+        result = runner.invoke(app, ["run", "--monthly", "2026-1"])
+        assert result.exit_code == 0
+        assert "Monthly summary" in result.output
+
+    @patch("git_recap.cli.main._weeks_in_month")
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_yearly_cascades_full_hierarchy(
+        self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
+    ):
+        """run --yearly → weekly → monthly → yearly cascade."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2025-01-01", "status": "success", "path": "/p1"},
+        ]
+        # Return 2 weeks per month for simplicity
+        mock_wim.return_value = [(2025, 1), (2025, 2)]
+        mock_summ.return_value.weekly.return_value = Path("/data/weekly.md")
+        mock_summ.return_value.monthly.return_value = Path("/data/monthly.md")
+        mock_summ.return_value.yearly.return_value = Path("/data/yearly.md")
+        result = runner.invoke(app, ["run", "--yearly", "2025"])
+        assert result.exit_code == 0
+        # 12 months × 2 weeks = 24 weekly calls
+        assert mock_summ.return_value.weekly.call_count == 24
+        # 12 monthly calls
+        assert mock_summ.return_value.monthly.call_count == 12
+        # 1 yearly call
+        mock_summ.return_value.yearly.assert_called_once_with(2025, force=False)
+        assert "Yearly summary" in result.output
+
+    @patch("git_recap.cli.main._weeks_in_month")
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_yearly_handles_errors_gracefully(
+        self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
+    ):
+        """run --yearly: SummarizeError from weekly/monthly doesn't crash."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2025-01-01", "status": "success", "path": "/p1"},
+        ]
+        mock_wim.return_value = [(2025, 1)]
+        mock_summ.return_value.weekly.side_effect = SummarizeError("no data")
+        mock_summ.return_value.monthly.side_effect = SummarizeError("no data")
+        mock_summ.return_value.yearly.return_value = Path("/data/yearly.md")
+        result = runner.invoke(app, ["run", "--yearly", "2025"])
+        assert result.exit_code == 0
+        assert "Yearly summary" in result.output
+
+    @patch("git_recap.cli.main._weeks_in_month")
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_weekly_skips_summarize_on_failure(
+        self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
+    ):
+        """Daily pipeline failures → skip hierarchical summarize."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2026-02-02", "status": "failed", "error": "fetch err"},
+        ]
+        result = runner.invoke(app, ["run", "--weekly", "2026-7"])
+        assert result.exit_code == 1
+        mock_summ.return_value.weekly.assert_not_called()
+
+    @patch("git_recap.cli.main._weeks_in_month")
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_since_until_no_hierarchical(
+        self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
+    ):
+        """run --since/--until (no --weekly/--monthly/--yearly) → no hierarchical summarize."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2026-02-14", "status": "success", "path": "/p1"},
+        ]
+        result = runner.invoke(app, ["run", "--since", "2026-02-14", "--until", "2026-02-14"])
+        assert result.exit_code == 0
+        mock_summ.return_value.weekly.assert_not_called()
+        mock_summ.return_value.monthly.assert_not_called()
+        mock_summ.return_value.yearly.assert_not_called()
