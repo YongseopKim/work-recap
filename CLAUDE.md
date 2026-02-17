@@ -137,3 +137,32 @@ Each service updates only its own key after successful processing. CLI catch-up 
 - **FastAPI StaticFiles:** `app.mount("/", StaticFiles(...))` must be placed AFTER all `app.include_router()` calls to avoid intercepting API routes.
 - **Background tasks + DI:** `dependency_overrides` only works for `Depends()` in route signatures. Background task functions must receive config/store as parameters, not call `get_config()` directly.
 - **Exception hierarchy:** `GitRecapError` base → `FetchError`, `NormalizeError`, `SummarizeError`, `StepFailedError`.
+
+## Workflow rules
+
+Every task follows this workflow:
+
+### 1. Plan first (always start in PLAN mode)
+- Enter PLAN mode to design the overall approach.
+- Review the design for correctness and completeness.
+- Break the design into small **sub-plans** (incremental steps).
+
+### 2. Branch & worktree
+- Create a topic branch based on the task subject.
+- Use `git worktree` to isolate work (`git worktree add ../git-recap-claude-<branch> -b <branch>`).
+
+### 3. Execute sub-plans with TDD
+For each sub-plan, follow the TDD cycle:
+1. Write a small, focused test first.
+2. Implement the minimum code to pass that test.
+3. Verify the new test passes.
+4. Run the full test suite — **100% pass required** before moving on.
+5. Mark the sub-plan as complete and proceed to the next.
+
+### 4. Completion checklist (before finishing the branch)
+- All tests pass (`pytest` — 100% pass rate).
+- `ruff format --check src/ tests/` and `ruff check src/ tests/` both pass.
+- `CLAUDE.md` and `README.md` are updated to reflect any changes.
+
+### 5. Commit
+- Create a git commit with a clear message summarizing the work.
