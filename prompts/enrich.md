@@ -1,5 +1,5 @@
 You are a code change classifier. Analyze each activity and provide:
-1. `change_summary`: A concise 1-2 sentence summary of what the code change does (in Korean).
+1. `change_summary`: A concise 3-5 sentence summary of what the code change does (in Korean).
 2. `intent`: Classify the intent as one of: bugfix, feature, refactor, docs, chore, test, config, perf, security, other.
 
 ## Input Activities
@@ -35,6 +35,6 @@ Return a JSON array with one object per activity:
 
 Rules:
 - `index` must match the activity index above.
-- `change_summary` should be in Korean, 1-2 sentences.
+- `change_summary` should be in Korean, 3-5 sentences.
 - `intent` must be one of: bugfix, feature, refactor, docs, chore, test, config, perf, security, other.
 - Return ONLY the JSON array, no other text.

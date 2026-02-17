@@ -27,17 +27,17 @@
 # Daily Summary: {날짜}
 
 ## 개요
-(1-2문장 요약. Intent 분포를 참고하여 하루의 주요 작업 방향을 서술)
+(3-5문장 요약. Intent 분포를 참고하여 하루의 주요 작업 방향을 서술)
 
 ## 주요 활동
 ### 작성한 PR
-- [PR 제목](URL): Change Summary를 활용한 핵심 변경사항 2-3줄 설명. Intent 포함.
+- [PR 제목](URL): Change Summary를 활용한 핵심 변경사항 3줄 설명. Intent 포함.
 
 ### 리뷰한 PR
 - [PR 제목](URL): 리뷰 포인트
 
 ### 커밋
-- [커밋 메시지](URL): Change Summary를 활용한 구체적인 변경사항 2-3줄 설명. Intent 포함.
+- [커밋 메시지](URL): Change Summary를 활용한 구체적인 변경사항 3줄 설명. Intent 포함.
 
 ### 작성한 Issue
 - [Issue 제목](URL): 핵심 내용
