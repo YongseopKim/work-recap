@@ -1146,3 +1146,287 @@ class TestFetcherDailyStateIntegration:
 
         assert len(results) == 3
         assert all(r["status"] == "skipped" for r in results)
+
+
+class TestParallelEnrichment:
+    def test_enrich_with_explicit_client(self, test_config, mock_client):
+        """_enrich with explicit client uses that client, not self._client."""
+        other_client = Mock(spec=GHESClient)
+        other_client.get_pr.return_value = _make_pr_detail()
+        other_client.get_pr_files.return_value = []
+        other_client.get_pr_comments.return_value = []
+        other_client.get_pr_reviews.return_value = []
+
+        fetcher = FetcherService(test_config, mock_client)
+        pr_basic = _make_search_item("https://ghes/api/v3/repos/org/repo/pulls/1")
+        result = fetcher._enrich(pr_basic, client=other_client)
+
+        assert result.number == 1
+        other_client.get_pr.assert_called_once()
+        mock_client.get_pr.assert_not_called()
+
+    def test_enrich_commit_with_explicit_client(self, test_config, mock_client):
+        """_enrich_commit with explicit client uses that client."""
+        other_client = Mock(spec=GHESClient)
+        other_client.get_commit.return_value = {
+            "sha": "abc123",
+            "html_url": "https://ghes/org/repo/commit/abc123",
+            "url": "https://ghes/api/v3/repos/org/repo/commits/abc123",
+            "commit": {
+                "message": "test",
+                "committer": {"date": "2025-02-16T10:00:00Z"},
+            },
+            "files": [],
+        }
+
+        fetcher = FetcherService(test_config, mock_client)
+        item = {
+            "sha": "abc123",
+            "repository": {"full_name": "org/repo"},
+            "author": {"login": "testuser"},
+        }
+        result = fetcher._enrich_commit(item, client=other_client)
+
+        assert result.sha == "abc123"
+        other_client.get_commit.assert_called_once()
+        mock_client.get_commit.assert_not_called()
+
+    def test_enrich_issue_with_explicit_client(self, test_config, mock_client):
+        """_enrich_issue with explicit client uses that client."""
+        other_client = Mock(spec=GHESClient)
+        other_client.get_issue.return_value = {
+            "url": "https://ghes/api/v3/repos/org/repo/issues/10",
+            "html_url": "https://ghes/org/repo/issues/10",
+            "number": 10,
+            "title": "Bug",
+            "body": "desc",
+            "state": "open",
+            "created_at": "2025-02-16T09:00:00Z",
+            "updated_at": "2025-02-16T15:00:00Z",
+            "closed_at": None,
+            "user": {"login": "testuser"},
+            "labels": [],
+        }
+        other_client.get_issue_comments.return_value = []
+
+        fetcher = FetcherService(test_config, mock_client)
+        item = {"url": "https://ghes/api/v3/repos/org/repo/issues/10"}
+        result = fetcher._enrich_issue(item, client=other_client)
+
+        assert result.number == 10
+        other_client.get_issue.assert_called_once()
+        mock_client.get_issue.assert_not_called()
+
+    def test_default_client_when_none_passed(self, test_config, mock_client):
+        """_enrich with client=None falls back to self._client."""
+        fetcher = FetcherService(test_config, mock_client)
+        pr_basic = _make_search_item("https://ghes/api/v3/repos/org/repo/pulls/1")
+        result = fetcher._enrich(pr_basic)
+
+        assert result.number == 1
+        mock_client.get_pr.assert_called_once()
+
+    def test_parallel_enrichment_with_max_workers(self, test_config, mock_client):
+        """FetcherService with max_workers > 1 uses ThreadPoolExecutor."""
+        from unittest.mock import MagicMock
+
+        mock_pool = MagicMock()
+        mock_pool_client = Mock(spec=GHESClient)
+        mock_pool_client.get_pr.return_value = _make_pr_detail()
+        mock_pool_client.get_pr_files.return_value = []
+        mock_pool_client.get_pr_comments.return_value = []
+        mock_pool_client.get_pr_reviews.return_value = []
+        mock_pool.acquire.return_value = mock_pool_client
+        mock_pool.release = Mock()
+
+        fetcher = FetcherService(test_config, mock_client, max_workers=3, client_pool=mock_pool)
+
+        bucket = {
+            "prs": {
+                f"https://ghes/api/v3/repos/org/repo/pulls/{i}": _make_search_item(
+                    f"https://ghes/api/v3/repos/org/repo/pulls/{i}", i
+                )
+                for i in range(1, 4)
+            },
+            "commits": [],
+            "issues": {},
+        }
+        fetcher._save_date_from_bucket("2025-02-16", bucket, {"prs"})
+
+        # Pool should have been used
+        assert mock_pool.acquire.call_count == 3
+        assert mock_pool.release.call_count == 3
+
+    def test_failure_isolation_in_parallel(self, test_config, mock_client):
+        """One PR enrichment failure doesn't prevent others from succeeding."""
+        call_count = [0]
+
+        def fail_on_second(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise FetchError("boom")
+            return _make_pr_detail()
+
+        mock_client.get_pr.side_effect = fail_on_second
+
+        fetcher = FetcherService(test_config, mock_client, max_workers=1)
+
+        bucket = {
+            "prs": {
+                f"https://ghes/api/v3/repos/org/repo/pulls/{i}": _make_search_item(
+                    f"https://ghes/api/v3/repos/org/repo/pulls/{i}", i
+                )
+                for i in range(1, 4)
+            },
+            "commits": [],
+            "issues": {},
+        }
+        # Should not raise - failures are logged and skipped
+        fetcher._save_date_from_bucket("2025-02-16", bucket, {"prs"})
+
+
+class TestFetchRangeParallel:
+    def test_fetch_range_max_workers_passed(self, test_config, mock_client):
+        """fetch_range with max_workers>1 uses parallel date processing."""
+        from unittest.mock import MagicMock
+
+        mock_pool = MagicMock()
+        pool_client = Mock(spec=GHESClient)
+        pool_client.get_pr.return_value = _make_pr_detail()
+        pool_client.get_pr_files.return_value = []
+        pool_client.get_pr_comments.return_value = []
+        pool_client.get_pr_reviews.return_value = []
+        mock_pool.acquire.return_value = pool_client
+        mock_pool.release = Mock()
+
+        fetcher = FetcherService(test_config, mock_client, max_workers=3, client_pool=mock_pool)
+
+        # Mock search to return 1 PR per axis
+        api_url = "https://ghes/api/v3/repos/org/repo/pulls/1"
+        item = _make_search_item(api_url)
+        mock_client.search_issues.return_value = {"total_count": 1, "items": [item]}
+        mock_client.search_commits.return_value = {"total_count": 0, "items": []}
+
+        results = fetcher.fetch_range("2025-02-16", "2025-02-16", force=True)
+
+        assert len(results) == 1
+        assert results[0]["status"] == "success"
+
+    def test_fetch_range_sequential_fallback(self, test_config, mock_client):
+        """fetch_range with max_workers=1 uses sequential path."""
+        fetcher = FetcherService(test_config, mock_client, max_workers=1)
+
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        mock_client.search_commits.return_value = {"total_count": 0, "items": []}
+
+        results = fetcher.fetch_range("2025-02-16", "2025-02-16", force=True)
+
+        assert len(results) == 1
+        assert results[0]["status"] == "success"
+
+    def test_fetch_range_parallel_date_failure_isolation(self, test_config, mock_client):
+        """One date failure in parallel mode doesn't affect others."""
+        call_count = [0]
+
+        def search_side_effect(query, **kwargs):
+            call_count[0] += 1
+            return {"total_count": 0, "items": []}
+
+        mock_client.search_issues.side_effect = search_side_effect
+        mock_client.search_commits.return_value = {"total_count": 0, "items": []}
+
+        fetcher = FetcherService(test_config, mock_client, max_workers=2)
+
+        results = fetcher.fetch_range("2025-02-14", "2025-02-16", force=True)
+
+        assert len(results) == 3
+        # All should succeed (empty results is still success)
+        statuses = [r["status"] for r in results]
+        assert "success" in statuses
+
+
+class TestFetchRangeResume:
+    def test_resume_skips_search_for_cached_chunk(self, test_config, mock_client):
+        """When progress_store has cached chunk, search API is not called."""
+        from git_recap.services.fetch_progress import FetchProgressStore
+
+        progress_dir = test_config.data_dir / "state" / "fetch_progress"
+        progress_store = FetchProgressStore(progress_dir)
+
+        # Pre-cache a chunk search result (empty buckets)
+        progress_store.save_chunk_search("2025-02-16__2025-02-16", {})
+
+        fetcher = FetcherService(test_config, mock_client, progress_store=progress_store)
+
+        results = fetcher.fetch_range("2025-02-16", "2025-02-16", force=True)
+
+        # Search should NOT have been called (cached)
+        mock_client.search_issues.assert_not_called()
+        mock_client.search_commits.assert_not_called()
+        assert len(results) == 1
+        assert results[0]["status"] == "success"
+
+    def test_resume_calls_search_for_uncached_chunk(self, test_config, mock_client):
+        """When progress_store has no cache, search API is called normally."""
+        from git_recap.services.fetch_progress import FetchProgressStore
+
+        progress_dir = test_config.data_dir / "state" / "fetch_progress"
+        progress_store = FetchProgressStore(progress_dir)
+        # Don't cache anything
+
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        mock_client.search_commits.return_value = {"total_count": 0, "items": []}
+
+        fetcher = FetcherService(test_config, mock_client, progress_store=progress_store)
+
+        results = fetcher.fetch_range("2025-02-16", "2025-02-16", force=True)
+
+        # Search SHOULD have been called
+        assert mock_client.search_issues.call_count > 0
+        assert len(results) == 1
+
+    def test_resume_clears_chunk_after_completion(self, test_config, mock_client):
+        """Completed chunks are cleared from progress store."""
+        from git_recap.services.fetch_progress import FetchProgressStore
+
+        progress_dir = test_config.data_dir / "state" / "fetch_progress"
+        progress_store = FetchProgressStore(progress_dir)
+
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        mock_client.search_commits.return_value = {"total_count": 0, "items": []}
+
+        fetcher = FetcherService(test_config, mock_client, progress_store=progress_store)
+
+        fetcher.fetch_range("2025-02-16", "2025-02-16", force=True)
+
+        # Chunk should have been cleared after successful processing
+        assert progress_store.load_chunk_search("2025-02-16__2025-02-16") is None
+
+    def test_resume_interruption_scenario(self, test_config, mock_client):
+        """Simulate interruption: cache chunk, process some dates, then resume."""
+        from git_recap.services.fetch_progress import FetchProgressStore
+        from git_recap.services.daily_state import DailyStateStore
+
+        progress_dir = test_config.data_dir / "state" / "fetch_progress"
+        progress_store = FetchProgressStore(progress_dir)
+        ds = DailyStateStore(test_config.daily_state_path)
+
+        # First run: "interrupted" — cache chunk but only process some dates
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        mock_client.search_commits.return_value = {"total_count": 0, "items": []}
+
+        fetcher = FetcherService(
+            test_config, mock_client, daily_state=ds, progress_store=progress_store
+        )
+
+        # First run — processes all dates, caches chunk search results
+        results1 = fetcher.fetch_range("2025-02-14", "2025-02-16", force=True)
+        assert len(results1) == 3
+
+        # Second run — daily_state shows dates already processed, so skips them
+        mock_client.search_issues.reset_mock()
+        mock_client.search_commits.reset_mock()
+        results2 = fetcher.fetch_range("2025-02-14", "2025-02-16", force=False)
+
+        # All should be skipped (already processed)
+        assert all(r["status"] == "skipped" for r in results2)

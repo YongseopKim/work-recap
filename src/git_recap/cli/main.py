@@ -194,6 +194,7 @@ def fetch(
     monthly: str = typer.Option(None, help="YEAR-MONTH, e.g. 2026-2"),
     yearly: int = typer.Option(None, help="Year, e.g. 2026"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-fetch even if data exists"),
+    workers: int = typer.Option(1, "--workers", "-w", help="Parallel workers (default: 1)"),
 ) -> None:
     """Fetch PR/Commit/Issue data from GHES."""
     logger.info("Command: fetch date=%s types=%s force=%s", target_date, type, force)
@@ -226,10 +227,24 @@ def fetch(
 
     # 3. Fetch 실행
     config = _get_config()
+    pool = None
     try:
         with _get_ghes_client(config) as client:
+            from git_recap.services.fetch_progress import FetchProgressStore
+
             ds = DailyStateStore(config.daily_state_path)
-            service = FetcherService(config, client, daily_state=ds)
+            progress_store = FetchProgressStore(config.state_dir / "fetch_progress")
+            fetch_kwargs: dict = {
+                "daily_state": ds,
+                "progress_store": progress_store,
+            }
+            if workers > 1:
+                from git_recap.infra.client_pool import GHESClientPool
+
+                pool = GHESClientPool(config.ghes_url, config.ghes_token, size=workers)
+                fetch_kwargs["max_workers"] = workers
+                fetch_kwargs["client_pool"] = pool
+            service = FetcherService(config, client, **fetch_kwargs)
 
             # 다중 날짜 → fetch_range (월 단위 최적화)
             range_ep = endpoints or catchup_endpoints
@@ -261,6 +276,9 @@ def fetch(
                     typer.echo(f"  {dates[0]} {type_name}: {path}")
     except GitRecapError as e:
         _handle_error(e)
+    finally:
+        if pool is not None:
+            pool.close()
 
 
 def _print_range_results(label: str, range_results: list[dict]) -> None:
@@ -516,12 +534,26 @@ def run(
 
     config = _get_config()
     max_workers = workers if workers is not None else config.max_workers
+    pool = None
 
     try:
+        from git_recap.services.fetch_progress import FetchProgressStore
+
         ghes = _get_ghes_client(config)
         llm = _get_llm_client(config)
         ds = DailyStateStore(config.daily_state_path)
-        fetcher = FetcherService(config, ghes, daily_state=ds)
+        progress_store = FetchProgressStore(config.state_dir / "fetch_progress")
+        fetch_kwargs: dict = {
+            "daily_state": ds,
+            "progress_store": progress_store,
+        }
+        if max_workers > 1:
+            from git_recap.infra.client_pool import GHESClientPool
+
+            pool = GHESClientPool(config.ghes_url, config.ghes_token, size=max_workers)
+            fetch_kwargs["max_workers"] = max_workers
+            fetch_kwargs["client_pool"] = pool
+        fetcher = FetcherService(config, ghes, **fetch_kwargs)
         normalizer = NormalizerService(config, daily_state=ds, llm=llm if enrich else None)
         summarizer = SummarizerService(config, llm, daily_state=ds)
         orchestrator = OrchestratorService(fetcher, normalizer, summarizer, config=config)
@@ -555,6 +587,9 @@ def run(
             _print_token_usage(llm)
     except GitRecapError as e:
         _handle_error(e)
+    finally:
+        if pool is not None:
+            pool.close()
 
 
 # ── 자유 질문 ──

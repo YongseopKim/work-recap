@@ -21,7 +21,7 @@ class DailyStateStore:
     def __init__(self, state_path: Path) -> None:
         self._path = state_path
         self._data: dict | None = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def _load(self) -> dict:
         if self._data is None:
@@ -38,16 +38,16 @@ class DailyStateStore:
             json.dump(self._data, f, indent=2)
 
     def get_timestamp(self, phase: str, date_str: str) -> datetime | None:
-        """Return the stored timestamp for a phase+date, or None."""
+        """Return the stored timestamp for a phase+date, or None. Thread-safe."""
         with self._lock:
             data = self._load()
             ts_str = data.get(date_str, {}).get(phase)
-        if ts_str is None:
-            return None
-        return datetime.fromisoformat(ts_str)
+            if ts_str is None:
+                return None
+            return datetime.fromisoformat(ts_str)
 
     def set_timestamp(self, phase: str, date_str: str, ts: datetime | None = None) -> None:
-        """Set timestamp for a phase+date and persist immediately."""
+        """Set timestamp for a phase+date and persist immediately. Thread-safe."""
         with self._lock:
             data = self._load()
             if ts is None:

@@ -670,3 +670,151 @@ class TestSearchThrottle:
         c.close()
 
         assert sleep_values == []
+
+
+class TestAdaptiveRateLimit:
+    @respx.mock
+    def test_tracks_rate_limit_headers(self, monkeypatch):
+        """Rate limit remaining is tracked from response headers."""
+        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", lambda _: None)
+        c = GHESClient(BASE_URL, "test-token", search_interval=0)
+        respx.get(f"{API_BASE}/repos/org/repo/pulls/1").mock(
+            return_value=httpx.Response(
+                200,
+                json={"number": 1},
+                headers={
+                    "X-RateLimit-Remaining": "500",
+                    "X-RateLimit-Reset": "1700000000",
+                },
+            )
+        )
+        c.get_pr("org", "repo", 1)
+        assert c._rate_limit_remaining == 500
+        assert c._rate_limit_reset == 1700000000
+        c.close()
+
+    @respx.mock
+    def test_warns_when_remaining_low(self, monkeypatch, caplog):
+        """Logs warning when remaining < 100."""
+        import logging
+
+        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", lambda _: None)
+        c = GHESClient(BASE_URL, "test-token", search_interval=0)
+        respx.get(f"{API_BASE}/repos/org/repo/pulls/1").mock(
+            return_value=httpx.Response(
+                200,
+                json={"number": 1},
+                headers={
+                    "X-RateLimit-Remaining": "50",
+                    "X-RateLimit-Reset": "1700000000",
+                },
+            )
+        )
+        with caplog.at_level(logging.WARNING, logger="git_recap.infra.ghes_client"):
+            c.get_pr("org", "repo", 1)
+        assert any("rate limit" in r.message.lower() for r in caplog.records)
+        c.close()
+
+    @respx.mock
+    def test_waits_when_remaining_critical(self, monkeypatch):
+        """Sleeps until reset when remaining < 10."""
+        sleep_values = []
+
+        def fake_sleep(v):
+            sleep_values.append(v)
+
+        def fake_time():
+            return 1700000000 - 5  # 5 seconds before reset
+
+        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", fake_sleep)
+        monkeypatch.setattr("git_recap.infra.ghes_client.time.time", fake_time)
+        monkeypatch.setattr("git_recap.infra.ghes_client.time.monotonic", lambda: 1000.0)
+
+        c = GHESClient(BASE_URL, "test-token", search_interval=0)
+        respx.get(f"{API_BASE}/repos/org/repo/pulls/1").mock(
+            return_value=httpx.Response(
+                200,
+                json={"number": 1},
+                headers={
+                    "X-RateLimit-Remaining": "5",
+                    "X-RateLimit-Reset": "1700000000",
+                },
+            )
+        )
+
+        c.get_pr("org", "repo", 1)
+        # Should have waited for ~6 seconds (5 + 1 buffer)
+        assert any(v >= 5 for v in sleep_values)
+        c.close()
+
+    @respx.mock
+    def test_no_wait_when_remaining_sufficient(self, monkeypatch):
+        """No wait when remaining > 100."""
+        sleep_values = []
+        monkeypatch.setattr(
+            "git_recap.infra.ghes_client.time.sleep",
+            lambda v: sleep_values.append(v),
+        )
+        monkeypatch.setattr("git_recap.infra.ghes_client.time.monotonic", lambda: 1000.0)
+
+        c = GHESClient(BASE_URL, "test-token", search_interval=0)
+        respx.get(f"{API_BASE}/repos/org/repo/pulls/1").mock(
+            return_value=httpx.Response(
+                200,
+                json={"number": 1},
+                headers={
+                    "X-RateLimit-Remaining": "4000",
+                    "X-RateLimit-Reset": "1700000000",
+                },
+            )
+        )
+        c.get_pr("org", "repo", 1)
+        assert sleep_values == []
+        c.close()
+
+
+class TestThreadSafeThrottle:
+    def test_concurrent_search_calls_serialized(self, monkeypatch):
+        """3 threads calling search concurrently should be serialized by lock."""
+        import threading
+
+        sleep_times = []
+        clock = [1000.0]
+        clock_lock = threading.Lock()
+
+        def fake_monotonic():
+            with clock_lock:
+                return clock[0]
+
+        def fake_sleep(v):
+            sleep_times.append(v)
+            with clock_lock:
+                clock[0] += v
+
+        monkeypatch.setattr("git_recap.infra.ghes_client.time.monotonic", fake_monotonic)
+        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", fake_sleep)
+
+        c = GHESClient(BASE_URL, "test-token", search_interval=2.0)
+
+        # Simulate that _request_with_retry just returns immediately
+        c._request_with_retry = lambda *a, **kw: {"total_count": 0, "items": []}
+
+        errors = []
+
+        def call_search():
+            try:
+                c.search_issues("test")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=call_search) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        c.close()
+
+        assert not errors
+        # After 3 calls: first call no sleep, 2nd and 3rd should sleep
+        assert len(sleep_times) >= 2
