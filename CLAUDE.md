@@ -154,6 +154,7 @@ Every task follows this workflow:
 ### 2. Branch & worktree
 - Create a topic branch based on the task subject.
 - Use `git worktree` to isolate work (`git worktree add ../git-recap-claude-<branch> -b <branch>`).
+- **Do NOT run `pip install -e .` in worktrees.** Editable install records a single path per package — running it in a worktree overwrites the main venv's path, and when the worktree is removed the import breaks. Instead, use `PYTHONPATH=src pytest` to run tests in worktrees without touching the shared `.venv`.
 
 ### 3. Execute sub-plans with TDD
 For each sub-plan, follow the TDD cycle:
