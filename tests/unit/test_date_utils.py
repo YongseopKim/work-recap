@@ -3,7 +3,6 @@
 from datetime import date
 from unittest.mock import patch
 
-import pytest
 
 from git_recap.services.date_utils import (
     catchup_range,

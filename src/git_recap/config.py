@@ -29,6 +29,9 @@ class AppConfig(BaseSettings):
     llm_api_key: str
     llm_model: str = "gpt-4o-mini"
 
+    # 병렬 실행
+    max_workers: int = 5
+
     # ── 파생 경로 ──
 
     @property

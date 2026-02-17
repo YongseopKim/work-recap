@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -46,6 +48,7 @@ class NormalizerService:
         self._username = config.username
         self._daily_state = daily_state
         self._llm = llm
+        self._checkpoint_lock = threading.Lock()
 
     def normalize(
         self, target_date: str, progress: Callable[[str], None] | None = None
@@ -131,27 +134,71 @@ class NormalizerService:
         until: str,
         force: bool = False,
         progress: Callable[[str], None] | None = None,
+        max_workers: int = 1,
     ) -> list[dict]:
         """날짜 범위 순회하며 normalize. skip/force/resilience 지원."""
         dates = date_range(since, until)
-        logger.info("normalize_range %s..%s (%d dates, force=%s)", since, until, len(dates), force)
+        logger.info(
+            "normalize_range %s..%s (%d dates, force=%s, workers=%d)",
+            since,
+            until,
+            len(dates),
+            force,
+            max_workers,
+        )
         if progress:
             progress(f"Normalizing {since}..{until} ({len(dates)} dates)")
-        results: list[dict] = []
 
+        if max_workers <= 1:
+            return self._normalize_range_sequential(dates, force, progress)
+        return self._normalize_range_parallel(dates, force, progress, max_workers)
+
+    def _normalize_range_sequential(
+        self,
+        dates: list[str],
+        force: bool,
+        progress: Callable[[str], None] | None,
+    ) -> list[dict]:
+        results: list[dict] = []
         for d in dates:
             try:
                 if not force and self._is_date_normalized(d):
                     results.append({"date": d, "status": "skipped"})
                     continue
-
                 self.normalize(d, progress=progress)
                 results.append({"date": d, "status": "success"})
             except Exception as e:
                 logger.warning("Failed to normalize %s: %s", d, e)
                 results.append({"date": d, "status": "failed", "error": str(e)})
-
         return results
+
+    def _normalize_range_parallel(
+        self,
+        dates: list[str],
+        force: bool,
+        progress: Callable[[str], None] | None,
+        max_workers: int,
+    ) -> list[dict]:
+        results_by_date: dict[str, dict] = {}
+
+        def process_date(d: str) -> dict:
+            try:
+                if not force and self._is_date_normalized(d):
+                    return {"date": d, "status": "skipped"}
+                self.normalize(d, progress=progress)
+                return {"date": d, "status": "success"}
+            except Exception as e:
+                logger.warning("Failed to normalize %s: %s", d, e)
+                return {"date": d, "status": "failed", "error": str(e)}
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(process_date, d): d for d in dates}
+            for future in as_completed(futures):
+                result = future.result()
+                results_by_date[result["date"]] = result
+
+        # Return in original date order
+        return [results_by_date[d] for d in dates]
 
     def _is_date_normalized(self, date_str: str) -> bool:
         """daily_state 있으면 timestamp cascade 체크, 없으면 파일 존재 체크."""
@@ -161,18 +208,20 @@ class NormalizerService:
         return (norm_dir / "activities.jsonl").exists() and (norm_dir / "stats.json").exists()
 
     def _update_checkpoint(self, target_date: str) -> None:
-        """last_normalize_date 키 업데이트."""
-        cp_path = self._config.checkpoints_path
-        cp_path.parent.mkdir(parents=True, exist_ok=True)
+        """last_normalize_date 키 업데이트. Thread-safe with date comparison guard."""
+        with self._checkpoint_lock:
+            cp_path = self._config.checkpoints_path
+            cp_path.parent.mkdir(parents=True, exist_ok=True)
 
-        checkpoints = {}
-        if cp_path.exists():
-            checkpoints = load_json(cp_path)
+            checkpoints = {}
+            if cp_path.exists():
+                checkpoints = load_json(cp_path)
 
-        checkpoints["last_normalize_date"] = target_date
-
-        with open(cp_path, "w", encoding="utf-8") as f:
-            json.dump(checkpoints, f, indent=2)
+            existing = checkpoints.get("last_normalize_date", "")
+            if target_date > existing:
+                checkpoints["last_normalize_date"] = target_date
+                with open(cp_path, "w", encoding="utf-8") as f:
+                    json.dump(checkpoints, f, indent=2)
 
         if self._daily_state is not None:
             self._daily_state.set_timestamp("normalize", target_date)

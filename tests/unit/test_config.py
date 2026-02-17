@@ -59,3 +59,15 @@ class TestAppConfig:
         """llm_provider 기본값은 'openai'."""
         config = AppConfig(ghes_url="u", ghes_token="t", username="u", llm_api_key="k")
         assert config.llm_provider == "openai"
+
+    def test_max_workers_default(self):
+        """max_workers 기본값은 5."""
+        config = AppConfig(ghes_url="u", ghes_token="t", username="u", llm_api_key="k")
+        assert config.max_workers == 5
+
+    def test_max_workers_from_kwarg(self):
+        """max_workers를 직접 인자로 설정 가능."""
+        config = AppConfig(
+            ghes_url="u", ghes_token="t", username="u", llm_api_key="k", max_workers=10
+        )
+        assert config.max_workers == 10

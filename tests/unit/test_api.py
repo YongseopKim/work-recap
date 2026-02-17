@@ -1,7 +1,7 @@
 """BE API 테스트 — FastAPI TestClient 기반."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from starlette.testclient import TestClient

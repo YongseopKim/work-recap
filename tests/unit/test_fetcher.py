@@ -3,7 +3,6 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from git_recap.config import AppConfig
 from git_recap.exceptions import FetchError
 from git_recap.infra.ghes_client import GHESClient
 from git_recap.models import load_json

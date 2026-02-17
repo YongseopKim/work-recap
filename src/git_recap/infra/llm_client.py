@@ -1,6 +1,7 @@
 """Provider-agnostic LLM client."""
 
 import logging
+import threading
 import time
 
 import anthropic
@@ -30,6 +31,7 @@ class LLMClient:
         self._provider = provider
         self._model = model
         self._usage = TokenUsage()
+        self._usage_lock = threading.Lock()
 
         if provider == "openai":
             self._openai = OpenAI(api_key=api_key, timeout=timeout, max_retries=max_retries)
@@ -70,7 +72,8 @@ class LLMClient:
             else:
                 text, call_usage = self._chat_anthropic(system_prompt, user_content)
             elapsed = time.monotonic() - t0
-            self._usage = self._usage + call_usage
+            with self._usage_lock:
+                self._usage = self._usage + call_usage
             logger.info(
                 "LLM tokens: prompt=%d completion=%d total=%d (%.1fs)",
                 call_usage.prompt_tokens,
