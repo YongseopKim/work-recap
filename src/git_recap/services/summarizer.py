@@ -84,7 +84,7 @@ class SummarizerService:
     def weekly(self, year: int, week: int, force: bool = False) -> Path:
         """Weekly summary 생성."""
         output_path = self._config.weekly_summary_path(year, week)
-        if not force and output_path.exists():
+        if not force and not self._is_stale(output_path, self._daily_paths_for_week(year, week)):
             logger.info("Weekly summary already exists, skipping: %s", output_path)
             return output_path
 
@@ -105,7 +105,7 @@ class SummarizerService:
     def monthly(self, year: int, month: int, force: bool = False) -> Path:
         """Monthly summary 생성."""
         output_path = self._config.monthly_summary_path(year, month)
-        if not force and output_path.exists():
+        if not force and not self._is_stale(output_path, self._weekly_paths_for_month(year, month)):
             logger.info("Monthly summary already exists, skipping: %s", output_path)
             return output_path
 
@@ -126,7 +126,7 @@ class SummarizerService:
     def yearly(self, year: int, force: bool = False) -> Path:
         """Yearly summary 생성."""
         output_path = self._config.yearly_summary_path(year)
-        if not force and output_path.exists():
+        if not force and not self._is_stale(output_path, self._monthly_paths_for_year(year)):
             logger.info("Yearly summary already exists, skipping: %s", output_path)
             return output_path
 
@@ -159,6 +159,57 @@ class SummarizerService:
         user_content = f"## Context\n\n{context}\n\n## 질문\n\n{question}"
 
         return self._llm.chat(system_prompt, user_content)
+
+    # ── Staleness 체크 ──
+
+    @staticmethod
+    def _is_stale(output_path: Path, input_paths: list[Path]) -> bool:
+        """output이 없거나 input 중 하나라도 output보다 새로우면 stale."""
+        if not output_path.exists():
+            return True
+        output_mtime = output_path.stat().st_mtime
+        return any(p.exists() and p.stat().st_mtime > output_mtime for p in input_paths)
+
+    def _daily_paths_for_week(self, year: int, week: int) -> list[Path]:
+        """ISO week의 daily summary 경로 (존재하는 것만)."""
+        monday = date.fromisocalendar(year, week, 1)
+        paths = []
+        for i in range(7):
+            d = monday + timedelta(days=i)
+            p = self._config.daily_summary_path(d.isoformat())
+            if p.exists():
+                paths.append(p)
+        return paths
+
+    def _weekly_paths_for_month(self, year: int, month: int) -> list[Path]:
+        """해당 월에 걸치는 weekly summary 경로 (존재하는 것만)."""
+        first_day = date(year, month, 1)
+        if month == 12:
+            last_day = date(year + 1, 1, 1) - timedelta(days=1)
+        else:
+            last_day = date(year, month + 1, 1) - timedelta(days=1)
+
+        paths = []
+        seen_weeks: set[tuple[int, int]] = set()
+        d = first_day
+        while d <= last_day:
+            iso_y, iso_w, _ = d.isocalendar()
+            if (iso_y, iso_w) not in seen_weeks:
+                seen_weeks.add((iso_y, iso_w))
+                p = self._config.weekly_summary_path(iso_y, iso_w)
+                if p.exists():
+                    paths.append(p)
+            d += timedelta(days=7)
+        return paths
+
+    def _monthly_paths_for_year(self, year: int) -> list[Path]:
+        """1~12월 monthly summary 경로 (존재하는 것만)."""
+        paths = []
+        for m in range(1, 13):
+            p = self._config.monthly_summary_path(year, m)
+            if p.exists():
+                paths.append(p)
+        return paths
 
     # ── 파일 수집 ──
 

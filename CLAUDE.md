@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install (editable, with dev deps)
 pip install -e ".[dev]"
 
-# Run unit tests (501 tests, integration excluded by default)
+# Run unit tests (510 tests, integration excluded by default)
 pytest
 
 # Run integration tests (require .env with real credentials)
@@ -59,7 +59,7 @@ Infrastructure (GHESClient: httpx, LLMClient: OpenAI/Anthropic)
 - `src/git_recap/services/daily_state.py` — `DailyStateStore`: per-date timestamp tracking for fetch/normalize/summarize. Staleness rules: fetch stale if `fetched_at.date() <= target_date`; normalize stale if `fetch_ts > normalize_ts` (cascade); summarize stale if `normalize_ts > summarize_ts` (cascade). Persists to `data/state/daily_state.json`.
 - `src/git_recap/services/fetcher.py` — Searches GHES for PRs (3 axes: author/reviewed-by/commenter), commits, issues. Deduplicates, enriches, filters noise (bots, LGTM). `fetch(date)` returns `dict[str, Path]`. `fetch_range(since, until)` uses monthly chunked range queries for 30x fewer API calls, with skip/force/resilience. When `DailyStateStore` injected, uses `stale_dates()` to narrow API range. Updates `last_fetch_date` checkpoint + daily state.
 - `src/git_recap/services/normalizer.py` — Converts raw data → `Activity` records + `DailyStats`. Preserves body/review/comment text in Activity fields. Filters by actual timestamp (not search date). Self-reviews excluded. `normalize_range(since, until, force)` with skip/force/resilience. When `DailyStateStore` injected, uses cascade staleness (re-normalizes if fetch is newer). Updates `last_normalize_date` checkpoint + daily state.
-- `src/git_recap/services/summarizer.py` — Renders Jinja2 prompt templates (`prompts/`), calls LLM, saves markdown. `_format_activities` includes `body` (500 char), `review_bodies`/`comment_bodies` (각 200 char truncate) as text context for LLM. `daily_range(since, until, force)` with skip/force/resilience. `weekly(year, week, force)`, `monthly(year, month, force)`, `yearly(year, force)` support skip-if-exists + `force` override. When `DailyStateStore` injected, uses cascade staleness (re-summarizes if normalize is newer). Updates `last_summarize_date` checkpoint + daily state.
+- `src/git_recap/services/summarizer.py` — Renders Jinja2 prompt templates (`prompts/`), calls LLM, saves markdown. `_format_activities` includes `body` (500 char), `review_bodies`/`comment_bodies` (각 200 char truncate) as text context for LLM. `daily_range(since, until, force)` with skip/force/resilience. `weekly(year, week, force)`, `monthly(year, month, force)`, `yearly(year, force)` use mtime-based cascade staleness: weekly regenerates if any daily summary is newer, monthly if any weekly is newer, yearly if any monthly is newer. `--force` bypasses staleness check. When `DailyStateStore` injected, uses cascade staleness for daily (re-summarizes if normalize is newer). Updates `last_summarize_date` checkpoint + daily state.
 - `src/git_recap/__main__.py` — `python -m git_recap` entry point.
 - `src/git_recap/infra/ghes_client.py` — HTTP client with retry (429 + 403 rate limit + 5xx), search API throttle (`search_interval=2.0s`), pagination. `search_interval` kwarg controls delay between Search API calls (30 req/min limit).
 - `src/git_recap/services/orchestrator.py` — Chains Fetch→Normalize→Summarize. `run_daily(date, types=None)` for single date. `run_range(since, until, force=False, types=None)` uses bulk `fetch_range`→`normalize_range`→`daily_range` for significantly fewer API calls. Passes `force` and `types` through to fetcher. Accepts optional `config` kwarg for path derivation.
@@ -102,11 +102,17 @@ Per-date timestamps are tracked in `data/state/daily_state.json` via `DailyState
 }
 ```
 
-**Staleness rules:**
+**Staleness rules (daily — DailyStateStore timestamps):**
 - **Fetch**: stale if `fetched_at.date() <= target_date` (same-day fetch may miss evening activity)
 - **Normalize (cascade)**: stale if `fetch_ts > normalize_ts` (re-fetched data needs re-normalizing)
 - **Summarize (cascade)**: stale if `normalize_ts > summarize_ts` (re-normalized data needs re-summarizing)
 - **Range optimization**: `fetch_range` narrows API range to `min(stale)..max(stale)` dates only
+
+**Staleness rules (weekly/monthly/yearly — file mtime comparison):**
+- **Weekly**: stale if `max(mtime of daily summaries in week) > mtime of weekly file`
+- **Monthly**: stale if `max(mtime of weekly summaries in month) > mtime of monthly file`
+- **Yearly**: stale if `max(mtime of monthly summaries in year) > mtime of yearly file`
+- Output file absent → always stale. `--force` bypasses staleness check.
 
 Each service updates only its own key after successful processing. CLI catch-up flow (applies to `fetch`, `normalize`, `summarize daily`, `run`):
 - No args + checkpoint exists → `catchup_range(last_date)` → range method call

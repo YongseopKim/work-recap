@@ -658,3 +658,236 @@ class TestSummarizerDailyStateIntegration:
         summarizer.daily(DATE)
 
         mock_ds.set_timestamp.assert_called_once_with("summarize", DATE)
+
+
+# ── _is_stale 테스트 ──
+
+
+class TestIsStale:
+    def test_output_not_exists(self, tmp_path):
+        """output 파일이 없으면 항상 stale."""
+        output = tmp_path / "out.md"
+        inp = tmp_path / "inp.md"
+        inp.write_text("data")
+        assert SummarizerService._is_stale(output, [inp]) is True
+
+    def test_output_newer_than_inputs(self, tmp_path):
+        """output이 input보다 새로우면 not stale."""
+        import os
+        import time
+
+        inp = tmp_path / "inp.md"
+        inp.write_text("data")
+        # Set input mtime to the past
+        past = time.time() - 100
+        os.utime(inp, (past, past))
+
+        output = tmp_path / "out.md"
+        output.write_text("summary")
+        # output has current mtime, which is newer than inp
+
+        assert SummarizerService._is_stale(output, [inp]) is False
+
+    def test_input_newer_than_output(self, tmp_path):
+        """input이 output보다 새로우면 stale."""
+        import os
+        import time
+
+        output = tmp_path / "out.md"
+        output.write_text("summary")
+        # Set output mtime to the past
+        past = time.time() - 100
+        os.utime(output, (past, past))
+
+        inp = tmp_path / "inp.md"
+        inp.write_text("newer data")
+        # inp has current mtime, which is newer than output
+
+        assert SummarizerService._is_stale(output, [inp]) is True
+
+    def test_no_inputs_exist(self, tmp_path):
+        """input 파일이 하나도 없으면 not stale (재생성 불가)."""
+        output = tmp_path / "out.md"
+        output.write_text("summary")
+        assert SummarizerService._is_stale(output, []) is False
+
+    def test_mixed_inputs(self, tmp_path):
+        """input 중 하나만 output보다 새로워도 stale."""
+        import os
+        import time
+
+        output = tmp_path / "out.md"
+        output.write_text("summary")
+
+        old_inp = tmp_path / "old.md"
+        old_inp.write_text("old")
+        past = time.time() - 100
+        os.utime(old_inp, (past, past))
+        os.utime(output, (past + 50, past + 50))
+
+        new_inp = tmp_path / "new.md"
+        new_inp.write_text("new")
+        # new_inp has current mtime, newer than output
+
+        assert SummarizerService._is_stale(output, [old_inp, new_inp]) is True
+
+
+# ── Weekly/Monthly/Yearly cascade staleness 테스트 ──
+
+
+class TestWeeklyCascadeStaleness:
+    def test_regenerate_when_daily_newer(self, summarizer, mock_llm, test_config):
+        """daily mtime > weekly mtime → LLM 호출하여 재생성."""
+        import os
+        import time
+
+        # Create daily summaries first
+        _save_daily_summary(test_config, "2025-02-10", "# Mon")
+        _save_daily_summary(test_config, "2025-02-14", "# Fri")
+
+        # Create weekly summary with old mtime
+        _save_weekly_summary(test_config, 2025, 7, "# Old weekly")
+        weekly_path = test_config.weekly_summary_path(2025, 7)
+        past = time.time() - 200
+        os.utime(weekly_path, (past, past))
+
+        # Touch daily to be newer than weekly
+        daily_path = test_config.daily_summary_path("2025-02-10")
+        now = time.time()
+        os.utime(daily_path, (now, now))
+
+        path = summarizer.weekly(2025, 7)
+        assert path.exists()
+        mock_llm.chat.assert_called_once()
+        assert path.read_text(encoding="utf-8") == "# LLM Generated Summary\n\nMock content."
+
+
+class TestMonthlyCascadeStaleness:
+    def test_regenerate_when_weekly_newer(self, summarizer, mock_llm, test_config):
+        """weekly mtime > monthly mtime → LLM 호출하여 재생성."""
+        import os
+        import time
+
+        # Create weekly summaries
+        _save_weekly_summary(test_config, 2025, 5)
+        _save_weekly_summary(test_config, 2025, 6)
+
+        # Create monthly summary with old mtime
+        _save_monthly_summary(test_config, 2025, 2, "# Old monthly")
+        monthly_path = test_config.monthly_summary_path(2025, 2)
+        past = time.time() - 200
+        os.utime(monthly_path, (past, past))
+
+        # Touch weekly to be newer
+        weekly_path = test_config.weekly_summary_path(2025, 5)
+        now = time.time()
+        os.utime(weekly_path, (now, now))
+
+        path = summarizer.monthly(2025, 2)
+        assert path.exists()
+        mock_llm.chat.assert_called_once()
+        assert path.read_text(encoding="utf-8") == "# LLM Generated Summary\n\nMock content."
+
+
+class TestYearlyCascadeStaleness:
+    def test_regenerate_when_monthly_newer(self, summarizer, mock_llm, test_config):
+        """monthly mtime > yearly mtime → LLM 호출하여 재생성."""
+        import os
+        import time
+
+        # Create monthly summaries
+        _save_monthly_summary(test_config, 2025, 1)
+        _save_monthly_summary(test_config, 2025, 2)
+
+        # Create yearly summary with old mtime
+        yearly_path = test_config.yearly_summary_path(2025)
+        yearly_path.parent.mkdir(parents=True, exist_ok=True)
+        yearly_path.write_text("# Old yearly", encoding="utf-8")
+        past = time.time() - 200
+        os.utime(yearly_path, (past, past))
+
+        # Touch monthly to be newer
+        monthly_path = test_config.monthly_summary_path(2025, 1)
+        now = time.time()
+        os.utime(monthly_path, (now, now))
+
+        path = summarizer.yearly(2025)
+        assert path.exists()
+        mock_llm.chat.assert_called_once()
+        assert path.read_text(encoding="utf-8") == "# LLM Generated Summary\n\nMock content."
+
+
+class TestCascadeStaleness:
+    def test_daily_change_cascades_through_all_levels(self, summarizer, mock_llm, test_config):
+        """daily 재생성 → weekly stale → monthly stale → yearly stale 순차 확인."""
+        import os
+        import time
+
+        base_time = time.time() - 500
+
+        # 1. Create daily summaries (old)
+        _save_daily_summary(test_config, "2025-02-10", "# Mon")
+        _save_daily_summary(test_config, "2025-02-14", "# Fri")
+        for d in ["2025-02-10", "2025-02-14"]:
+            os.utime(test_config.daily_summary_path(d), (base_time, base_time))
+
+        # 2. Create weekly summary (slightly newer than daily)
+        _save_weekly_summary(test_config, 2025, 7, "# Weekly")
+        os.utime(
+            test_config.weekly_summary_path(2025, 7),
+            (base_time + 100, base_time + 100),
+        )
+
+        # 3. Create monthly summary (slightly newer than weekly)
+        _save_monthly_summary(test_config, 2025, 2, "# Monthly")
+        os.utime(
+            test_config.monthly_summary_path(2025, 2),
+            (base_time + 200, base_time + 200),
+        )
+
+        # 4. Create yearly summary (slightly newer than monthly)
+        yearly_path = test_config.yearly_summary_path(2025)
+        yearly_path.parent.mkdir(parents=True, exist_ok=True)
+        yearly_path.write_text("# Yearly", encoding="utf-8")
+        os.utime(yearly_path, (base_time + 300, base_time + 300))
+
+        # All fresh — no regeneration needed
+        assert not SummarizerService._is_stale(
+            test_config.weekly_summary_path(2025, 7),
+            [test_config.daily_summary_path("2025-02-10")],
+        )
+
+        # 5. Simulate daily re-generation (touch daily to be newest)
+        future = time.time()
+        daily_path = test_config.daily_summary_path("2025-02-10")
+        os.utime(daily_path, (future, future))
+
+        # Weekly is now stale (daily newer)
+        assert SummarizerService._is_stale(
+            test_config.weekly_summary_path(2025, 7),
+            [test_config.daily_summary_path("2025-02-10")],
+        )
+
+        # 6. Regenerate weekly → weekly mtime updates
+        summarizer.weekly(2025, 7)
+        assert mock_llm.chat.call_count == 1
+
+        # Monthly is now stale (weekly just regenerated, newer than monthly)
+        assert SummarizerService._is_stale(
+            test_config.monthly_summary_path(2025, 2),
+            [test_config.weekly_summary_path(2025, 7)],
+        )
+
+        # 7. Regenerate monthly → monthly mtime updates
+        summarizer.monthly(2025, 2)
+        assert mock_llm.chat.call_count == 2
+
+        # Yearly is now stale (monthly just regenerated)
+        assert SummarizerService._is_stale(
+            yearly_path,
+            [test_config.monthly_summary_path(2025, 2)],
+        )
+
+        # 8. Regenerate yearly
+        summarizer.yearly(2025)
+        assert mock_llm.chat.call_count == 3
