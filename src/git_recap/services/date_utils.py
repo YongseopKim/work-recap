@@ -36,6 +36,24 @@ def yearly_range(year: int) -> tuple[str, str]:
     return date(year, 1, 1).isoformat(), date(year, 12, 31).isoformat()
 
 
+def monthly_chunks(since: str, until: str) -> list[tuple[str, str]]:
+    """날짜 범위를 월 단위 (start, end) 쌍으로 분할."""
+    start = date.fromisoformat(since)
+    end = date.fromisoformat(until)
+    if start > end:
+        return []
+
+    chunks: list[tuple[str, str]] = []
+    current = start
+    while current <= end:
+        last_day = calendar.monthrange(current.year, current.month)[1]
+        month_end = date(current.year, current.month, last_day)
+        chunk_end = min(month_end, end)
+        chunks.append((current.isoformat(), chunk_end.isoformat()))
+        current = chunk_end + timedelta(days=1)
+    return chunks
+
+
 def catchup_range(last_fetch_date: str) -> tuple[str, str]:
     """Checkpoint 다음 날 ~ 오늘."""
     last = date.fromisoformat(last_fetch_date)

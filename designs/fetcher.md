@@ -465,6 +465,55 @@ class FetcherService:
             json.dump(checkpoints, f, indent=2)
 ```
 
+### Range-Based Fetch (fetch_range)
+
+day-by-day `fetch()` 호출 시 하루당 6개 Search API 호출이 필요하다 (PR 3축 + Commit 1 + Issue 2).
+6년 기준 ~13,000회 → ~7.3시간 소요. `fetch_range()`는 월 단위 검색으로 전환하여
+~432회 → ~14분으로 단축한다 (~30배).
+
+```python
+    def fetch_range(
+        self, since: str, until: str,
+        types: set[str] | None = None,
+        force: bool = False,
+    ) -> list[dict]:
+        """월 단위 chunk 검색 → 날짜별 enrich/save. 실패 시 계속 진행."""
+```
+
+**흐름:**
+1. `monthly_chunks(since, until)` → 월 단위 (start, end) 쌍 목록
+2. 각 chunk에 대해 range search 호출 (쿼리: `updated:{start}..{end}`)
+3. `_bucket_by_date()` → `updated_at`/`committer_date`의 날짜 부분으로 분류
+4. 각 날짜 순회: skip 판단 → enrich + save → checkpoint
+5. 실패 시 해당 날짜만 `{"status": "failed"}`로 기록, 다음 날짜 계속
+
+```python
+    @staticmethod
+    def _bucket_by_date(
+        pr_map: dict[str, dict],
+        commit_items: list[dict],
+        issue_map: dict[str, dict],
+    ) -> dict[str, dict]:
+        """검색 결과를 날짜별로 분류.
+        반환: {"2020-03-15": {"prs": {url: item}, "commits": [...], "issues": {url: item}}}"""
+
+    def _is_date_fetched(self, date_str: str) -> bool:
+        """prs.json + commits.json + issues.json 3개 모두 존재하면 True."""
+
+    def _search_prs_range(self, start: str, end: str) -> dict[str, dict]:
+        """날짜 범위로 PR 3축 검색 + dedup. 1000건 초과 시 warning."""
+
+    def _search_commits_range(self, start: str, end: str) -> list[dict]:
+        """날짜 범위로 커밋 검색. GHES 미지원 시 빈 리스트."""
+
+    def _search_issues_range(self, start: str, end: str) -> dict[str, dict]:
+        """날짜 범위로 Issue 2축 검색 + dedup."""
+
+    @staticmethod
+    def _warn_if_truncated(count: int, query: str) -> None:
+        """수집 결과가 1000건 이상이면 truncation warning 로깅."""
+```
+
 ---
 
 ## 출력 파일
@@ -809,3 +858,8 @@ def fetcher(test_config, mock_client):
 | 1.2.7 | `_fetch_commits()` + `_search_all_commit_pages()` + `_enrich_commit()` 구현 | TestFetchCommits |
 | 1.2.8 | `_fetch_issues()` + `_enrich_issue()` + `_parse_issue_url()` 구현 | TestFetchIssues, TestParseIssueUrl |
 | 1.2.9 | `_save_commits()` + `_save_issues()` 구현 | TestFetch (통합) |
+| 1.2.10 | `monthly_chunks()` (date_utils) | TestMonthlyChunks |
+| 1.2.11 | `_is_date_fetched()` | TestIsDateFetched |
+| 1.2.12 | `_bucket_by_date()` | TestBucketByDate |
+| 1.2.13 | `_search_prs_range()` / `_search_commits_range()` / `_search_issues_range()` | TestSearchPrsRange, TestSearchCommitsRange, TestSearchIssuesRange |
+| 1.2.14 | `fetch_range()` 통합 | TestFetchRange |

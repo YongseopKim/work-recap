@@ -9,6 +9,7 @@ LLM 기반으로 일/주/월/년 단위 업무 요약을 자동 생성하는 개
 - **수치는 스크립트, 서술은 LLM** — PR 수, line count 등은 코드가 계산하고 LLM은 서술만 담당
 - **계층적 요약** — daily → weekly → monthly → yearly로 하위 요약을 input으로 사용하여 토큰 관리
 - **멱등 파이프라인** — 동일 날짜 재실행 시 파일을 덮어씀
+- **범위 최적화** — 다중 날짜 fetch 시 월 단위 range 검색으로 API 호출 30배 절감
 
 ## 요구사항
 
@@ -65,6 +66,7 @@ git-recap summarize daily --weekly 2025-7
 # fetch 전용 옵션
 git-recap fetch --type prs 2025-02-16   # PR만 수집 (prs, commits, issues)
 git-recap fetch                         # catch-up: checkpoint 이후 ~ 오늘
+git-recap fetch --since 2020-03-15 --until 2025-02-16 --force  # 기존 데이터 무시하고 재수집
 
 # 전체 파이프라인 (fetch → normalize → summarize)
 git-recap run 2025-02-16                # 단일 날짜
@@ -175,7 +177,7 @@ git-recap/
 │   ├── yearly.md
 │   └── query.md
 ├── designs/                    # 모듈별 상세 설계 문서
-├── tests/unit/                 # 296개 단위 테스트
+├── tests/unit/                 # 345개 단위 테스트
 ├── pyproject.toml
 └── .env.example
 ```

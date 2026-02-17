@@ -8,6 +8,7 @@ import pytest
 from git_recap.services.date_utils import (
     catchup_range,
     date_range,
+    monthly_chunks,
     monthly_range,
     weekly_range,
     yearly_range,
@@ -106,3 +107,77 @@ class TestCatchupRange:
         since, until = catchup_range("2026-02-17")
         # since > until means nothing to fetch
         assert since > until
+
+
+class TestMonthlyChunks:
+    def test_single_month_full(self):
+        """전체 1개월."""
+        result = monthly_chunks("2026-02-01", "2026-02-28")
+        assert result == [("2026-02-01", "2026-02-28")]
+
+    def test_partial_start_and_end(self):
+        """시작/끝이 월 중간."""
+        result = monthly_chunks("2020-03-15", "2020-05-10")
+        assert result == [
+            ("2020-03-15", "2020-03-31"),
+            ("2020-04-01", "2020-04-30"),
+            ("2020-05-01", "2020-05-10"),
+        ]
+
+    def test_cross_year(self):
+        """연도 경계."""
+        result = monthly_chunks("2025-11-15", "2026-01-20")
+        assert result == [
+            ("2025-11-15", "2025-11-30"),
+            ("2025-12-01", "2025-12-31"),
+            ("2026-01-01", "2026-01-20"),
+        ]
+
+    def test_leap_year_february(self):
+        """윤년 2월."""
+        result = monthly_chunks("2024-02-01", "2024-02-29")
+        assert result == [("2024-02-01", "2024-02-29")]
+
+    def test_leap_year_cross_feb(self):
+        """윤년 2월 포함 범위."""
+        result = monthly_chunks("2024-01-15", "2024-03-10")
+        assert result == [
+            ("2024-01-15", "2024-01-31"),
+            ("2024-02-01", "2024-02-29"),
+            ("2024-03-01", "2024-03-10"),
+        ]
+
+    def test_empty_range(self):
+        """since > until → 빈 리스트."""
+        result = monthly_chunks("2026-03-01", "2026-02-28")
+        assert result == []
+
+    def test_single_day(self):
+        """1일 범위."""
+        result = monthly_chunks("2026-02-15", "2026-02-15")
+        assert result == [("2026-02-15", "2026-02-15")]
+
+    def test_same_month_partial(self):
+        """같은 달 내 부분 범위."""
+        result = monthly_chunks("2026-02-10", "2026-02-20")
+        assert result == [("2026-02-10", "2026-02-20")]
+
+    def test_six_years_produces_72_chunks(self):
+        """6년 = 72 chunks."""
+        result = monthly_chunks("2020-01-01", "2025-12-31")
+        assert len(result) == 72
+        assert result[0] == ("2020-01-01", "2020-01-31")
+        assert result[-1] == ("2025-12-01", "2025-12-31")
+
+    def test_end_of_month_boundary(self):
+        """월말이 정확히 until."""
+        result = monthly_chunks("2026-01-01", "2026-01-31")
+        assert result == [("2026-01-01", "2026-01-31")]
+
+    def test_start_first_end_last_of_different_months(self):
+        """1일~말일 완전한 2개월."""
+        result = monthly_chunks("2026-01-01", "2026-02-28")
+        assert result == [
+            ("2026-01-01", "2026-01-31"),
+            ("2026-02-01", "2026-02-28"),
+        ]

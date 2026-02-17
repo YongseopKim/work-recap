@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -120,9 +120,7 @@ class TestSearchPrs:
         """동일 PR이 여러 축에서 나오면 1개로 dedup."""
         api_url = "https://ghes/api/v3/repos/org/repo/pulls/1"
         item = _make_search_item(api_url, 1)
-        mock_client.search_issues.return_value = {
-            "total_count": 1, "items": [item]
-        }
+        mock_client.search_issues.return_value = {"total_count": 1, "items": [item]}
         result = fetcher._search_prs("2025-02-16")
         assert len(result) == 1
         assert api_url in result
@@ -148,6 +146,7 @@ class TestSearchPrs:
 
     def test_reviewed_by_fallback_on_422(self, fetcher, mock_client):
         """reviewed-by 422 에러 시 해당 축만 스킵."""
+
         def search_side_effect(query, **kwargs):
             if "reviewed-by:" in query:
                 raise FetchError("Client error 422")
@@ -161,6 +160,7 @@ class TestSearchPrs:
 
     def test_non_reviewed_by_error_propagates(self, fetcher, mock_client):
         """author/commenter 축 에러는 전파."""
+
         def search_side_effect(query, **kwargs):
             if "author:" in query:
                 raise FetchError("Server error")
@@ -173,15 +173,11 @@ class TestSearchPrs:
     def test_pagination(self, fetcher, mock_client):
         """100개 초과 결과 시 다음 페이지 요청."""
         page1_items = [
-            _make_search_item(
-                f"https://ghes/api/v3/repos/org/repo/pulls/{i}", i
-            )
+            _make_search_item(f"https://ghes/api/v3/repos/org/repo/pulls/{i}", i)
             for i in range(100)
         ]
         page2_items = [
-            _make_search_item(
-                f"https://ghes/api/v3/repos/org/repo/pulls/{i}", i
-            )
+            _make_search_item(f"https://ghes/api/v3/repos/org/repo/pulls/{i}", i)
             for i in range(100, 120)
         ]
 
@@ -297,9 +293,7 @@ class TestFetch:
     def test_full_pipeline(self, fetcher, mock_client, test_config):
         api_url = "https://ghes/api/v3/repos/org/repo/pulls/1"
         item = _make_search_item(api_url, 1)
-        mock_client.search_issues.return_value = {
-            "total_count": 1, "items": [item]
-        }
+        mock_client.search_issues.return_value = {"total_count": 1, "items": [item]}
 
         result = fetcher.fetch("2025-02-16")
 
@@ -321,9 +315,7 @@ class TestFetch:
     def test_enrich_failure_skips_pr(self, fetcher, mock_client, test_config):
         api_url = "https://ghes/api/v3/repos/org/repo/pulls/1"
         item = _make_search_item(api_url, 1)
-        mock_client.search_issues.return_value = {
-            "total_count": 1, "items": [item]
-        }
+        mock_client.search_issues.return_value = {"total_count": 1, "items": [item]}
         mock_client.get_pr.side_effect = FetchError("timeout")
 
         result = fetcher.fetch("2025-02-16")
@@ -431,6 +423,7 @@ class TestFetchCommits:
         page2 = [_make_commit_search_item(sha=f"sha{i}") for i in range(100, 110)]
 
         call_count = 0
+
         def search_side_effect(query, page=1, per_page=100):
             nonlocal call_count
             call_count += 1
@@ -543,10 +536,18 @@ class TestFetchIssues:
         mock_client.search_issues.side_effect = search_side_effect
         mock_client.get_issue.return_value = _make_issue_detail()
         mock_client.get_issue_comments.return_value = [
-            {"user": {"login": "human"}, "body": "Good point",
-             "created_at": "2025-02-16T10:00:00Z", "html_url": "u1"},
-            {"user": {"login": "ci-bot"}, "body": "Build passed",
-             "created_at": "2025-02-16T10:00:00Z", "html_url": "u2"},
+            {
+                "user": {"login": "human"},
+                "body": "Good point",
+                "created_at": "2025-02-16T10:00:00Z",
+                "html_url": "u1",
+            },
+            {
+                "user": {"login": "ci-bot"},
+                "body": "Build passed",
+                "created_at": "2025-02-16T10:00:00Z",
+                "html_url": "u2",
+            },
         ]
 
         result = fetcher._fetch_issues("2025-02-16")
@@ -595,7 +596,8 @@ class TestFetchIntegration:
 
         mock_client.search_issues.side_effect = search_issues_side_effect
         mock_client.search_commits.return_value = {
-            "total_count": 1, "items": [commit_item],
+            "total_count": 1,
+            "items": [commit_item],
         }
         mock_client.get_commit.return_value = _make_commit_detail()
         mock_client.get_issue.return_value = _make_issue_detail()
@@ -617,6 +619,234 @@ class TestFetchIntegration:
 
 
 # ── 타입 필터링 테스트 ──
+
+
+class TestSearchPrsRange:
+    def test_date_range_in_query(self, fetcher, mock_client):
+        """쿼리에 날짜 범위 포함."""
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        fetcher._search_prs_range("2025-02-14", "2025-02-16")
+        calls = [str(c) for c in mock_client.search_issues.call_args_list]
+        assert any("updated:2025-02-14..2025-02-16" in c for c in calls)
+
+    def test_three_axes(self, fetcher, mock_client):
+        """3축 쿼리 모두 호출."""
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        fetcher._search_prs_range("2025-02-14", "2025-02-16")
+        calls = [str(c) for c in mock_client.search_issues.call_args_list]
+        assert any("author:testuser" in c for c in calls)
+        assert any("reviewed-by:testuser" in c for c in calls)
+        assert any("commenter:testuser" in c for c in calls)
+
+    def test_dedup(self, fetcher, mock_client):
+        """동일 PR dedup."""
+        api_url = "https://ghes/api/v3/repos/org/repo/pulls/1"
+        item = _make_search_item(api_url, 1)
+        mock_client.search_issues.return_value = {"total_count": 1, "items": [item]}
+        result = fetcher._search_prs_range("2025-02-14", "2025-02-16")
+        assert len(result) == 1
+
+    def test_reviewed_by_422_fallback(self, fetcher, mock_client):
+        """reviewed-by 422 시 스킵."""
+
+        def side_effect(query, **kwargs):
+            if "reviewed-by:" in query:
+                raise FetchError("422")
+            return {"total_count": 0, "items": []}
+
+        mock_client.search_issues.side_effect = side_effect
+        result = fetcher._search_prs_range("2025-02-14", "2025-02-16")
+        assert len(result) == 0
+
+    def test_warns_on_1000_results(self, fetcher, mock_client, caplog):
+        """수집 결과 >= 1000 시 warning."""
+        # 10 pages of 100 items = 1000 items total
+        pages = {
+            i: [
+                _make_search_item(
+                    f"https://ghes/api/v3/repos/org/repo/pulls/{(i - 1) * 100 + j}",
+                    (i - 1) * 100 + j,
+                )
+                for j in range(100)
+            ]
+            for i in range(1, 11)
+        }
+
+        def side_effect(query, page=1, per_page=100):
+            if page in pages:
+                return {"total_count": 1000, "items": pages[page]}
+            return {"total_count": 1000, "items": []}
+
+        mock_client.search_issues.side_effect = side_effect
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            fetcher._search_prs_range("2025-02-14", "2025-02-16")
+        assert any("truncated" in r.message.lower() or "1000" in r.message for r in caplog.records)
+
+
+class TestSearchCommitsRange:
+    def test_date_range_in_query(self, fetcher, mock_client):
+        mock_client.search_commits.return_value = {"total_count": 0, "items": []}
+        fetcher._search_commits_range("2025-02-14", "2025-02-16")
+        call_args = str(mock_client.search_commits.call_args)
+        assert "committer-date:2025-02-14..2025-02-16" in call_args
+
+    def test_returns_items(self, fetcher, mock_client):
+        items = [_make_commit_search_item(sha="abc")]
+        mock_client.search_commits.return_value = {"total_count": 1, "items": items}
+        result = fetcher._search_commits_range("2025-02-14", "2025-02-16")
+        assert len(result) == 1
+        assert result[0]["sha"] == "abc"
+
+    def test_search_failure_returns_empty(self, fetcher, mock_client):
+        mock_client.search_commits.side_effect = FetchError("not supported")
+        result = fetcher._search_commits_range("2025-02-14", "2025-02-16")
+        assert result == []
+
+    def test_warns_on_1000_results(self, fetcher, mock_client, caplog):
+        """수집 결과 >= 1000 시 warning."""
+        pages = {
+            i: [_make_commit_search_item(sha=f"sha{(i - 1) * 100 + j}") for j in range(100)]
+            for i in range(1, 11)
+        }
+
+        def side_effect(query, page=1, per_page=100):
+            if page in pages:
+                return {"total_count": 1000, "items": pages[page]}
+            return {"total_count": 1000, "items": []}
+
+        mock_client.search_commits.side_effect = side_effect
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            fetcher._search_commits_range("2025-02-14", "2025-02-16")
+        assert any("truncated" in r.message.lower() or "1000" in r.message for r in caplog.records)
+
+
+class TestSearchIssuesRange:
+    def test_date_range_in_query(self, fetcher, mock_client):
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        fetcher._search_issues_range("2025-02-14", "2025-02-16")
+        calls = [str(c) for c in mock_client.search_issues.call_args_list]
+        assert any("updated:2025-02-14..2025-02-16" in c for c in calls)
+
+    def test_two_axes(self, fetcher, mock_client):
+        """author + commenter 2축."""
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        fetcher._search_issues_range("2025-02-14", "2025-02-16")
+        assert mock_client.search_issues.call_count == 2
+
+    def test_dedup(self, fetcher, mock_client):
+        item = _make_issue_search_item(10)
+        mock_client.search_issues.return_value = {"total_count": 1, "items": [item]}
+        result = fetcher._search_issues_range("2025-02-14", "2025-02-16")
+        assert len(result) == 1
+
+    def test_search_failure_graceful(self, fetcher, mock_client):
+        mock_client.search_issues.side_effect = FetchError("server error")
+        result = fetcher._search_issues_range("2025-02-14", "2025-02-16")
+        assert result == {}
+
+    def test_warns_on_1000_results(self, fetcher, mock_client, caplog):
+        """수집 결과 >= 1000 시 warning."""
+        pages = {
+            i: [_make_issue_search_item(number=(i - 1) * 100 + j) for j in range(100)]
+            for i in range(1, 11)
+        }
+
+        def side_effect(query, page=1, per_page=100):
+            if page in pages:
+                return {"total_count": 1000, "items": pages[page]}
+            return {"total_count": 1000, "items": []}
+
+        mock_client.search_issues.side_effect = side_effect
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            fetcher._search_issues_range("2025-02-14", "2025-02-16")
+        assert any("truncated" in r.message.lower() or "1000" in r.message for r in caplog.records)
+
+
+class TestBucketByDate:
+    def test_single_pr(self):
+        pr_map = {
+            "url1": {"updated_at": "2025-02-16T15:00:00Z", "title": "PR1"},
+        }
+        result = FetcherService._bucket_by_date(pr_map, [], {})
+        assert "2025-02-16" in result
+        assert "url1" in result["2025-02-16"]["prs"]
+        assert result["2025-02-16"]["commits"] == []
+        assert result["2025-02-16"]["issues"] == {}
+
+    def test_single_commit(self):
+        commit = {"commit": {"committer": {"date": "2025-02-16T10:00:00Z"}}, "sha": "abc"}
+        result = FetcherService._bucket_by_date({}, [commit], {})
+        assert "2025-02-16" in result
+        assert len(result["2025-02-16"]["commits"]) == 1
+
+    def test_single_issue(self):
+        issue_map = {
+            "url2": {"updated_at": "2025-02-16T12:00:00Z", "title": "Issue1"},
+        }
+        result = FetcherService._bucket_by_date({}, [], issue_map)
+        assert "2025-02-16" in result
+        assert "url2" in result["2025-02-16"]["issues"]
+
+    def test_multiple_dates(self):
+        pr_map = {
+            "url1": {"updated_at": "2025-02-15T10:00:00Z"},
+            "url2": {"updated_at": "2025-02-16T10:00:00Z"},
+        }
+        commits = [
+            {"commit": {"committer": {"date": "2025-02-15T08:00:00Z"}}, "sha": "a"},
+            {"commit": {"committer": {"date": "2025-02-16T09:00:00Z"}}, "sha": "b"},
+        ]
+        result = FetcherService._bucket_by_date(pr_map, commits, {})
+        assert len(result) == 2
+        assert "url1" in result["2025-02-15"]["prs"]
+        assert "url2" in result["2025-02-16"]["prs"]
+        assert len(result["2025-02-15"]["commits"]) == 1
+        assert len(result["2025-02-16"]["commits"]) == 1
+
+    def test_empty_inputs(self):
+        result = FetcherService._bucket_by_date({}, [], {})
+        assert result == {}
+
+    def test_mixed_types_same_date(self):
+        pr_map = {"url1": {"updated_at": "2025-02-16T10:00:00Z"}}
+        commits = [{"commit": {"committer": {"date": "2025-02-16T11:00:00Z"}}, "sha": "x"}]
+        issue_map = {"url2": {"updated_at": "2025-02-16T12:00:00Z"}}
+        result = FetcherService._bucket_by_date(pr_map, commits, issue_map)
+        assert len(result) == 1
+        bucket = result["2025-02-16"]
+        assert len(bucket["prs"]) == 1
+        assert len(bucket["commits"]) == 1
+        assert len(bucket["issues"]) == 1
+
+
+class TestIsDateFetched:
+    def test_all_files_exist(self, fetcher, test_config):
+        """3개 파일 모두 존재 → True."""
+        raw_dir = test_config.date_raw_dir("2025-02-16")
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / "prs.json").write_text("[]")
+        (raw_dir / "commits.json").write_text("[]")
+        (raw_dir / "issues.json").write_text("[]")
+        assert fetcher._is_date_fetched("2025-02-16") is True
+
+    def test_missing_one_file(self, fetcher, test_config):
+        """파일 1개 누락 → False."""
+        raw_dir = test_config.date_raw_dir("2025-02-16")
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / "prs.json").write_text("[]")
+        (raw_dir / "commits.json").write_text("[]")
+        # issues.json 없음
+        assert fetcher._is_date_fetched("2025-02-16") is False
+
+    def test_dir_not_exist(self, fetcher, test_config):
+        """디렉토리 자체가 없음 → False."""
+        assert fetcher._is_date_fetched("2099-01-01") is False
 
 
 class TestFetchWithTypes:
@@ -683,3 +913,141 @@ class TestFetchWithTypes:
         mock_client.search_issues.return_value = {"total_count": 0, "items": []}
         result = fetcher.fetch("2025-02-16", types={"prs"})
         assert isinstance(result["prs"], Path)
+
+
+# ── fetch_range 테스트 ──
+
+
+class TestFetchRange:
+    def _setup_empty_search(self, mock_client):
+        """빈 검색 결과 세팅."""
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        mock_client.search_commits.return_value = {"total_count": 0, "items": []}
+
+    def test_basic_range(self, fetcher, mock_client, test_config):
+        """기본 범위 fetch — 날짜별 빈 파일 생성."""
+        self._setup_empty_search(mock_client)
+        results = fetcher.fetch_range("2025-02-14", "2025-02-16")
+        assert len(results) == 3
+        for r in results:
+            assert r["status"] == "success"
+        # 3개 날짜 모두 파일 존재
+        for d in ["2025-02-14", "2025-02-15", "2025-02-16"]:
+            raw_dir = test_config.date_raw_dir(d)
+            assert (raw_dir / "prs.json").exists()
+            assert (raw_dir / "commits.json").exists()
+            assert (raw_dir / "issues.json").exists()
+
+    def test_skip_existing(self, fetcher, mock_client, test_config):
+        """이미 fetch한 날짜는 skip."""
+        self._setup_empty_search(mock_client)
+        # 2025-02-15를 미리 생성
+        raw_dir = test_config.date_raw_dir("2025-02-15")
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / "prs.json").write_text("[]")
+        (raw_dir / "commits.json").write_text("[]")
+        (raw_dir / "issues.json").write_text("[]")
+
+        results = fetcher.fetch_range("2025-02-14", "2025-02-16")
+        statuses = {r["date"]: r["status"] for r in results}
+        assert statuses["2025-02-15"] == "skipped"
+        assert statuses["2025-02-14"] == "success"
+        assert statuses["2025-02-16"] == "success"
+
+    def test_force_override(self, fetcher, mock_client, test_config):
+        """force=True → 기존 데이터 무시하고 재수집."""
+        self._setup_empty_search(mock_client)
+        # 미리 생성
+        raw_dir = test_config.date_raw_dir("2025-02-15")
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / "prs.json").write_text("[]")
+        (raw_dir / "commits.json").write_text("[]")
+        (raw_dir / "issues.json").write_text("[]")
+
+        results = fetcher.fetch_range("2025-02-14", "2025-02-16", force=True)
+        statuses = {r["date"]: r["status"] for r in results}
+        assert statuses["2025-02-15"] == "success"  # force → not skipped
+
+    def test_empty_dates_saved(self, fetcher, mock_client, test_config):
+        """검색 결과 없는 날짜도 빈 JSON 저장."""
+        self._setup_empty_search(mock_client)
+        results = fetcher.fetch_range("2025-02-14", "2025-02-14")
+        assert len(results) == 1
+        assert results[0]["status"] == "success"
+        raw_dir = test_config.date_raw_dir("2025-02-14")
+        data = load_json(raw_dir / "prs.json")
+        assert data == []
+
+    def test_checkpoint_per_date(self, fetcher, mock_client, test_config):
+        """성공한 날짜마다 checkpoint 갱신."""
+        self._setup_empty_search(mock_client)
+        fetcher.fetch_range("2025-02-14", "2025-02-16")
+        data = load_json(test_config.checkpoints_path)
+        assert data["last_fetch_date"] == "2025-02-16"
+
+    def test_types_filter(self, fetcher, mock_client, test_config):
+        """types 필터 전달 시 해당 타입만 검색/저장."""
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        results = fetcher.fetch_range("2025-02-14", "2025-02-14", types={"prs"})
+        assert len(results) == 1
+        # commits search 미호출
+        mock_client.search_commits.assert_not_called()
+
+    @patch("git_recap.services.fetcher.monthly_chunks")
+    def test_monthly_chunking(self, mock_chunks, fetcher, mock_client, test_config):
+        """monthly_chunks를 호출하여 월 단위 chunk."""
+        mock_chunks.return_value = [("2025-02-01", "2025-02-28")]
+        self._setup_empty_search(mock_client)
+        fetcher.fetch_range("2025-02-01", "2025-02-28")
+        mock_chunks.assert_called_once_with("2025-02-01", "2025-02-28")
+
+    def test_single_day_range(self, fetcher, mock_client, test_config):
+        """1일 범위도 정상 동작."""
+        self._setup_empty_search(mock_client)
+        results = fetcher.fetch_range("2025-02-16", "2025-02-16")
+        assert len(results) == 1
+        assert results[0]["date"] == "2025-02-16"
+        assert results[0]["status"] == "success"
+
+    def test_failure_resilience(self, fetcher, mock_client, test_config):
+        """한 날짜 실패해도 다음 날짜 계속 진행."""
+        call_count = 0
+
+        def search_side_effect(query, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # 첫 번째 chunk의 PR search에서 실패
+            if call_count <= 3:  # first 3 calls (3 axes for PR)
+                raise FetchError("temporary error")
+            return {"total_count": 0, "items": []}
+
+        mock_client.search_issues.side_effect = search_side_effect
+        mock_client.search_commits.return_value = {"total_count": 0, "items": []}
+
+        results = fetcher.fetch_range("2025-02-14", "2025-02-14")
+        # Failure should be caught, date marked as failed
+        assert any(r["status"] == "failed" for r in results)
+
+    def test_returns_list_of_dicts(self, fetcher, mock_client, test_config):
+        """반환값 형식 검증."""
+        self._setup_empty_search(mock_client)
+        results = fetcher.fetch_range("2025-02-14", "2025-02-15")
+        assert isinstance(results, list)
+        for r in results:
+            assert "date" in r
+            assert "status" in r
+            assert r["status"] in ("success", "skipped", "failed")
+
+    def test_with_pr_data(self, fetcher, mock_client, test_config):
+        """PR 데이터 있는 경우 enrich + save."""
+        api_url = "https://ghes/api/v3/repos/org/repo/pulls/1"
+        pr_item = _make_search_item(api_url, 1)
+        pr_item["updated_at"] = "2025-02-14T15:00:00Z"
+        mock_client.search_issues.return_value = {"total_count": 1, "items": [pr_item]}
+        mock_client.search_commits.return_value = {"total_count": 0, "items": []}
+
+        results = fetcher.fetch_range("2025-02-14", "2025-02-14")
+        assert results[0]["status"] == "success"
+        raw_dir = test_config.date_raw_dir("2025-02-14")
+        prs = load_json(raw_dir / "prs.json")
+        assert len(prs) == 1

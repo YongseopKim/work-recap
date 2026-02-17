@@ -8,6 +8,7 @@ from pathlib import Path
 from git_recap.config import AppConfig
 from git_recap.exceptions import FetchError
 from git_recap.infra.ghes_client import GHESClient
+from git_recap.services.date_utils import date_range, monthly_chunks
 from git_recap.models import (
     Comment,
     CommitRaw,
@@ -37,9 +38,7 @@ class FetcherService:
         self._client = ghes_client
         self._username = config.username
 
-    def fetch(
-        self, target_date: str, types: set[str] | None = None
-    ) -> dict[str, Path]:
+    def fetch(self, target_date: str, types: set[str] | None = None) -> dict[str, Path]:
         """
         지정 날짜의 PR/Commit/Issue 활동을 수집하여 파일로 저장.
 
@@ -76,9 +75,208 @@ class FetcherService:
 
         logger.info(
             "Fetched %s for %s → %s",
-            ", ".join(active), target_date, results,
+            ", ".join(active),
+            target_date,
+            results,
         )
         return results
+
+    def fetch_range(
+        self,
+        since: str,
+        until: str,
+        types: set[str] | None = None,
+        force: bool = False,
+    ) -> list[dict]:
+        """월 단위 chunk 검색 → 날짜별 enrich/save. 실패 시 계속 진행."""
+        active = types or {"prs", "commits", "issues"}
+        chunks = monthly_chunks(since, until)
+        all_dates = date_range(since, until)
+        results: list[dict] = []
+        processed: set[str] = set()
+
+        for chunk_start, chunk_end in chunks:
+            try:
+                # Range search per chunk
+                pr_map: dict[str, dict] = {}
+                commit_items: list[dict] = []
+                issue_map: dict[str, dict] = {}
+
+                if "prs" in active:
+                    pr_map = self._search_prs_range(chunk_start, chunk_end)
+                if "commits" in active:
+                    commit_items = self._search_commits_range(chunk_start, chunk_end)
+                if "issues" in active:
+                    issue_map = self._search_issues_range(chunk_start, chunk_end)
+
+                # Bucket by date
+                buckets = self._bucket_by_date(pr_map, commit_items, issue_map)
+
+                # Process each date in the chunk
+                chunk_dates = date_range(chunk_start, chunk_end)
+                for d in chunk_dates:
+                    if d in processed:
+                        continue
+                    processed.add(d)
+                    try:
+                        if not force and self._is_date_fetched(d):
+                            results.append({"date": d, "status": "skipped"})
+                            continue
+
+                        bucket = buckets.get(d, {"prs": {}, "commits": [], "issues": {}})
+                        self._save_date_from_bucket(d, bucket, active)
+                        self._update_checkpoint(d)
+                        results.append({"date": d, "status": "success"})
+                    except Exception as e:
+                        logger.warning("Failed to process date %s: %s", d, e)
+                        results.append({"date": d, "status": "failed", "error": str(e)})
+
+            except Exception as e:
+                # Chunk-level failure: mark all unprocessed dates in chunk as failed
+                chunk_dates = date_range(chunk_start, chunk_end)
+                for d in chunk_dates:
+                    if d not in processed:
+                        processed.add(d)
+                        results.append({"date": d, "status": "failed", "error": str(e)})
+
+        # Handle dates not covered by any chunk (shouldn't happen but safety)
+        for d in all_dates:
+            if d not in processed:
+                results.append({"date": d, "status": "failed", "error": "not in any chunk"})
+
+        return results
+
+    def _save_date_from_bucket(self, date_str: str, bucket: dict, active: set[str]) -> None:
+        """bucket 데이터를 날짜별 파일로 enrich+save."""
+        if "prs" in active:
+            prs: list[PRRaw] = []
+            for pr_api_url, pr_basic in bucket["prs"].items():
+                try:
+                    prs.append(self._enrich(pr_basic))
+                except FetchError:
+                    logger.warning("Failed to enrich PR %s, skipping", pr_api_url)
+            self._save(date_str, prs)
+
+        if "commits" in active:
+            commits: list[CommitRaw] = []
+            for item in bucket["commits"]:
+                try:
+                    commits.append(self._enrich_commit(item))
+                except Exception:
+                    logger.warning(
+                        "Failed to enrich commit %s, skipping",
+                        item.get("sha", "unknown"),
+                    )
+            self._save_commits(date_str, commits)
+
+        if "issues" in active:
+            issues: list[IssueRaw] = []
+            for api_url, item in bucket["issues"].items():
+                try:
+                    issues.append(self._enrich_issue(item))
+                except Exception:
+                    logger.warning("Failed to enrich issue %s, skipping", api_url)
+            self._save_issues(date_str, issues)
+
+    @staticmethod
+    def _bucket_by_date(
+        pr_map: dict[str, dict],
+        commit_items: list[dict],
+        issue_map: dict[str, dict],
+    ) -> dict[str, dict]:
+        """검색 결과를 날짜별로 분류."""
+        buckets: dict[str, dict] = {}
+
+        def ensure_bucket(d: str) -> dict:
+            if d not in buckets:
+                buckets[d] = {"prs": {}, "commits": [], "issues": {}}
+            return buckets[d]
+
+        for url, item in pr_map.items():
+            d = item["updated_at"][:10]
+            ensure_bucket(d)["prs"][url] = item
+
+        for item in commit_items:
+            d = item["commit"]["committer"]["date"][:10]
+            ensure_bucket(d)["commits"].append(item)
+
+        for url, item in issue_map.items():
+            d = item["updated_at"][:10]
+            ensure_bucket(d)["issues"][url] = item
+
+        return buckets
+
+    def _is_date_fetched(self, date_str: str) -> bool:
+        """prs.json + commits.json + issues.json 3개 모두 존재하면 True."""
+        raw_dir = self._config.date_raw_dir(date_str)
+        return all((raw_dir / f).exists() for f in ("prs.json", "commits.json", "issues.json"))
+
+    # ── Range 검색 ──
+
+    @staticmethod
+    def _warn_if_truncated(count: int, query: str) -> None:
+        """수집된 결과가 1000건 이상이면 truncation warning."""
+        if count >= 1000:
+            logger.warning(
+                "Search results may be truncated (%d >= 1000) for query: %s",
+                count,
+                query,
+            )
+
+    def _search_prs_range(self, start: str, end: str) -> dict[str, dict]:
+        """날짜 범위로 PR 3축 검색 + dedup."""
+        axes = [
+            f"author:{self._username}",
+            f"reviewed-by:{self._username}",
+            f"commenter:{self._username}",
+        ]
+        pr_map: dict[str, dict] = {}
+        for qualifier in axes:
+            query = f"type:pr {qualifier} updated:{start}..{end}"
+            try:
+                items = self._search_all_pages(query)
+                self._warn_if_truncated(len(items), query)
+            except FetchError:
+                if "reviewed-by" in qualifier:
+                    logger.warning("reviewed-by qualifier not supported, skipping")
+                    continue
+                raise
+            for item in items:
+                api_url = item.get("pull_request", {}).get("url", item["url"])
+                if api_url not in pr_map:
+                    pr_map[api_url] = item
+        return pr_map
+
+    def _search_commits_range(self, start: str, end: str) -> list[dict]:
+        """날짜 범위로 커밋 검색."""
+        query = f"author:{self._username} committer-date:{start}..{end}"
+        try:
+            items = self._search_all_commit_pages(query)
+            self._warn_if_truncated(len(items), query)
+            return items
+        except FetchError:
+            logger.warning("Commit range search not supported, skipping")
+            return []
+
+    def _search_issues_range(self, start: str, end: str) -> dict[str, dict]:
+        """날짜 범위로 Issue 2축 검색 + dedup."""
+        axes = [
+            f"type:issue author:{self._username} updated:{start}..{end}",
+            f"type:issue commenter:{self._username} updated:{start}..{end}",
+        ]
+        issue_map: dict[str, dict] = {}
+        for query in axes:
+            try:
+                items = self._search_all_pages(query)
+                self._warn_if_truncated(len(items), query)
+            except FetchError:
+                logger.warning("Issue range search failed for query '%s', skipping", query)
+                continue
+            for item in items:
+                api_url = item["url"]
+                if api_url not in issue_map:
+                    issue_map[api_url] = item
+        return issue_map
 
     # ── 3축 검색 + dedup ──
 
@@ -138,12 +336,8 @@ class FetcherService:
         raw_comments = self._client.get_pr_comments(owner, repo, number)
         raw_reviews = self._client.get_pr_reviews(owner, repo, number)
 
-        filtered_comments = [
-            c for c in raw_comments if not self._is_noise_comment(c)
-        ]
-        filtered_reviews = [
-            r for r in raw_reviews if not self._is_noise_review(r)
-        ]
+        filtered_comments = [c for c in raw_comments if not self._is_noise_comment(c)]
+        filtered_reviews = [r for r in raw_reviews if not self._is_noise_review(r)]
 
         return PRRaw(
             url=pr_detail["html_url"],
@@ -215,8 +409,7 @@ class FetcherService:
             try:
                 commits.append(self._enrich_commit(item))
             except Exception:
-                logger.warning("Failed to enrich commit %s, skipping",
-                               item.get("sha", "unknown"))
+                logger.warning("Failed to enrich commit %s, skipping", item.get("sha", "unknown"))
         return commits
 
     def _search_all_commit_pages(self, query: str) -> list[dict]:
@@ -301,9 +494,7 @@ class FetcherService:
         detail = self._client.get_issue(owner, repo, number)
         raw_comments = self._client.get_issue_comments(owner, repo, number)
 
-        filtered_comments = [
-            c for c in raw_comments if not self._is_noise_comment(c)
-        ]
+        filtered_comments = [c for c in raw_comments if not self._is_noise_comment(c)]
 
         return IssueRaw(
             url=detail["html_url"],

@@ -430,13 +430,41 @@ class FetcherService:
                 issues.json (list[IssueRaw])
         멱등성: 동일 날짜 재실행 시 파일 덮어쓰기
         """
+
+    def fetch_range(
+        self, since: str, until: str,
+        types: set[str] | None = None,
+        force: bool = False,
+    ) -> list[dict]:
+        """
+        월 단위 chunk 검색 → 날짜별 enrich/save. 실패 시 계속 진행.
+
+        Args:
+            since, until: "YYYY-MM-DD" 범위 (inclusive)
+            types: 수집할 타입. None이면 전체.
+            force: True이면 이미 fetch한 날짜도 재수집.
+
+        Returns:
+            [{"date": "...", "status": "success"|"skipped"|"failed", ...}]
+
+        day-by-day fetch 대비 ~30배 빠름 (월 단위 Search API 호출로 최적화).
+        이미 fetch한 날짜(3개 파일 모두 존재)는 skip (force=True 시 무시).
+        """
 ```
 
-**내부 동작:**
+**`fetch()` 내부 동작:**
 1. **PR 파이프라인**: Search API 3축 쿼리 (`author`, `reviewed-by`, `commenter`) → dedup → enrich (files, comments, reviews) → 노이즈 필터링 → `prs.json`
 2. **Commit 파이프라인**: Commit Search API (`author`, `committer-date`) → enrich (`get_commit`으로 files 포함) → `commits.json` (GHES 미지원 시 graceful skip)
 3. **Issue 파이프라인**: Search API 2축 (`author`, `commenter`) → dedup → enrich (`get_issue` + `get_issue_comments`) → 노이즈 필터링 → `issues.json`
 4. checkpoints.json 갱신 (마지막 성공 날짜 기록)
+
+**`fetch_range()` 내부 동작:**
+1. `monthly_chunks(since, until)` → 월 단위 (start, end) 쌍 목록
+2. 각 chunk에 대해 `_search_prs_range()`, `_search_commits_range()`, `_search_issues_range()` 호출 (날짜 범위 검색, 6 API calls/chunk)
+3. `_bucket_by_date()` → 검색 결과를 `updated_at`/`committer_date` 기준으로 날짜별 분류
+4. 각 날짜에 대해: `_is_date_fetched()` → skip 판단 → enrich + save → checkpoint 갱신
+5. 실패한 날짜는 기록하고 다음 날짜로 계속 진행 (resilience)
+6. 검색 결과 >= 1000건 시 truncation warning 로깅
 
 ### 6.3 NormalizerService
 

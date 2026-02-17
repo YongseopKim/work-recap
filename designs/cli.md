@@ -29,7 +29,7 @@ Typer 기반 CLI로 각 서비스를 개별 또는 파이프라인으로 실행�
 ## 커맨드 구조
 
 ```
-git-recap fetch [DATE] [--type TYPE] [--since/--until | --weekly | --monthly | --yearly]
+git-recap fetch [DATE] [--type TYPE] [--force] [--since/--until | --weekly | --monthly | --yearly]
 git-recap normalize [DATE] [--since/--until | --weekly | --monthly | --yearly]
 git-recap summarize daily [DATE] [--since/--until | --weekly | --monthly | --yearly]
 git-recap summarize weekly YEAR WEEK       # Weekly summary 생성
@@ -54,7 +54,15 @@ fetch, normalize, summarize daily는 아래 날짜 범위 옵션을 공유한다
 | `--monthly` | YEAR-MONTH | 해당 월 전체 |
 | `--yearly` | YEAR | 해당 연도 전체 |
 
-fetch 전용: `--type TYPE` (prs, commits, issues), 인자 없으면 catch-up 모드
+fetch 전용: `--type TYPE` (prs, commits, issues), `--force` / `-f` (기존 데이터 무시 재수집), 인자 없으면 catch-up 모드
+
+### 다중 날짜 최적화 (fetch_range)
+
+다중 날짜 범위(`--since/--until`, `--weekly`, `--monthly`, `--yearly`, catch-up)일 때
+`fetch_range()`를 사용하여 월 단위 Search API 호출로 최적화한다.
+출력 형식: `Fetched N day(s): X succeeded, Y skipped, Z failed`
+
+단일 날짜는 기존 `fetch()` 유지.
 
 ---
 
@@ -186,6 +194,7 @@ def fetch(
     weekly: str = typer.Option(None, help="YEAR-WEEK, e.g. 2026-7"),
     monthly: str = typer.Option(None, help="YEAR-MONTH, e.g. 2026-2"),
     yearly: int = typer.Option(None, help="Year, e.g. 2026"),
+    force: bool = typer.Option(False, "--force", "-f", help="Re-fetch even if data exists"),
 ) -> None:
     """Fetch PR/Commit/Issue data from GHES."""
     # 1. --type 검증
@@ -198,8 +207,11 @@ def fetch(
 
     # 2. 날짜 범위 결정
     dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
+    endpoints = _resolve_range_endpoints(target_date, since, until, weekly, monthly, yearly)
+
+    # catch-up 모드
+    catchup_endpoints: tuple[str, str] | None = None
     if dates is None:
-        # catch-up 모드: checkpoint 있으면 이후 날짜들, 없으면 오늘만
         config = _get_config()
         last = _read_last_fetch_date(config)
         if last:
@@ -208,6 +220,7 @@ def fetch(
             if not dates:
                 typer.echo("Already up to date.")
                 return
+            catchup_endpoints = (s, u)
         else:
             dates = [date.today().isoformat()]
 
@@ -216,15 +229,31 @@ def fetch(
     try:
         with _get_ghes_client(config) as client:
             service = FetcherService(config, client)
-            all_results: list[dict[str, Path]] = []
-            for d in dates:
-                result = service.fetch(d, types=types)
-                all_results.append(result)
 
-        typer.echo(f"Fetched {len(dates)} day(s)")
-        for d, result in zip(dates, all_results):
-            for type_name, path in sorted(result.items()):
-                typer.echo(f"  {d} {type_name}: {path}")
+            # 다중 날짜 → fetch_range (월 단위 최적화)
+            range_ep = endpoints or catchup_endpoints
+            if len(dates) > 1 and range_ep:
+                range_results = service.fetch_range(
+                    range_ep[0], range_ep[1], types=types, force=force,
+                )
+                succeeded = sum(1 for r in range_results if r["status"] == "success")
+                skipped = sum(1 for r in range_results if r["status"] == "skipped")
+                failed = sum(1 for r in range_results if r["status"] == "failed")
+                typer.echo(
+                    f"Fetched {len(range_results)} day(s): "
+                    f"{succeeded} succeeded, {skipped} skipped, {failed} failed"
+                )
+                for r in range_results:
+                    mark = {"success": "+", "skipped": "=", "failed": "!"}[r["status"]]
+                    typer.echo(f"  {mark} {r['date']}: {r['status']}")
+                if failed > 0:
+                    raise typer.Exit(code=1)
+            else:
+                # 단일 날짜
+                result = service.fetch(dates[0], types=types)
+                typer.echo("Fetched 1 day(s)")
+                for type_name, path in sorted(result.items()):
+                    typer.echo(f"  {dates[0]} {type_name}: {path}")
     except GitRecapError as e:
         _handle_error(e)
 
