@@ -103,7 +103,9 @@ class GHESClient:
         now = time.monotonic()
         elapsed = now - self._last_search_time
         if self._last_search_time > 0 and elapsed < self._search_interval:
-            time.sleep(self._search_interval - elapsed)
+            wait = self._search_interval - elapsed
+            logger.debug("Search throttle: sleeping %.1fs", wait)
+            time.sleep(wait)
         self._last_search_time = time.monotonic()
 
     def _request_with_retry(
@@ -117,12 +119,14 @@ class GHESClient:
 
         for attempt in range(MAX_RETRIES + 1):
             try:
+                logger.debug("Request: %s %s params=%s", method, path, params)
                 response = self._client.request(
                     method,
                     path,
                     params=params,
                     headers=extra_headers,
                 )
+                logger.debug("Response: %s %s → %d", method, path, response.status_code)
 
                 if response.status_code == 429:
                     retry_after = self._get_retry_after(response)
@@ -221,4 +225,5 @@ class GHESClient:
                 all_items.append(response_data)
                 break
 
+        logger.debug("Paginate %s → %d items (%d pages)", path, len(all_items), page)
         return all_items

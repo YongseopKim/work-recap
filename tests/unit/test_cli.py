@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -6,6 +7,7 @@ from typer.testing import CliRunner
 
 from git_recap.cli.main import app
 from git_recap.exceptions import FetchError, NormalizeError, SummarizeError, StepFailedError
+from git_recap.logging_config import reset_logging
 
 runner = CliRunner()
 
@@ -35,6 +37,14 @@ def _fetch_result(**overrides):
     }
     base.update(overrides)
     return base
+
+
+@pytest.fixture(autouse=True)
+def _reset_logging_state():
+    """Reset logging config between tests to avoid idempotent guard interference."""
+    reset_logging()
+    yield
+    reset_logging()
 
 
 @pytest.fixture(autouse=True)
@@ -1300,3 +1310,24 @@ class TestRunTypeFilter:
         mock_orch.return_value.run_range.assert_called_once_with(
             "2025-02-14", "2025-02-14", force=True, types={"issues"}
         )
+
+
+# ── Verbose Flag 테스트 ──
+
+
+class TestVerboseFlag:
+    @patch("git_recap.cli.main.FetcherService")
+    def test_verbose_sets_debug_level(self, mock_cls):
+        """--verbose sets git_recap logger to DEBUG."""
+        mock_cls.return_value.fetch.return_value = _fetch_result()
+        runner.invoke(app, ["-v", "fetch", "2025-02-16"])
+        root = logging.getLogger("git_recap")
+        assert root.level == logging.DEBUG
+
+    @patch("git_recap.cli.main.FetcherService")
+    def test_default_sets_info_level(self, mock_cls):
+        """Without --verbose, git_recap logger is INFO."""
+        mock_cls.return_value.fetch.return_value = _fetch_result()
+        runner.invoke(app, ["fetch", "2025-02-16"])
+        root = logging.getLogger("git_recap")
+        assert root.level == logging.INFO

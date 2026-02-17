@@ -1,5 +1,7 @@
 """자유 질문 엔드포인트 — async job."""
 
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel
 
@@ -9,6 +11,8 @@ from git_recap.config import AppConfig
 from git_recap.infra.llm_client import LLMClient
 from git_recap.models import JobStatus
 from git_recap.services.summarizer import SummarizerService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -22,6 +26,7 @@ def _run_query_task(
     job_id: str, question: str, months: int, config: AppConfig, store: JobStore,
 ) -> None:
     """BackgroundTask: 자유 질문 실행."""
+    logger.info("Background task start: query (job=%s)", job_id)
     store.update(job_id, JobStatus.RUNNING)
 
     try:

@@ -1,5 +1,7 @@
 """Pipeline 엔드포인트 — run, run/range, job status."""
 
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -14,6 +16,8 @@ from git_recap.services.fetcher import FetcherService
 from git_recap.services.normalizer import NormalizerService
 from git_recap.services.orchestrator import OrchestratorService
 from git_recap.services.summarizer import SummarizerService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -30,6 +34,7 @@ def _run_pipeline_task(
     store: JobStore,
 ) -> None:
     """BackgroundTask: 단일 날짜 파이프라인 실행."""
+    logger.info("Background task start: run_pipeline %s (job=%s)", target_date, job_id)
     store.update(job_id, JobStatus.RUNNING)
 
     try:
@@ -43,8 +48,10 @@ def _run_pipeline_task(
 
         path = orchestrator.run_daily(target_date)
         ghes.close()
+        logger.info("Background task complete: run_pipeline %s → %s", target_date, path)
         store.update(job_id, JobStatus.COMPLETED, result=str(path))
     except Exception as e:
+        logger.warning("Background task failed: run_pipeline %s: %s", target_date, e)
         store.update(job_id, JobStatus.FAILED, error=str(e))
 
 
@@ -56,6 +63,7 @@ def _run_range_task(
     store: JobStore,
 ) -> None:
     """BackgroundTask: 기간 범위 파이프라인 실행."""
+    logger.info("Background task start: run_range %s..%s (job=%s)", since, until, job_id)
     store.update(job_id, JobStatus.RUNNING)
 
     try:

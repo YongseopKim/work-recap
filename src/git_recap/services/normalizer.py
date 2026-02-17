@@ -50,6 +50,7 @@ class NormalizerService:
         Raises:
             NormalizeError: 입력 파일 없음 또는 파싱 실패
         """
+        logger.info("Normalizing %s", target_date)
         raw_path = self._config.date_raw_dir(target_date) / "prs.json"
         if not raw_path.exists():
             raise NormalizeError(f"Raw file not found: {raw_path}")
@@ -60,6 +61,7 @@ class NormalizerService:
             raise NormalizeError(f"Failed to parse {raw_path}: {e}") from e
 
         prs = [pr_raw_from_dict(d) for d in raw_data]
+        logger.debug("Loaded %d PRs from %s", len(prs), raw_path)
 
         # Commit/Issue 로드 (optional — 없으면 빈 리스트, 하위 호환)
         raw_dir = self._config.date_raw_dir(target_date)
@@ -109,6 +111,7 @@ class NormalizerService:
     def normalize_range(self, since: str, until: str, force: bool = False) -> list[dict]:
         """날짜 범위 순회하며 normalize. skip/force/resilience 지원."""
         dates = date_range(since, until)
+        logger.info("normalize_range %s..%s (%d dates, force=%s)", since, until, len(dates), force)
         results: list[dict] = []
 
         for d in dates:

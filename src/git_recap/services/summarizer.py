@@ -37,6 +37,7 @@ class SummarizerService:
 
     def daily(self, target_date: str) -> Path:
         """Daily summary 생성."""
+        logger.info("Summarizing daily: %s", target_date)
         norm_dir = self._config.date_normalized_dir(target_date)
         activities_path = norm_dir / "activities.jsonl"
         stats_path = norm_dir / "stats.json"
@@ -48,9 +49,11 @@ class SummarizerService:
 
         activities = load_jsonl(activities_path)
         stats = load_json(stats_path)
+        logger.debug("Loaded %d activities for %s", len(activities), target_date)
 
         system_prompt = self._render_prompt("daily.md", date=target_date, stats=stats)
         user_content = self._format_activities(activities)
+        logger.debug("LLM prompt: system=%d chars, user=%d chars", len(system_prompt), len(user_content))
 
         response = self._llm.chat(system_prompt, user_content)
 
@@ -65,6 +68,7 @@ class SummarizerService:
     def daily_range(self, since: str, until: str, force: bool = False) -> list[dict]:
         """날짜 범위 순회하며 daily summary 생성. skip/force/resilience 지원."""
         dates = date_range(since, until)
+        logger.info("daily_range %s..%s (%d dates, force=%s)", since, until, len(dates), force)
         results: list[dict] = []
 
         for d in dates:
@@ -83,6 +87,7 @@ class SummarizerService:
 
     def weekly(self, year: int, week: int, force: bool = False) -> Path:
         """Weekly summary 생성."""
+        logger.info("Summarizing weekly: %d-W%02d (force=%s)", year, week, force)
         output_path = self._config.weekly_summary_path(year, week)
         if not force and not self._is_stale(output_path, self._daily_paths_for_week(year, week)):
             logger.info("Weekly summary already exists, skipping: %s", output_path)
@@ -104,6 +109,7 @@ class SummarizerService:
 
     def monthly(self, year: int, month: int, force: bool = False) -> Path:
         """Monthly summary 생성."""
+        logger.info("Summarizing monthly: %d-%02d (force=%s)", year, month, force)
         output_path = self._config.monthly_summary_path(year, month)
         if not force and not self._is_stale(output_path, self._weekly_paths_for_month(year, month)):
             logger.info("Monthly summary already exists, skipping: %s", output_path)
@@ -125,6 +131,7 @@ class SummarizerService:
 
     def yearly(self, year: int, force: bool = False) -> Path:
         """Yearly summary 생성."""
+        logger.info("Summarizing yearly: %d (force=%s)", year, force)
         output_path = self._config.yearly_summary_path(year)
         if not force and not self._is_stale(output_path, self._monthly_paths_for_year(year)):
             logger.info("Yearly summary already exists, skipping: %s", output_path)

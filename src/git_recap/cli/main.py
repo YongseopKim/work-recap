@@ -1,12 +1,14 @@
 """git-recap CLI — Typer 기반."""
 
 import json
+import logging
 from datetime import date
 
 import typer
 
 from git_recap.config import AppConfig
 from git_recap.exceptions import GitRecapError
+from git_recap.logging_config import setup_logging
 from git_recap.services import date_utils
 from git_recap.services.daily_state import DailyStateStore
 from git_recap.services.fetcher import FetcherService
@@ -14,9 +16,20 @@ from git_recap.services.normalizer import NormalizerService
 from git_recap.services.orchestrator import OrchestratorService
 from git_recap.services.summarizer import SummarizerService
 
+logger = logging.getLogger(__name__)
+
 app = typer.Typer(help="GHES activity summarizer with LLM")
 summarize_app = typer.Typer(help="Generate summaries")
 app.add_typer(summarize_app, name="summarize")
+
+
+@app.callback()
+def main(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable DEBUG logging"),
+) -> None:
+    """GHES activity summarizer with LLM."""
+    level = logging.DEBUG if verbose else logging.INFO
+    setup_logging(level)
 
 VALID_TYPES = {"prs", "commits", "issues"}
 
@@ -167,6 +180,7 @@ def fetch(
     force: bool = typer.Option(False, "--force", "-f", help="Re-fetch even if data exists"),
 ) -> None:
     """Fetch PR/Commit/Issue data from GHES."""
+    logger.info("Command: fetch date=%s types=%s force=%s", target_date, type, force)
     # 1. --type 검증
     types: set[str] | None = None
     if type is not None:
@@ -261,6 +275,7 @@ def normalize(
     force: bool = typer.Option(False, "--force", "-f", help="Re-normalize even if data exists"),
 ) -> None:
     """Normalize raw PR data into activities and stats."""
+    logger.info("Command: normalize date=%s force=%s", target_date, force)
     dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
     endpoints = _resolve_range_endpoints(target_date, since, until, weekly, monthly, yearly)
 
@@ -317,6 +332,7 @@ def summarize_daily(
     force: bool = typer.Option(False, "--force", "-f", help="Re-summarize even if data exists"),
 ) -> None:
     """Generate daily summary."""
+    logger.info("Command: summarize daily date=%s force=%s", target_date, force)
     dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
     endpoints = _resolve_range_endpoints(target_date, since, until, weekly, monthly, yearly)
 
@@ -364,6 +380,7 @@ def summarize_weekly(
     force: bool = typer.Option(False, "--force", "-f", help="Re-generate even if exists"),
 ) -> None:
     """Generate weekly summary."""
+    logger.info("Command: summarize weekly year=%d week=%d force=%s", year, week, force)
     config = _get_config()
 
     try:
@@ -382,6 +399,7 @@ def summarize_monthly(
     force: bool = typer.Option(False, "--force", "-f", help="Re-generate even if exists"),
 ) -> None:
     """Generate monthly summary."""
+    logger.info("Command: summarize monthly year=%d month=%d force=%s", year, month, force)
     config = _get_config()
 
     try:
@@ -399,6 +417,7 @@ def summarize_yearly(
     force: bool = typer.Option(False, "--force", "-f", help="Re-generate even if exists"),
 ) -> None:
     """Generate yearly summary."""
+    logger.info("Command: summarize yearly year=%d force=%s", year, force)
     config = _get_config()
 
     try:
@@ -427,6 +446,7 @@ def run(
     force: bool = typer.Option(False, "--force", "-f", help="Re-run even if data exists"),
 ) -> None:
     """Run full pipeline (fetch → normalize → summarize)."""
+    logger.info("Command: run date=%s types=%s force=%s", target_date, type, force)
     # --type 검증
     types: set[str] | None = None
     if type is not None:
@@ -495,6 +515,7 @@ def ask(
     months: int = typer.Option(3, help="Months of context to use"),
 ) -> None:
     """Ask a question based on recent summaries."""
+    logger.info("Command: ask months=%d", months)
     config = _get_config()
 
     try:

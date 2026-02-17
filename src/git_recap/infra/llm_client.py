@@ -34,11 +34,19 @@ class LLMClient:
         Raises:
             SummarizeError: API 호출 실패
         """
+        logger.info("LLM call: provider=%s model=%s", self._provider, self._model)
+        logger.debug(
+            "LLM request: system_prompt=%d chars, user_content=%d chars",
+            len(system_prompt),
+            len(user_content),
+        )
         try:
             if self._provider == "openai":
-                return self._chat_openai(system_prompt, user_content)
+                result = self._chat_openai(system_prompt, user_content)
             else:
-                return self._chat_anthropic(system_prompt, user_content)
+                result = self._chat_anthropic(system_prompt, user_content)
+            logger.debug("LLM response: %d chars", len(result))
+            return result
         except SummarizeError:
             raise
         except Exception as e:

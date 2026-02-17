@@ -51,35 +51,47 @@ class DailyStateStore:
         if date_str not in data:
             data[date_str] = {}
         data[date_str][phase] = ts.isoformat()
+        logger.debug("set_timestamp: %s %s → %s", phase, date_str, ts.isoformat())
         self._save()
 
     def is_fetch_stale(self, date_str: str) -> bool:
         """Fetch is stale if no record OR fetched_at.date() <= target_date."""
         fetch_ts = self.get_timestamp("fetch", date_str)
         if fetch_ts is None:
+            logger.debug("is_fetch_stale(%s): True (no record)", date_str)
             return True
         target = date.fromisoformat(date_str)
-        return fetch_ts.date() <= target
+        result = fetch_ts.date() <= target
+        logger.debug("is_fetch_stale(%s): %s (fetched=%s)", date_str, result, fetch_ts.date())
+        return result
 
     def is_normalize_stale(self, date_str: str) -> bool:
         """Normalize is stale if no record OR fetch_ts > normalize_ts."""
         norm_ts = self.get_timestamp("normalize", date_str)
         if norm_ts is None:
+            logger.debug("is_normalize_stale(%s): True (no record)", date_str)
             return True
         fetch_ts = self.get_timestamp("fetch", date_str)
         if fetch_ts is None:
+            logger.debug("is_normalize_stale(%s): True (no fetch record)", date_str)
             return True
-        return fetch_ts > norm_ts
+        result = fetch_ts > norm_ts
+        logger.debug("is_normalize_stale(%s): %s", date_str, result)
+        return result
 
     def is_summarize_stale(self, date_str: str) -> bool:
         """Summarize is stale if no record OR normalize_ts > summarize_ts."""
         summ_ts = self.get_timestamp("summarize", date_str)
         if summ_ts is None:
+            logger.debug("is_summarize_stale(%s): True (no record)", date_str)
             return True
         norm_ts = self.get_timestamp("normalize", date_str)
         if norm_ts is None:
+            logger.debug("is_summarize_stale(%s): True (no normalize record)", date_str)
             return True
-        return norm_ts > summ_ts
+        result = norm_ts > summ_ts
+        logger.debug("is_summarize_stale(%s): %s", date_str, result)
+        return result
 
     def stale_dates(self, phase: str, dates: list[str]) -> list[str]:
         """Filter dates to only those that are stale for the given phase."""
@@ -89,4 +101,6 @@ class DailyStateStore:
             "summarize": self.is_summarize_stale,
         }
         fn = checker[phase]
-        return [d for d in dates if fn(d)]
+        result = [d for d in dates if fn(d)]
+        logger.debug("stale_dates(%s): %d/%d stale", phase, len(result), len(dates))
+        return result

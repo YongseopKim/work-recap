@@ -42,15 +42,19 @@ class OrchestratorService:
         Raises:
             StepFailedError: 어느 단계에서든 실패 시
         """
+        logger.info("Pipeline start: %s (types=%s)", target_date, types)
+
         try:
             self._fetcher.fetch(target_date, types=types)
         except FetchError as e:
             raise StepFailedError("fetch", e) from e
+        logger.info("Phase complete: fetch → normalize (%s)", target_date)
 
         try:
             self._normalizer.normalize(target_date)
         except NormalizeError as e:
             raise StepFailedError("normalize", e) from e
+        logger.info("Phase complete: normalize → summarize (%s)", target_date)
 
         try:
             summary_path = self._summarizer.daily(target_date)
@@ -72,13 +76,16 @@ class OrchestratorService:
         Returns:
             [{date, status, path?, error?}] 날짜별 결과
         """
+        logger.info("Pipeline range: %s..%s (force=%s, types=%s)", since, until, force, types)
         start = date.fromisoformat(since)
         end = date.fromisoformat(until)
         if start > end:
             return []
 
         fetch_results = self._fetcher.fetch_range(since, until, types=types, force=force)
+        logger.info("Phase complete: fetch → normalize (%s..%s)", since, until)
         normalize_results = self._normalizer.normalize_range(since, until, force=force)
+        logger.info("Phase complete: normalize → summarize (%s..%s)", since, until)
         summarize_results = self._summarizer.daily_range(since, until, force=force)
 
         results = self._merge_results(fetch_results, normalize_results, summarize_results)

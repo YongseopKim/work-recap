@@ -9,11 +9,13 @@ from fastapi.staticfiles import StaticFiles
 
 from git_recap.api.routes import pipeline, query, summary
 from git_recap.exceptions import GitRecapError
+from git_recap.logging_config import setup_logging
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent.parent / "frontend"
 
 
 def create_app() -> FastAPI:
+    setup_logging()
     app = FastAPI(title="git-recap", version="0.1.0")
 
     app.add_middleware(

@@ -62,13 +62,16 @@ class FetcherService:
             타입별 저장 경로 dict (예: {"prs": Path, "commits": Path})
         """
         active = types or {"prs", "commits", "issues"}
+        logger.info("Fetching %s for %s", ", ".join(sorted(active)), target_date)
         results: dict[str, Path] = {}
 
         if "prs" in active:
             pr_map = self._search_prs(target_date)
+            logger.info("Found %d PRs for %s", len(pr_map), target_date)
             prs: list[PRRaw] = []
             for pr_api_url, pr_basic in pr_map.items():
                 try:
+                    logger.debug("Enriching PR %s", pr_api_url)
                     enriched = self._enrich(pr_basic)
                     prs.append(enriched)
                 except FetchError:
@@ -77,20 +80,17 @@ class FetcherService:
 
         if "commits" in active:
             commits = self._fetch_commits(target_date)
+            logger.info("Found %d commits for %s", len(commits), target_date)
             results["commits"] = self._save_commits(target_date, commits)
 
         if "issues" in active:
             issues = self._fetch_issues(target_date)
+            logger.info("Found %d issues for %s", len(issues), target_date)
             results["issues"] = self._save_issues(target_date, issues)
 
         self._update_checkpoint(target_date)
 
-        logger.info(
-            "Fetched %s for %s → %s",
-            ", ".join(active),
-            target_date,
-            results,
-        )
+        logger.info("Fetch complete for %s → %s", target_date, results)
         return results
 
     def fetch_range(
@@ -103,12 +103,16 @@ class FetcherService:
         """월 단위 chunk 검색 → 날짜별 enrich/save. 실패 시 계속 진행."""
         active = types or {"prs", "commits", "issues"}
         all_dates = date_range(since, until)
+        logger.info(
+            "fetch_range %s..%s (%d dates, force=%s)", since, until, len(all_dates), force
+        )
         results: list[dict] = []
         processed: set[str] = set()
 
         # Determine stale dates for range narrowing
         if not force and self._daily_state is not None:
             stale = set(self._daily_state.stale_dates("fetch", all_dates))
+            logger.info("Stale dates: %d/%d", len(stale), len(all_dates))
             if not stale:
                 return [{"date": d, "status": "skipped"} for d in all_dates]
             # Pre-skip non-stale dates
@@ -124,6 +128,7 @@ class FetcherService:
             chunks = monthly_chunks(since, until)
 
         for chunk_start, chunk_end in chunks:
+            logger.debug("Processing chunk %s..%s", chunk_start, chunk_end)
             try:
                 # Range search per chunk
                 pr_map: dict[str, dict] = {}
