@@ -395,6 +395,7 @@ class FetcherService:
                     additions=f["additions"],
                     deletions=f["deletions"],
                     status=f["status"],
+                    patch=f.get("patch", ""),
                 )
                 for f in raw_files
             ],
@@ -404,6 +405,9 @@ class FetcherService:
                     body=c.get("body") or "",
                     created_at=c["created_at"],
                     url=c["html_url"],
+                    path=c.get("path") or "",
+                    line=c.get("line") or c.get("original_line") or 0,
+                    diff_hunk=c.get("diff_hunk") or "",
                 )
                 for c in filtered_comments
             ],
@@ -487,6 +491,7 @@ class FetcherService:
                     additions=f["additions"],
                     deletions=f["deletions"],
                     status=f["status"],
+                    patch=f.get("patch", ""),
                 )
                 for f in raw_files
             ],
@@ -551,6 +556,9 @@ class FetcherService:
                     body=c.get("body") or "",
                     created_at=c["created_at"],
                     url=c["html_url"],
+                    path=c.get("path") or "",
+                    line=c.get("line") or c.get("original_line") or 0,
+                    diff_hunk=c.get("diff_hunk") or "",
                 )
                 for c in filtered_comments
             ],

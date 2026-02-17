@@ -93,6 +93,42 @@ class TestFileChange:
         assert fc.additions == 10
         assert fc.deletions == 3
         assert fc.status == "modified"
+        assert fc.patch == ""
+
+    def test_creation_with_patch(self):
+        fc = FileChange("src/auth.py", 5, 2, "modified", patch="@@ -1,3 +1,5 @@\n+new line")
+        assert fc.patch == "@@ -1,3 +1,5 @@\n+new line"
+
+    def test_backward_compat_no_patch(self):
+        """기존 dict(patch 없음)에서 FileChange(**d) 생성."""
+        d = {"filename": "f.py", "additions": 1, "deletions": 0, "status": "added"}
+        fc = FileChange(**d)
+        assert fc.patch == ""
+
+
+class TestComment:
+    def test_creation_defaults(self):
+        c = Comment("user", "body", "2025-02-16T10:00:00Z", "url")
+        assert c.path == ""
+        assert c.line == 0
+        assert c.diff_hunk == ""
+
+    def test_creation_with_inline_fields(self):
+        c = Comment(
+            "user", "body", "2025-02-16T10:00:00Z", "url",
+            path="src/auth.py", line=42, diff_hunk="@@ -40,3 +40,5 @@",
+        )
+        assert c.path == "src/auth.py"
+        assert c.line == 42
+        assert c.diff_hunk == "@@ -40,3 +40,5 @@"
+
+    def test_backward_compat_no_inline_fields(self):
+        """기존 dict(path/line/diff_hunk 없음)에서 Comment(**d) 생성."""
+        d = {"author": "u", "body": "b", "created_at": "t", "url": "u"}
+        c = Comment(**d)
+        assert c.path == ""
+        assert c.line == 0
+        assert c.diff_hunk == ""
 
 
 class TestPRRaw:
@@ -218,6 +254,52 @@ class TestActivity:
         assert act.body == ""
         assert act.review_bodies == []
         assert act.comment_bodies == []
+
+    def test_file_patches_and_comment_contexts_defaults(self):
+        """file_patches/comment_contexts 기본값 빈 dict/list."""
+        act = Activity(
+            ts="t", kind=ActivityKind.PR_AUTHORED, repo="r",
+            pr_number=1, title="t", url="u", summary="s",
+        )
+        assert act.file_patches == {}
+        assert act.comment_contexts == []
+
+    def test_file_patches_roundtrip(self, tmp_path):
+        """file_patches 포함 왕복 변환."""
+        act = Activity(
+            ts="t", kind=ActivityKind.PR_AUTHORED, repo="r",
+            pr_number=1, title="t", url="u", summary="s",
+            file_patches={"src/auth.py": "@@ -1 +1 @@\n+new"},
+        )
+        path = tmp_path / "act.jsonl"
+        save_jsonl([act], path)
+        loaded = load_jsonl(path)
+        restored = activity_from_dict(loaded[0])
+        assert restored.file_patches == {"src/auth.py": "@@ -1 +1 @@\n+new"}
+
+    def test_comment_contexts_roundtrip(self, tmp_path):
+        """comment_contexts 포함 왕복 변환."""
+        ctx = [{"path": "src/auth.py", "line": 42, "diff_hunk": "@@", "body": "Fix this"}]
+        act = Activity(
+            ts="t", kind=ActivityKind.PR_REVIEWED, repo="r",
+            pr_number=1, title="t", url="u", summary="s",
+            comment_contexts=ctx,
+        )
+        path = tmp_path / "act.jsonl"
+        save_jsonl([act], path)
+        loaded = load_jsonl(path)
+        restored = activity_from_dict(loaded[0])
+        assert restored.comment_contexts == ctx
+
+    def test_backward_compat_no_patches_contexts(self):
+        """옛 데이터(file_patches/comment_contexts 없음)로 from_dict 호출 시 정상 동작."""
+        d = {
+            "ts": "t", "kind": "pr_authored", "repo": "r",
+            "pr_number": 1, "title": "t", "url": "u", "summary": "s",
+        }
+        act = activity_from_dict(d)
+        assert act.file_patches == {}
+        assert act.comment_contexts == []
 
 
 class TestDailyStats:

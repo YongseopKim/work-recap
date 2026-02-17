@@ -66,12 +66,22 @@ def _review(author="reviewer1", submitted_at="2025-02-16T12:00:00Z"):
     )
 
 
-def _comment(author="commenter1", created_at="2025-02-16T11:00:00Z", body="Good"):
+def _comment(
+    author="commenter1",
+    created_at="2025-02-16T11:00:00Z",
+    body="Good",
+    path="",
+    line=0,
+    diff_hunk="",
+):
     return Comment(
         author=author,
         body=body,
         created_at=created_at,
         url=f"https://ghes/org/repo/pull/1#comment-{author}",
+        path=path,
+        line=line,
+        diff_hunk=diff_hunk,
     )
 
 
@@ -324,6 +334,84 @@ class TestConvertActivities:
         assert len(reviewed) == 1
         assert reviewed[0].review_bodies == ["LGTM, nice work!"]
         assert reviewed[0].body == "Description"  # PR body도 보존
+
+    def test_file_patches_in_authored(self, normalizer):
+        """PR_AUTHORED에 file_patches 전달."""
+        prs = [
+            _make_pr(
+                author="testuser",
+                files=[
+                    FileChange("src/auth.py", 5, 2, "modified", patch="@@ +1 @@\n+new"),
+                    FileChange("README.md", 1, 0, "modified"),
+                ],
+            )
+        ]
+        result = normalizer._convert_activities(prs, DATE)
+        assert result[0].file_patches == {"src/auth.py": "@@ +1 @@\n+new"}
+
+    def test_comment_contexts_in_reviewed(self, normalizer):
+        """PR_REVIEWED에 reviewer 인라인 코멘트가 comment_contexts로 전달."""
+        prs = [
+            _make_pr(
+                author="other",
+                reviews=[_review(author="testuser")],
+                comments=[
+                    _comment(
+                        author="testuser",
+                        path="src/auth.py",
+                        line=42,
+                        diff_hunk="@@ -40 @@",
+                        body="Check user.verified",
+                    ),
+                    _comment(author="someone_else", body="General comment"),
+                ],
+            )
+        ]
+        result = normalizer._convert_activities(prs, DATE)
+        reviewed = [a for a in result if a.kind == ActivityKind.PR_REVIEWED]
+        assert len(reviewed) == 1
+        assert len(reviewed[0].comment_contexts) == 1
+        assert reviewed[0].comment_contexts[0]["path"] == "src/auth.py"
+        assert reviewed[0].comment_contexts[0]["line"] == 42
+
+    def test_comment_contexts_in_commented(self, normalizer):
+        """PR_COMMENTED에 인라인 코멘트가 comment_contexts로 전달."""
+        prs = [
+            _make_pr(
+                author="other",
+                comments=[
+                    _comment(
+                        author="testuser",
+                        path="src/main.py",
+                        line=10,
+                        diff_hunk="@@ -8 @@",
+                        body="Inline note",
+                    ),
+                    _comment(
+                        author="testuser",
+                        body="General comment",
+                    ),
+                ],
+            )
+        ]
+        result = normalizer._convert_activities(prs, DATE)
+        commented = [a for a in result if a.kind == ActivityKind.PR_COMMENTED]
+        assert len(commented) == 1
+        assert len(commented[0].comment_contexts) == 1
+        assert commented[0].comment_contexts[0]["path"] == "src/main.py"
+
+    def test_comment_contexts_empty_when_no_inline(self, normalizer):
+        """일반 코멘트만 있으면 comment_contexts 빈 리스트."""
+        prs = [
+            _make_pr(
+                author="other",
+                comments=[_comment(author="testuser", body="General only")],
+            )
+        ]
+        result = normalizer._convert_activities(prs, DATE)
+        commented = [a for a in result if a.kind == ActivityKind.PR_COMMENTED]
+        assert len(commented) == 1
+        assert commented[0].comment_contexts == []
 
 
 class TestComputeStats:
@@ -640,6 +728,20 @@ class TestConvertCommitActivities:
     def test_empty_commits(self, normalizer):
         result = normalizer._convert_commit_activities([], DATE)
         assert result == []
+
+    def test_file_patches_in_commit(self, normalizer):
+        """COMMIT Activity에 file_patches 전달."""
+        commits = [
+            _make_commit(
+                files=[
+                    FileChange("src/main.py", 10, 3, "modified", patch="@@ +1 @@\n+line"),
+                    FileChange("docs/README.md", 1, 0, "modified"),
+                ],
+            )
+        ]
+        result = normalizer._convert_commit_activities(commits, DATE)
+        assert len(result) == 1
+        assert result[0].file_patches == {"src/main.py": "@@ +1 @@\n+line"}
 
 
 # ── Issue 변환 테스트 ──

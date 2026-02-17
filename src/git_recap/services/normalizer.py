@@ -176,6 +176,16 @@ class NormalizerService:
                     if review.author.lower() == self._username.lower() and self._matches_date(
                         review.submitted_at, target_date
                     ):
+                        reviewer_inline = [
+                            {
+                                "path": c.path,
+                                "line": c.line,
+                                "diff_hunk": c.diff_hunk,
+                                "body": c.body,
+                            }
+                            for c in pr.comments
+                            if c.author.lower() == self._username.lower() and c.path
+                        ]
                         activities.append(
                             self._make_activity(
                                 pr,
@@ -183,6 +193,7 @@ class NormalizerService:
                                 review.submitted_at,
                                 evidence_urls=[review.url],
                                 review_bodies=[review.body],
+                                comment_contexts=reviewer_inline,
                             )
                         )
                         break  # PR당 1개 review activity
@@ -196,6 +207,16 @@ class NormalizerService:
             ]
             if user_comments:
                 earliest = min(user_comments, key=lambda c: c.created_at)
+                contexts = [
+                    {
+                        "path": c.path,
+                        "line": c.line,
+                        "diff_hunk": c.diff_hunk,
+                        "body": c.body,
+                    }
+                    for c in user_comments
+                    if c.path
+                ]
                 activities.append(
                     self._make_activity(
                         pr,
@@ -203,6 +224,7 @@ class NormalizerService:
                         earliest.created_at,
                         evidence_urls=[c.url for c in user_comments],
                         comment_bodies=[c.body for c in user_comments],
+                        comment_contexts=contexts,
                     )
                 )
 
@@ -226,6 +248,7 @@ class NormalizerService:
             total_adds = sum(f.additions for f in commit.files)
             total_dels = sum(f.deletions for f in commit.files)
             file_names = [f.filename for f in commit.files]
+            file_patches = {f.filename: f.patch for f in commit.files if f.patch}
 
             activities.append(
                 Activity(
@@ -239,6 +262,7 @@ class NormalizerService:
                     sha=commit.sha,
                     body=commit.message,
                     files=file_names,
+                    file_patches=file_patches,
                     additions=total_adds,
                     deletions=total_dels,
                 )
@@ -303,10 +327,12 @@ class NormalizerService:
         evidence_urls: list[str] | None = None,
         review_bodies: list[str] | None = None,
         comment_bodies: list[str] | None = None,
+        comment_contexts: list[dict] | None = None,
     ) -> Activity:
         total_adds = sum(f.additions for f in pr.files)
         total_dels = sum(f.deletions for f in pr.files)
         file_names = [f.filename for f in pr.files]
+        file_patches = {f.filename: f.patch for f in pr.files if f.patch}
 
         return Activity(
             ts=ts,
@@ -320,10 +346,12 @@ class NormalizerService:
             review_bodies=review_bodies or [],
             comment_bodies=comment_bodies or [],
             files=file_names,
+            file_patches=file_patches,
             additions=total_adds,
             deletions=total_dels,
             labels=pr.labels,
             evidence_urls=evidence_urls or [],
+            comment_contexts=comment_contexts or [],
         )
 
     # ── Auto Summary ──

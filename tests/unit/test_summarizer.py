@@ -150,7 +150,7 @@ class TestFormatActivities:
                 "additions": 100,
                 "deletions": 50,
                 "url": "https://ghes/pull/1",
-                "files": [f"file{i}.py" for i in range(8)],
+                "files": [f"file{i}.py" for i in range(13)],
             },
         ]
         result = SummarizerService._format_activities(activities)
@@ -219,8 +219,8 @@ class TestFormatActivities:
         result = SummarizerService._format_activities(activities)
         assert "Comments: Looks good | Fixed in next commit" in result
 
-    def test_body_truncated_at_500(self):
-        long_body = "x" * 600
+    def test_body_truncated_at_1000(self):
+        long_body = "x" * 1200
         activities = [
             {
                 "kind": "pr_authored",
@@ -234,11 +234,11 @@ class TestFormatActivities:
             },
         ]
         result = SummarizerService._format_activities(activities)
-        assert "Body: " + "x" * 500 + "..." in result
-        assert "x" * 501 not in result
+        assert "Body: " + "x" * 1000 + "..." in result
+        assert "x" * 1001 not in result
 
-    def test_review_body_truncated_at_200(self):
-        long_review = "r" * 300
+    def test_review_body_truncated_at_500(self):
+        long_review = "r" * 600
         activities = [
             {
                 "kind": "pr_reviewed",
@@ -252,11 +252,11 @@ class TestFormatActivities:
             },
         ]
         result = SummarizerService._format_activities(activities)
-        assert "Reviews: " + "r" * 200 + "..." in result
-        assert "r" * 201 not in result
+        assert "Reviews: " + "r" * 500 + "..." in result
+        assert "r" * 501 not in result
 
-    def test_comment_body_truncated_at_200(self):
-        long_comment = "c" * 300
+    def test_comment_body_truncated_at_500(self):
+        long_comment = "c" * 600
         activities = [
             {
                 "kind": "pr_commented",
@@ -270,8 +270,123 @@ class TestFormatActivities:
             },
         ]
         result = SummarizerService._format_activities(activities)
-        assert "Comments: " + "c" * 200 + "..." in result
-        assert "c" * 201 not in result
+        assert "Comments: " + "c" * 500 + "..." in result
+        assert "c" * 501 not in result
+
+    def test_patches_section_rendered(self):
+        activities = [
+            {
+                "kind": "pr_authored",
+                "title": "PR",
+                "repo": "org/repo",
+                "additions": 5,
+                "deletions": 2,
+                "url": "https://ghes/pull/1",
+                "files": ["src/auth.py"],
+                "file_patches": {"src/auth.py": "@@ -40,3 +40,5 @@\n+  if user is None:"},
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Patches:" in result
+        assert "--- src/auth.py ---" in result
+        assert "+  if user is None:" in result
+
+    def test_patches_section_truncated_per_file(self):
+        activities = [
+            {
+                "kind": "pr_authored",
+                "title": "PR",
+                "repo": "org/repo",
+                "additions": 0,
+                "deletions": 0,
+                "url": "u",
+                "files": ["big.py"],
+                "file_patches": {"big.py": "x" * 1200},
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Patches:" in result
+        assert "x" * 1000 in result
+        assert "x" * 1001 not in result
+
+    def test_patches_section_not_shown_when_empty(self):
+        activities = [
+            {
+                "kind": "pr_authored",
+                "title": "PR",
+                "repo": "org/repo",
+                "additions": 0,
+                "deletions": 0,
+                "url": "u",
+                "files": [],
+                "file_patches": {},
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Patches:" not in result
+
+    def test_inline_comments_section_rendered(self):
+        activities = [
+            {
+                "kind": "pr_reviewed",
+                "title": "PR",
+                "repo": "org/repo",
+                "additions": 0,
+                "deletions": 0,
+                "url": "u",
+                "files": [],
+                "comment_contexts": [
+                    {
+                        "path": "src/auth.py",
+                        "line": 42,
+                        "diff_hunk": "@@ -40,3 +40,5 @@",
+                        "body": "Consider checking user.verified",
+                    },
+                ],
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Inline comments:" in result
+        assert "at src/auth.py:42" in result
+        assert "Consider checking user.verified" in result
+
+    def test_inline_comments_hunk_truncated_from_end(self):
+        long_hunk = "h" * 500
+        activities = [
+            {
+                "kind": "pr_reviewed",
+                "title": "PR",
+                "repo": "org/repo",
+                "additions": 0,
+                "deletions": 0,
+                "url": "u",
+                "files": [],
+                "comment_contexts": [
+                    {"path": "f.py", "line": 1, "diff_hunk": long_hunk, "body": "note"},
+                ],
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Inline comments:" in result
+        # hunk truncated to last 300 chars
+        assert "h" * 300 in result
+        assert "h" * 301 not in result
+
+    def test_inline_comments_not_shown_when_empty(self):
+        activities = [
+            {
+                "kind": "pr_reviewed",
+                "title": "PR",
+                "repo": "org/repo",
+                "additions": 0,
+                "deletions": 0,
+                "url": "u",
+                "files": [],
+                "comment_contexts": [],
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Inline comments:" not in result
 
     def test_empty_body_not_shown(self):
         activities = [

@@ -50,7 +50,13 @@ def mock_client():
     client.search_issues.return_value = {"total_count": 0, "items": []}
     client.get_pr.return_value = _make_pr_detail()
     client.get_pr_files.return_value = [
-        {"filename": "src/main.py", "additions": 10, "deletions": 3, "status": "modified"},
+        {
+            "filename": "src/main.py",
+            "additions": 10,
+            "deletions": 3,
+            "status": "modified",
+            "patch": "@@ -1,3 +1,5 @@\n+new line",
+        },
     ]
     client.get_pr_comments.return_value = [
         {
@@ -58,6 +64,9 @@ def mock_client():
             "body": "Good approach",
             "created_at": "2025-02-16T11:00:00Z",
             "html_url": "https://ghes/org/repo/pull/1#comment-1",
+            "path": "src/main.py",
+            "line": 5,
+            "diff_hunk": "@@ -1,3 +1,5 @@\n+new line",
         },
     ]
     client.get_pr_reviews.return_value = [
@@ -210,7 +219,11 @@ class TestEnrich:
         assert result.is_merged is True
         assert len(result.files) == 1
         assert result.files[0].filename == "src/main.py"
+        assert result.files[0].patch == "@@ -1,3 +1,5 @@\n+new line"
         assert len(result.comments) == 1
+        assert result.comments[0].path == "src/main.py"
+        assert result.comments[0].line == 5
+        assert result.comments[0].diff_hunk == "@@ -1,3 +1,5 @@\n+new line"
         assert len(result.reviews) == 1
 
     def test_pr_body_none_becomes_empty_string(self, fetcher, mock_client):
@@ -381,7 +394,13 @@ def _make_commit_detail(sha="abc123", repo_full="org/repo"):
             "committer": {"date": "2025-02-16T10:00:00Z"},
         },
         "files": [
-            {"filename": "src/main.py", "additions": 10, "deletions": 3, "status": "modified"},
+            {
+                "filename": "src/main.py",
+                "additions": 10,
+                "deletions": 3,
+                "status": "modified",
+                "patch": "@@ -5,3 +5,6 @@\n+commit change",
+            },
         ],
     }
 
@@ -399,6 +418,7 @@ class TestFetchCommits:
         assert result[0].sha == "abc123"
         assert result[0].repo == "org/repo"
         assert len(result[0].files) == 1
+        assert result[0].files[0].patch == "@@ -5,3 +5,6 @@\n+commit change"
 
     def test_fetch_commits_search_failure_returns_empty(self, fetcher, mock_client):
         """Commit search 미지원 시 빈 리스트 반환."""

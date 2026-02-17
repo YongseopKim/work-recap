@@ -17,6 +17,7 @@ class FileChange:
     additions: int
     deletions: int
     status: str  # "added" | "modified" | "removed" | "renamed"
+    patch: str = ""  # unified diff text
 
 
 @dataclass
@@ -27,6 +28,9 @@ class Comment:
     body: str
     created_at: str  # ISO 8601
     url: str
+    path: str = ""  # 인라인 리뷰 대상 파일
+    line: int = 0  # 인라인 리뷰 대상 라인
+    diff_hunk: str = ""  # 코멘트 주변 diff 컨텍스트
 
 
 @dataclass
@@ -125,10 +129,12 @@ class Activity:
     review_bodies: list[str] = field(default_factory=list)  # user의 review 본문
     comment_bodies: list[str] = field(default_factory=list)  # user의 comment 본문
     files: list[str] = field(default_factory=list)
+    file_patches: dict[str, str] = field(default_factory=dict)  # filename → patch
     additions: int = 0
     deletions: int = 0
     labels: list[str] = field(default_factory=list)
     evidence_urls: list[str] = field(default_factory=list)
+    comment_contexts: list[dict] = field(default_factory=list)  # [{path, line, diff_hunk, body}]
 
 
 @dataclass
@@ -292,10 +298,12 @@ def activity_from_dict(d: dict) -> Activity:
         review_bodies=d.get("review_bodies", []),
         comment_bodies=d.get("comment_bodies", []),
         files=d.get("files", []),
+        file_patches=d.get("file_patches", {}),
         additions=d.get("additions", 0),
         deletions=d.get("deletions", 0),
         labels=d.get("labels", []),
         evidence_urls=d.get("evidence_urls", []),
+        comment_contexts=d.get("comment_contexts", []),
     )
 
 

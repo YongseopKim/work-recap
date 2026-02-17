@@ -319,23 +319,57 @@ class SummarizerService:
                 f"URL: {act['url']}"
             )
             if act.get("files"):
-                file_list = ", ".join(act["files"][:5])
+                file_list = ", ".join(act["files"][:10])
                 line += f"\n  Files: {file_list}"
-                if len(act["files"]) > 5:
-                    line += f" 외 {len(act['files']) - 5}개"
+                if len(act["files"]) > 10:
+                    line += f" 외 {len(act['files']) - 10}개"
             if act.get("body"):
-                body = act["body"][:500]
-                if len(act["body"]) > 500:
+                body = act["body"][:1000]
+                if len(act["body"]) > 1000:
                     body += "..."
                 line += f"\n  Body: {body}"
             if act.get("review_bodies"):
-                parts = [rb[:200] + ("..." if len(rb) > 200 else "") for rb in act["review_bodies"]]
+                parts = [rb[:500] + ("..." if len(rb) > 500 else "") for rb in act["review_bodies"]]
                 line += f"\n  Reviews: {' | '.join(parts)}"
             if act.get("comment_bodies"):
                 parts = [
-                    cb[:200] + ("..." if len(cb) > 200 else "") for cb in act["comment_bodies"]
+                    cb[:500] + ("..." if len(cb) > 500 else "") for cb in act["comment_bodies"]
                 ]
                 line += f"\n  Comments: {' | '.join(parts)}"
+            # Patches section
+            if act.get("file_patches"):
+                patch_lines = []
+                budget = 8000
+                count = 0
+                for fname, patch in act["file_patches"].items():
+                    if count >= 8:
+                        break
+                    truncated = patch[:1000]
+                    if len(patch) > 1000:
+                        truncated += "..."
+                    entry = f"    --- {fname} ---\n    {truncated}"
+                    if budget - len(entry) < 0:
+                        break
+                    budget -= len(entry)
+                    patch_lines.append(entry)
+                    count += 1
+                if patch_lines:
+                    line += "\n  Patches:\n" + "\n".join(patch_lines)
+            # Inline comments section
+            if act.get("comment_contexts"):
+                ctx_lines = []
+                for ctx in act["comment_contexts"][:10]:
+                    hunk = ctx.get("diff_hunk", "")
+                    if len(hunk) > 300:
+                        hunk = hunk[-300:]
+                    comment_body = (ctx.get("body") or "")[:300]
+                    ctx_lines.append(
+                        f"    at {ctx.get('path', '')}:{ctx.get('line', 0)}\n"
+                        f"    hunk: {hunk}\n"
+                        f"    comment: {comment_body}"
+                    )
+                if ctx_lines:
+                    line += "\n  Inline comments:\n" + "\n".join(ctx_lines)
             lines.append(line)
 
         return "\n".join(lines)
