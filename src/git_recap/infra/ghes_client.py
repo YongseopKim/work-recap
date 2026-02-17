@@ -1,6 +1,7 @@
 """GHES REST API v3 HTTP client with retry and rate limit handling."""
 
 import logging
+import threading
 import time
 
 import httpx
@@ -33,6 +34,10 @@ class GHESClient:
         )
         self._search_interval = search_interval
         self._last_search_time: float = 0.0
+        self._throttle_lock = threading.Lock()
+        self._rate_limit_remaining: int | None = None
+        self._rate_limit_reset: int | None = None
+        self._rate_limit_lock = threading.Lock()
 
     def close(self) -> None:
         self._client.close()
@@ -97,16 +102,20 @@ class GHESClient:
     # ── Internal ──
 
     def _throttle_search(self) -> None:
-        """Rate-limit Search API calls to stay under 30 req/min."""
+        """Rate-limit Search API calls to stay under 30 req/min.
+
+        Thread-safe: uses a lock to serialize concurrent search calls.
+        """
         if self._search_interval <= 0:
             return
-        now = time.monotonic()
-        elapsed = now - self._last_search_time
-        if self._last_search_time > 0 and elapsed < self._search_interval:
-            wait = self._search_interval - elapsed
-            logger.debug("Search throttle: sleeping %.1fs", wait)
-            time.sleep(wait)
-        self._last_search_time = time.monotonic()
+        with self._throttle_lock:
+            now = time.monotonic()
+            elapsed = now - self._last_search_time
+            if self._last_search_time > 0 and elapsed < self._search_interval:
+                wait = self._search_interval - elapsed
+                logger.debug("Search throttle: sleeping %.1fs", wait)
+                time.sleep(wait)
+            self._last_search_time = time.monotonic()
 
     def _request_with_retry(
         self,
@@ -174,6 +183,7 @@ class GHESClient:
                         f"Client error {response.status_code}: {path} - {response.text}"
                     )
 
+                self._track_rate_limit(response)
                 return response.json()
 
             except httpx.HTTPError as e:
@@ -190,6 +200,46 @@ class GHESClient:
                     continue
 
         raise FetchError(f"Request failed after {MAX_RETRIES} retries: {path}") from last_error
+
+    def _track_rate_limit(self, response: httpx.Response) -> None:
+        """Track X-RateLimit-Remaining/Reset from response headers.
+
+        Warns when approaching limit, sleeps when critically low.
+        """
+        remaining_str = response.headers.get("X-RateLimit-Remaining")
+        reset_str = response.headers.get("X-RateLimit-Reset")
+        if remaining_str is None:
+            return
+
+        try:
+            remaining = int(remaining_str)
+        except (ValueError, TypeError):
+            return
+
+        reset_ts: int | None = None
+        if reset_str:
+            try:
+                reset_ts = int(reset_str)
+            except (ValueError, TypeError):
+                pass
+
+        with self._rate_limit_lock:
+            self._rate_limit_remaining = remaining
+            self._rate_limit_reset = reset_ts
+
+        if remaining < 10:
+            if reset_ts is not None:
+                wait = max(0, reset_ts - time.time()) + 1
+                logger.warning(
+                    "Rate limit critical: %d remaining, waiting %.0fs until reset",
+                    remaining,
+                    wait,
+                )
+                time.sleep(wait)
+            else:
+                logger.warning("Rate limit critical: %d remaining, no reset header", remaining)
+        elif remaining < 100:
+            logger.warning("Rate limit low: %d remaining", remaining)
 
     @staticmethod
     def _is_rate_limit_403(response: httpx.Response) -> bool:

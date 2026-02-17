@@ -162,17 +162,9 @@ class NormalizerService:
 
     def _update_checkpoint(self, target_date: str) -> None:
         """last_normalize_date 키 업데이트."""
-        cp_path = self._config.checkpoints_path
-        cp_path.parent.mkdir(parents=True, exist_ok=True)
+        from git_recap.services.checkpoint import update_checkpoint
 
-        checkpoints = {}
-        if cp_path.exists():
-            checkpoints = load_json(cp_path)
-
-        checkpoints["last_normalize_date"] = target_date
-
-        with open(cp_path, "w", encoding="utf-8") as f:
-            json.dump(checkpoints, f, indent=2)
+        update_checkpoint(self._config.checkpoints_path, "last_normalize_date", target_date)
 
         if self._daily_state is not None:
             self._daily_state.set_timestamp("normalize", target_date)

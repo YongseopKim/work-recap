@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install (editable, with dev deps)
 pip install -e ".[dev]"
 
-# Run unit tests (510 tests, integration excluded by default)
+# Run unit tests (610 tests, integration excluded by default)
 pytest
 
 # Run integration tests (require .env with real credentials)
@@ -56,15 +56,18 @@ Infrastructure (GHESClient: httpx, LLMClient: OpenAI/Anthropic)
 
 - `src/git_recap/config.py` — `AppConfig` (pydantic-settings), derives all data paths. Env vars from `.env`.
 - `src/git_recap/models.py` — Pydantic/dataclass models (`PRRaw`, `CommitRaw`, `IssueRaw`, `Activity`, `DailyStats`) + JSON/JSONL serialization utilities. `Activity` preserves text context: `body` (PR/commit/issue body), `review_bodies`, `comment_bodies`.
-- `src/git_recap/services/daily_state.py` — `DailyStateStore`: per-date timestamp tracking for fetch/normalize/summarize. Staleness rules: fetch stale if `fetched_at.date() <= target_date`; normalize stale if `fetch_ts > normalize_ts` (cascade); summarize stale if `normalize_ts > summarize_ts` (cascade). Persists to `data/state/daily_state.json`.
-- `src/git_recap/services/fetcher.py` — Searches GHES for PRs (3 axes: author/reviewed-by/commenter), commits, issues. Deduplicates, enriches, filters noise (bots, LGTM). `fetch(date)` returns `dict[str, Path]`. `fetch_range(since, until)` uses monthly chunked range queries for 30x fewer API calls, with skip/force/resilience. When `DailyStateStore` injected, uses `stale_dates()` to narrow API range. Updates `last_fetch_date` checkpoint + daily state.
+- `src/git_recap/services/daily_state.py` — `DailyStateStore`: per-date timestamp tracking for fetch/normalize/summarize. Thread-safe (`threading.RLock`). Staleness rules: fetch stale if `fetched_at.date() <= target_date`; normalize stale if `fetch_ts > normalize_ts` (cascade); summarize stale if `normalize_ts > summarize_ts` (cascade). Persists to `data/state/daily_state.json`.
+- `src/git_recap/services/fetcher.py` — Searches GHES for PRs (3 axes: author/reviewed-by/commenter), commits, issues. Deduplicates, enriches, filters noise (bots, LGTM). `fetch(date)` returns `dict[str, Path]`. `fetch_range(since, until)` uses monthly chunked range queries for 30x fewer API calls, with skip/force/resilience. When `DailyStateStore` injected, uses `stale_dates()` to narrow API range. Updates `last_fetch_date` checkpoint + daily state. **Parallel mode:** `max_workers > 1` enables ThreadPoolExecutor for date-level parallel enrichment with `GHESClientPool`. **Resumable:** `FetchProgressStore` caches per-chunk search results so interrupted runs can resume without re-executing search API calls.
 - `src/git_recap/services/normalizer.py` — Converts raw data → `Activity` records + `DailyStats`. Preserves body/review/comment text in Activity fields. Filters by actual timestamp (not search date). Self-reviews excluded. `normalize_range(since, until, force)` with skip/force/resilience. When `DailyStateStore` injected, uses cascade staleness (re-normalizes if fetch is newer). Updates `last_normalize_date` checkpoint + daily state.
 - `src/git_recap/services/summarizer.py` — Renders Jinja2 prompt templates (`prompts/`), calls LLM, saves markdown. `_format_activities` includes `body` (500 char), `review_bodies`/`comment_bodies` (각 200 char truncate) as text context for LLM. `daily_range(since, until, force)` with skip/force/resilience. `weekly(year, week, force)`, `monthly(year, month, force)`, `yearly(year, force)` use mtime-based cascade staleness: weekly regenerates if any daily summary is newer, monthly if any weekly is newer, yearly if any monthly is newer. `--force` bypasses staleness check. When `DailyStateStore` injected, uses cascade staleness for daily (re-summarizes if normalize is newer). Updates `last_summarize_date` checkpoint + daily state.
 - `src/git_recap/__main__.py` — `python -m git_recap` entry point.
-- `src/git_recap/infra/ghes_client.py` — HTTP client with retry (429 + 403 rate limit + 5xx), search API throttle (`search_interval=2.0s`), pagination. `search_interval` kwarg controls delay between Search API calls (30 req/min limit).
+- `src/git_recap/infra/ghes_client.py` — HTTP client with retry (429 + 403 rate limit + 5xx), search API throttle (`search_interval=2.0s`), pagination, adaptive rate limiting (warns <100, waits <10 remaining). Thread-safe: `_throttle_search()` protected by `threading.Lock`, rate limit state by separate lock. `search_interval` kwarg controls delay between Search API calls (30 req/min limit).
+- `src/git_recap/infra/client_pool.py` — `GHESClientPool`: `queue.Queue`-based thread-safe pool of `GHESClient` instances. `acquire(timeout)`/`release(client)`/`client()` context manager/`close()`. Used for parallel enrichment.
+- `src/git_recap/services/checkpoint.py` — Thread-safe `update_checkpoint(cp_path, key, value)` utility with module-level `threading.Lock`. Used by fetcher/normalizer/summarizer.
+- `src/git_recap/services/fetch_progress.py` — `FetchProgressStore`: chunk search result caching in `data/state/fetch_progress/` for resumable `fetch_range()`. `save_chunk_search(key, buckets)`/`load_chunk_search(key)`/`clear_chunk(key)`/`clear_all()`.
 - `src/git_recap/services/orchestrator.py` — Chains Fetch→Normalize→Summarize. `run_daily(date, types=None)` for single date. `run_range(since, until, force=False, types=None)` uses bulk `fetch_range`→`normalize_range`→`daily_range` for significantly fewer API calls. Passes `force` and `types` through to fetcher. Accepts optional `config` kwarg for path derivation.
 - `src/git_recap/services/date_utils.py` — `date_range`, `weekly_range`, `monthly_range`, `yearly_range`, `catchup_range`, `monthly_chunks`.
-- `src/git_recap/cli/main.py` — Typer app. Subcommands: `fetch`, `normalize`, `summarize`, `run`, `ask`. All four commands support checkpoint catch-up and `--weekly/--monthly/--yearly` options. All four commands support `--force/-f`. `summarize weekly/monthly/yearly` also support `--force/-f` (skip-if-exists). `fetch` and `run` support `--type/-t` for type filtering. All inject `DailyStateStore` into services.
+- `src/git_recap/cli/main.py` — Typer app. Subcommands: `fetch`, `normalize`, `summarize`, `run`, `ask`. All four commands support checkpoint catch-up and `--weekly/--monthly/--yearly` options. All four commands support `--force/-f`. `summarize weekly/monthly/yearly` also support `--force/-f` (skip-if-exists). `fetch` and `run` support `--type/-t` for type filtering and `--workers/-w` for parallel fetch (default: 1). All inject `DailyStateStore` + `FetchProgressStore` into services.
 - `src/git_recap/api/app.py` — FastAPI app. Routes in `api/routes/`. `StaticFiles` mount for `frontend/`.
 
 ### Data directory layout
@@ -77,7 +80,7 @@ data/summaries/{YYYY}/daily/        → {MM}-{DD}.md
 data/summaries/{YYYY}/weekly/       → W{NN}.md
 data/summaries/{YYYY}/monthly/      → {MM}.md
 data/summaries/{YYYY}/              → yearly.md
-data/state/                         → checkpoints.json (last_fetch/normalize/summarize_date), daily_state.json (per-date timestamps), jobs/
+data/state/                         → checkpoints.json (last_fetch/normalize/summarize_date), daily_state.json (per-date timestamps), fetch_progress/ (chunk search cache), jobs/
 ```
 
 ### Checkpoint & catch-up

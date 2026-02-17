@@ -2,6 +2,7 @@
 
 import json
 import logging
+import threading
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -20,6 +21,7 @@ class DailyStateStore:
     def __init__(self, state_path: Path) -> None:
         self._path = state_path
         self._data: dict | None = None
+        self._lock = threading.RLock()
 
     def _load(self) -> dict:
         if self._data is None:
@@ -36,23 +38,25 @@ class DailyStateStore:
             json.dump(self._data, f, indent=2)
 
     def get_timestamp(self, phase: str, date_str: str) -> datetime | None:
-        """Return the stored timestamp for a phase+date, or None."""
-        data = self._load()
-        ts_str = data.get(date_str, {}).get(phase)
-        if ts_str is None:
-            return None
-        return datetime.fromisoformat(ts_str)
+        """Return the stored timestamp for a phase+date, or None. Thread-safe."""
+        with self._lock:
+            data = self._load()
+            ts_str = data.get(date_str, {}).get(phase)
+            if ts_str is None:
+                return None
+            return datetime.fromisoformat(ts_str)
 
     def set_timestamp(self, phase: str, date_str: str, ts: datetime | None = None) -> None:
-        """Set timestamp for a phase+date and persist immediately."""
-        data = self._load()
-        if ts is None:
-            ts = datetime.now(timezone.utc)
-        if date_str not in data:
-            data[date_str] = {}
-        data[date_str][phase] = ts.isoformat()
-        logger.debug("set_timestamp: %s %s → %s", phase, date_str, ts.isoformat())
-        self._save()
+        """Set timestamp for a phase+date and persist immediately. Thread-safe."""
+        with self._lock:
+            data = self._load()
+            if ts is None:
+                ts = datetime.now(timezone.utc)
+            if date_str not in data:
+                data[date_str] = {}
+            data[date_str][phase] = ts.isoformat()
+            logger.debug("set_timestamp: %s %s → %s", phase, date_str, ts.isoformat())
+            self._save()
 
     def is_fetch_stale(self, date_str: str) -> bool:
         """Fetch is stale if no record OR fetched_at.date() <= target_date."""

@@ -259,3 +259,70 @@ class TestStaleDates:
     def test_empty_input(self, store):
         result = store.stale_dates("fetch", [])
         assert result == []
+
+
+# ── Thread safety ──
+
+
+class TestThreadSafety:
+    def test_concurrent_writes(self, tmp_path):
+        """10 threads writing to different dates concurrently."""
+        import threading
+
+        store = DailyStateStore(tmp_path / "daily_state.json")
+        errors = []
+
+        def write_date(i):
+            try:
+                date_str = f"2025-02-{i + 1:02d}"
+                ts = datetime(2025, 2, i + 1, 10, 0, 0, tzinfo=timezone.utc)
+                store.set_timestamp("fetch", date_str, ts)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=write_date, args=(i,)) for i in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors
+
+        # Verify all 10 dates were stored correctly
+        for i in range(10):
+            date_str = f"2025-02-{i + 1:02d}"
+            ts = store.get_timestamp("fetch", date_str)
+            assert ts is not None
+            assert ts == datetime(2025, 2, i + 1, 10, 0, 0, tzinfo=timezone.utc)
+
+    def test_concurrent_read_write(self, tmp_path):
+        """Concurrent reads and writes don't corrupt state."""
+        import threading
+
+        store = DailyStateStore(tmp_path / "daily_state.json")
+        errors = []
+
+        def writer(i):
+            try:
+                date_str = f"2025-03-{i + 1:02d}"
+                ts = datetime(2025, 3, i + 1, 10, 0, 0, tzinfo=timezone.utc)
+                store.set_timestamp("fetch", date_str, ts)
+            except Exception as e:
+                errors.append(e)
+
+        def reader():
+            try:
+                store.stale_dates("fetch", [f"2025-03-{i + 1:02d}" for i in range(5)])
+            except Exception as e:
+                errors.append(e)
+
+        threads = []
+        for i in range(5):
+            threads.append(threading.Thread(target=writer, args=(i,)))
+            threads.append(threading.Thread(target=reader))
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors

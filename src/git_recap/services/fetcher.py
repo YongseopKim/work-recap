@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from collections.abc import Callable
@@ -10,7 +9,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from git_recap.infra.client_pool import GHESClientPool
     from git_recap.services.daily_state import DailyStateStore
+    from git_recap.services.fetch_progress import FetchProgressStore
 
 from git_recap.config import AppConfig
 from git_recap.exceptions import FetchError
@@ -24,7 +25,6 @@ from git_recap.models import (
     PRRaw,
     Review,
     save_json,
-    load_json,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,11 +45,17 @@ class FetcherService:
         config: AppConfig,
         ghes_client: GHESClient,
         daily_state: "DailyStateStore | None" = None,
+        max_workers: int = 1,
+        client_pool: "GHESClientPool | None" = None,
+        progress_store: "FetchProgressStore | None" = None,
     ) -> None:
         self._config = config
         self._client = ghes_client
         self._username = config.username
         self._daily_state = daily_state
+        self._max_workers = max_workers
+        self._client_pool = client_pool
+        self._progress_store = progress_store
 
     def fetch(
         self,
@@ -137,50 +143,71 @@ class FetcherService:
             stale = None  # no narrowing, use per-date check
             chunks = monthly_chunks(since, until)
 
+        use_parallel = self._max_workers > 1
+
         for chunk_start, chunk_end in chunks:
+            chunk_key = f"{chunk_start}__{chunk_end}"
             logger.debug("Processing chunk %s..%s", chunk_start, chunk_end)
             if progress:
                 progress(f"  Fetch chunk {chunk_start}..{chunk_end}")
             try:
-                # Range search per chunk
-                pr_map: dict[str, dict] = {}
-                commit_items: list[dict] = []
-                issue_map: dict[str, dict] = {}
+                # Try to load cached search results (resumable)
+                cached = (
+                    self._progress_store.load_chunk_search(chunk_key)
+                    if self._progress_store
+                    else None
+                )
+                if cached is not None:
+                    logger.info("Resuming chunk %s from cache", chunk_key)
+                    buckets = cached
+                else:
+                    # Range search per chunk (always sequential — throttled)
+                    pr_map: dict[str, dict] = {}
+                    commit_items: list[dict] = []
+                    issue_map: dict[str, dict] = {}
 
-                if "prs" in active:
-                    pr_map = self._search_prs_range(chunk_start, chunk_end)
-                if "commits" in active:
-                    commit_items = self._search_commits_range(chunk_start, chunk_end)
-                if "issues" in active:
-                    issue_map = self._search_issues_range(chunk_start, chunk_end)
+                    if "prs" in active:
+                        pr_map = self._search_prs_range(chunk_start, chunk_end)
+                    if "commits" in active:
+                        commit_items = self._search_commits_range(chunk_start, chunk_end)
+                    if "issues" in active:
+                        issue_map = self._search_issues_range(chunk_start, chunk_end)
 
-                # Bucket by date
-                buckets = self._bucket_by_date(pr_map, commit_items, issue_map)
+                    # Bucket by date
+                    buckets = self._bucket_by_date(pr_map, commit_items, issue_map)
 
-                # Process each date in the chunk
+                    # Cache search results for resumability
+                    if self._progress_store:
+                        self._progress_store.save_chunk_search(chunk_key, buckets)
+
+                # Determine which dates to process in this chunk
                 chunk_dates = date_range(chunk_start, chunk_end)
+                dates_to_process: list[str] = []
                 for d in chunk_dates:
                     if d in processed:
                         continue
                     processed.add(d)
-                    try:
-                        if not force:
-                            if stale is not None:
-                                # Use pre-computed stale set
-                                if d not in stale:
-                                    results.append({"date": d, "status": "skipped"})
-                                    continue
-                            elif self._is_date_fetched(d):
+                    if not force:
+                        if stale is not None:
+                            if d not in stale:
                                 results.append({"date": d, "status": "skipped"})
                                 continue
+                        elif self._is_date_fetched(d):
+                            results.append({"date": d, "status": "skipped"})
+                            continue
+                    dates_to_process.append(d)
 
-                        bucket = buckets.get(d, {"prs": {}, "commits": [], "issues": {}})
-                        self._save_date_from_bucket(d, bucket, active)
-                        self._update_checkpoint(d)
-                        results.append({"date": d, "status": "success"})
-                    except Exception as e:
-                        logger.warning("Failed to process date %s: %s", d, e)
-                        results.append({"date": d, "status": "failed", "error": str(e)})
+                if use_parallel and len(dates_to_process) > 1:
+                    chunk_results = self._process_dates_parallel(dates_to_process, buckets, active)
+                else:
+                    chunk_results = self._process_dates_sequential(
+                        dates_to_process, buckets, active
+                    )
+                results.extend(chunk_results)
+
+                # Clear chunk cache after all dates processed
+                if self._progress_store:
+                    self._progress_store.clear_chunk(chunk_key)
 
             except Exception as e:
                 # Chunk-level failure: mark all unprocessed dates in chunk as failed
@@ -197,37 +224,183 @@ class FetcherService:
 
         return results
 
+    def _process_dates_sequential(
+        self, dates: list[str], buckets: dict, active: set[str]
+    ) -> list[dict]:
+        """Process dates sequentially (default path)."""
+        results: list[dict] = []
+        for d in dates:
+            try:
+                bucket = buckets.get(d, {"prs": {}, "commits": [], "issues": {}})
+                self._save_date_from_bucket(d, bucket, active)
+                self._update_checkpoint(d)
+                results.append({"date": d, "status": "success"})
+            except Exception as e:
+                logger.warning("Failed to process date %s: %s", d, e)
+                results.append({"date": d, "status": "failed", "error": str(e)})
+        return results
+
+    def _process_dates_parallel(
+        self, dates: list[str], buckets: dict, active: set[str]
+    ) -> list[dict]:
+        """Process dates in parallel using ThreadPoolExecutor."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        results: list[dict] = []
+
+        def process_one(d: str) -> dict:
+            try:
+                bucket = buckets.get(d, {"prs": {}, "commits": [], "issues": {}})
+                self._save_date_from_bucket(d, bucket, active)
+                self._update_checkpoint(d)
+                return {"date": d, "status": "success"}
+            except Exception as e:
+                logger.warning("Failed to process date %s: %s", d, e)
+                return {"date": d, "status": "failed", "error": str(e)}
+
+        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
+            futures = {executor.submit(process_one, d): d for d in dates}
+            for future in as_completed(futures):
+                results.append(future.result())
+        return results
+
     def _save_date_from_bucket(self, date_str: str, bucket: dict, active: set[str]) -> None:
-        """bucket 데이터를 날짜별 파일로 enrich+save."""
+        """bucket 데이터를 날짜별 파일로 enrich+save.
+
+        When max_workers > 1 and client_pool is available, enrichment runs
+        in parallel using ThreadPoolExecutor.
+        """
+        use_parallel = self._max_workers > 1 and self._client_pool is not None
+
         if "prs" in active:
-            prs: list[PRRaw] = []
-            for pr_api_url, pr_basic in bucket["prs"].items():
-                try:
-                    prs.append(self._enrich(pr_basic))
-                except FetchError:
-                    logger.warning("Failed to enrich PR %s, skipping", pr_api_url)
+            if use_parallel:
+                prs = self._enrich_prs_parallel(bucket["prs"])
+            else:
+                prs = self._enrich_prs_sequential(bucket["prs"])
             self._save(date_str, prs)
 
         if "commits" in active:
-            commits: list[CommitRaw] = []
-            for item in bucket["commits"]:
-                try:
-                    commits.append(self._enrich_commit(item))
-                except Exception:
-                    logger.warning(
-                        "Failed to enrich commit %s, skipping",
-                        item.get("sha", "unknown"),
-                    )
+            if use_parallel:
+                commits = self._enrich_commits_parallel(bucket["commits"])
+            else:
+                commits = self._enrich_commits_sequential(bucket["commits"])
             self._save_commits(date_str, commits)
 
         if "issues" in active:
-            issues: list[IssueRaw] = []
-            for api_url, item in bucket["issues"].items():
-                try:
-                    issues.append(self._enrich_issue(item))
-                except Exception:
-                    logger.warning("Failed to enrich issue %s, skipping", api_url)
+            if use_parallel:
+                issues = self._enrich_issues_parallel(bucket["issues"])
+            else:
+                issues = self._enrich_issues_sequential(bucket["issues"])
             self._save_issues(date_str, issues)
+
+    def _enrich_prs_sequential(self, pr_map: dict[str, dict]) -> list[PRRaw]:
+        prs: list[PRRaw] = []
+        for pr_api_url, pr_basic in pr_map.items():
+            try:
+                prs.append(self._enrich(pr_basic))
+            except FetchError:
+                logger.warning("Failed to enrich PR %s, skipping", pr_api_url)
+        return prs
+
+    def _enrich_prs_parallel(self, pr_map: dict[str, dict]) -> list[PRRaw]:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        pool = self._client_pool
+        prs: list[PRRaw] = []
+
+        def enrich_one(pr_api_url: str, pr_basic: dict) -> PRRaw | None:
+            client = pool.acquire()
+            try:
+                return self._enrich(pr_basic, client=client)
+            except FetchError:
+                logger.warning("Failed to enrich PR %s, skipping", pr_api_url)
+                return None
+            finally:
+                pool.release(client)
+
+        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
+            futures = {
+                executor.submit(enrich_one, url, basic): url for url, basic in pr_map.items()
+            }
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    prs.append(result)
+        return prs
+
+    def _enrich_commits_sequential(self, commit_items: list[dict]) -> list[CommitRaw]:
+        commits: list[CommitRaw] = []
+        for item in commit_items:
+            try:
+                commits.append(self._enrich_commit(item))
+            except Exception:
+                logger.warning(
+                    "Failed to enrich commit %s, skipping",
+                    item.get("sha", "unknown"),
+                )
+        return commits
+
+    def _enrich_commits_parallel(self, commit_items: list[dict]) -> list[CommitRaw]:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        pool = self._client_pool
+        commits: list[CommitRaw] = []
+
+        def enrich_one(item: dict) -> CommitRaw | None:
+            client = pool.acquire()
+            try:
+                return self._enrich_commit(item, client=client)
+            except Exception:
+                logger.warning(
+                    "Failed to enrich commit %s, skipping",
+                    item.get("sha", "unknown"),
+                )
+                return None
+            finally:
+                pool.release(client)
+
+        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
+            futures = {executor.submit(enrich_one, item): item for item in commit_items}
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    commits.append(result)
+        return commits
+
+    def _enrich_issues_sequential(self, issue_map: dict[str, dict]) -> list[IssueRaw]:
+        issues: list[IssueRaw] = []
+        for api_url, item in issue_map.items():
+            try:
+                issues.append(self._enrich_issue(item))
+            except Exception:
+                logger.warning("Failed to enrich issue %s, skipping", api_url)
+        return issues
+
+    def _enrich_issues_parallel(self, issue_map: dict[str, dict]) -> list[IssueRaw]:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        pool = self._client_pool
+        issues: list[IssueRaw] = []
+
+        def enrich_one(api_url: str, item: dict) -> IssueRaw | None:
+            client = pool.acquire()
+            try:
+                return self._enrich_issue(item, client=client)
+            except Exception:
+                logger.warning("Failed to enrich issue %s, skipping", api_url)
+                return None
+            finally:
+                pool.release(client)
+
+        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
+            futures = {
+                executor.submit(enrich_one, url, item): url for url, item in issue_map.items()
+            }
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    issues.append(result)
+        return issues
 
     @staticmethod
     def _bucket_by_date(
@@ -378,16 +551,17 @@ class FetcherService:
 
     # ── PR Enrich ──
 
-    def _enrich(self, pr_basic: dict) -> PRRaw:
+    def _enrich(self, pr_basic: dict, client: GHESClient | None = None) -> PRRaw:
         """기본 PR 정보에 files, comments, reviews를 추가 수집."""
+        c = client or self._client
         pr_api_url = pr_basic.get("pull_request", {}).get("url", "")
         owner, repo, number = self._parse_pr_url(pr_api_url)
 
-        pr_detail = self._client.get_pr(owner, repo, number)
+        pr_detail = c.get_pr(owner, repo, number)
 
-        raw_files = self._client.get_pr_files(owner, repo, number)
-        raw_comments = self._client.get_pr_comments(owner, repo, number)
-        raw_reviews = self._client.get_pr_reviews(owner, repo, number)
+        raw_files = c.get_pr_files(owner, repo, number)
+        raw_comments = c.get_pr_comments(owner, repo, number)
+        raw_reviews = c.get_pr_reviews(owner, repo, number)
 
         filtered_comments = [c for c in raw_comments if not self._is_noise_comment(c)]
         filtered_reviews = [r for r in raw_reviews if not self._is_noise_review(r)]
@@ -485,13 +659,14 @@ class FetcherService:
 
         return all_items
 
-    def _enrich_commit(self, item: dict) -> CommitRaw:
+    def _enrich_commit(self, item: dict, client: GHESClient | None = None) -> CommitRaw:
         """검색 결과를 CommitRaw로 변환. get_commit으로 files 포함 상세 조회."""
+        c = client or self._client
         repo_full = item["repository"]["full_name"]
         sha = item["sha"]
         owner, repo = repo_full.split("/", 1)
 
-        detail = self._client.get_commit(owner, repo, sha)
+        detail = c.get_commit(owner, repo, sha)
 
         raw_files = detail.get("files", [])
         return CommitRaw(
@@ -544,13 +719,14 @@ class FetcherService:
                 logger.warning("Failed to enrich issue %s, skipping", api_url)
         return issues
 
-    def _enrich_issue(self, item: dict) -> IssueRaw:
+    def _enrich_issue(self, item: dict, client: GHESClient | None = None) -> IssueRaw:
         """Issue 검색 결과를 IssueRaw로 변환."""
+        c = client or self._client
         api_url = item["url"]
         owner, repo, number = self._parse_issue_url(api_url)
 
-        detail = self._client.get_issue(owner, repo, number)
-        raw_comments = self._client.get_issue_comments(owner, repo, number)
+        detail = c.get_issue(owner, repo, number)
+        raw_comments = c.get_issue_comments(owner, repo, number)
 
         filtered_comments = [c for c in raw_comments if not self._is_noise_comment(c)]
 
@@ -636,17 +812,9 @@ class FetcherService:
         return output_path
 
     def _update_checkpoint(self, target_date: str) -> None:
-        cp_path = self._config.checkpoints_path
-        cp_path.parent.mkdir(parents=True, exist_ok=True)
+        from git_recap.services.checkpoint import update_checkpoint
 
-        checkpoints = {}
-        if cp_path.exists():
-            checkpoints = load_json(cp_path)
-
-        checkpoints["last_fetch_date"] = target_date
-
-        with open(cp_path, "w", encoding="utf-8") as f:
-            json.dump(checkpoints, f, indent=2)
+        update_checkpoint(self._config.checkpoints_path, "last_fetch_date", target_date)
 
         if self._daily_state is not None:
             self._daily_state.set_timestamp("fetch", target_date)

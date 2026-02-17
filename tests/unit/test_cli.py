@@ -1471,3 +1471,43 @@ class TestTokenUsageDisplay:
         result = runner.invoke(app, ["summarize", "yearly", "2025"])
         assert result.exit_code == 0
         assert "Token usage:" in result.output
+
+
+class TestWorkersOption:
+    @patch("git_recap.cli.main.FetcherService")
+    def test_fetch_workers_default(self, mock_cls):
+        """Default workers=1 → no pool."""
+        mock_cls.return_value.fetch.return_value = {"prs": Path("/tmp/prs.json")}
+        result = runner.invoke(app, ["fetch", "2025-02-16"])
+        assert result.exit_code == 0
+        # FetcherService should be called without max_workers > 1
+        call_kwargs = mock_cls.call_args
+        assert call_kwargs.kwargs.get("max_workers", 1) == 1
+
+    @patch("git_recap.infra.client_pool.GHESClientPool")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_fetch_workers_creates_pool(self, mock_fetcher_cls, mock_pool_cls):
+        """--workers 3 creates pool and passes it to FetcherService."""
+        mock_fetcher_cls.return_value.fetch_range.return_value = [
+            {"date": "2025-02-16", "status": "success"},
+        ]
+        result = runner.invoke(
+            app, ["fetch", "--since", "2025-02-16", "--until", "2025-02-16", "--workers", "3"]
+        )
+        assert result.exit_code == 0
+        mock_pool_cls.assert_called_once()
+        call_kwargs = mock_fetcher_cls.call_args
+        assert call_kwargs.kwargs.get("max_workers") == 3
+        assert call_kwargs.kwargs.get("client_pool") is not None
+
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_workers_default(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        """run with default workers=1."""
+        mock_orch.return_value.run_daily.return_value = Path("/tmp/summary.md")
+        result = runner.invoke(app, ["run", "2025-02-16"])
+        assert result.exit_code == 0
+        call_kwargs = mock_fetch.call_args
+        assert call_kwargs.kwargs.get("max_workers", 1) == 1
