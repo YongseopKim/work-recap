@@ -686,6 +686,97 @@ class TestRun:
         assert result.exit_code == 1
         assert "Error" in result.output
 
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_no_args_default_today(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        """인자 없고 checkpoint 없으면 오늘 날짜로 run_daily 호출."""
+        mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
+        result = runner.invoke(app, ["run"])
+        assert result.exit_code == 0
+        assert "Pipeline complete" in result.output
+        mock_orch.return_value.run_daily.assert_called_once()
+
+    @patch("git_recap.cli.main.date_utils")
+    @patch("git_recap.cli.main._read_last_summarize_date")
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_no_args_with_checkpoint(
+        self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_read, mock_du
+    ):
+        """인자 없고 checkpoint 있으면 catch-up → run_range 호출."""
+        mock_read.return_value = "2026-02-14"
+        mock_du.catchup_range.return_value = ("2026-02-15", "2026-02-17")
+        mock_du.date_range.return_value = ["2026-02-15", "2026-02-16", "2026-02-17"]
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2026-02-15", "status": "success", "path": "/p1"},
+            {"date": "2026-02-16", "status": "success", "path": "/p2"},
+            {"date": "2026-02-17", "status": "success", "path": "/p3"},
+        ]
+        result = runner.invoke(app, ["run"])
+        assert result.exit_code == 0
+        assert "3/3 succeeded" in result.output
+        mock_orch.return_value.run_range.assert_called_once_with(
+            "2026-02-15", "2026-02-17"
+        )
+
+    @patch("git_recap.cli.main.date_utils")
+    @patch("git_recap.cli.main._read_last_summarize_date")
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_already_up_to_date(
+        self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_read, mock_du
+    ):
+        """날짜 목록 비어있으면 'Already up to date.'."""
+        mock_read.return_value = "2026-02-17"
+        mock_du.catchup_range.return_value = ("2026-02-18", "2026-02-17")
+        mock_du.date_range.return_value = []
+        result = runner.invoke(app, ["run"])
+        assert result.exit_code == 0
+        assert "Already up to date." in result.output
+
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_weekly(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        mock_orch.return_value.run_range.return_value = [
+            {"date": f"2026-02-0{i}", "status": "success", "path": f"/p{i}"}
+            for i in range(2, 9)
+        ]
+        result = runner.invoke(app, ["run", "--weekly", "2026-7"])
+        assert result.exit_code == 0
+        assert "7/7 succeeded" in result.output
+
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_monthly(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2026-01-01", "status": "success", "path": "/p1"},
+        ]
+        result = runner.invoke(app, ["run", "--monthly", "2026-1"])
+        assert result.exit_code == 0
+        assert "succeeded" in result.output
+
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_yearly(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2025-01-01", "status": "success", "path": "/p1"},
+        ]
+        result = runner.invoke(app, ["run", "--yearly", "2025"])
+        assert result.exit_code == 0
+        assert "succeeded" in result.output
+
 
 class TestAsk:
     @patch("git_recap.cli.main.SummarizerService")

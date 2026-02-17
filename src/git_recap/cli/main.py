@@ -409,12 +409,33 @@ def summarize_yearly(
 @app.command()
 def run(
     target_date: str = typer.Argument(
-        default=None, help="Target date (YYYY-MM-DD). Default: today"
+        default=None, help="Target date (YYYY-MM-DD). Default: today or catch-up"
     ),
     since: str = typer.Option(None, help="Range start (YYYY-MM-DD)"),
     until: str = typer.Option(None, help="Range end (YYYY-MM-DD)"),
+    weekly: str = typer.Option(None, help="YEAR-WEEK, e.g. 2026-7"),
+    monthly: str = typer.Option(None, help="YEAR-MONTH, e.g. 2026-2"),
+    yearly: int = typer.Option(None, help="Year, e.g. 2026"),
 ) -> None:
     """Run full pipeline (fetch → normalize → summarize)."""
+    dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
+    endpoints = _resolve_range_endpoints(target_date, since, until, weekly, monthly, yearly)
+
+    # catch-up 모드
+    catchup_endpoints: tuple[str, str] | None = None
+    if dates is None:
+        config = _get_config()
+        last = _read_last_summarize_date(config)
+        if last:
+            s, u = date_utils.catchup_range(last)
+            dates = date_utils.date_range(s, u)
+            if not dates:
+                typer.echo("Already up to date.")
+                return
+            catchup_endpoints = (s, u)
+        else:
+            dates = [date.today().isoformat()]
+
     config = _get_config()
 
     try:
@@ -425,8 +446,9 @@ def run(
         summarizer = SummarizerService(config, llm)
         orchestrator = OrchestratorService(fetcher, normalizer, summarizer)
 
-        if since and until:
-            results = orchestrator.run_range(since, until)
+        range_ep = endpoints or catchup_endpoints
+        if range_ep:
+            results = orchestrator.run_range(range_ep[0], range_ep[1])
             succeeded = sum(1 for r in results if r["status"] == "success")
             typer.echo(f"Range complete: {succeeded}/{len(results)} succeeded")
             for r in results:
@@ -437,8 +459,7 @@ def run(
             if succeeded < len(results):
                 raise typer.Exit(code=1)
         else:
-            target_date = target_date or date.today().isoformat()
-            path = orchestrator.run_daily(target_date)
+            path = orchestrator.run_daily(dates[0])
             ghes.close()
             typer.echo(f"Pipeline complete → {path}")
     except GitRecapError as e:

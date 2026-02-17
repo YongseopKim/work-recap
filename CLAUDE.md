@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install (editable, with dev deps)
 pip install -e ".[dev]"
 
-# Run unit tests (403 tests, integration excluded by default)
+# Run unit tests (409 tests, integration excluded by default)
 pytest
 
 # Run integration tests (require .env with real credentials)
@@ -62,7 +62,7 @@ Infrastructure (GHESClient: httpx, LLMClient: OpenAI/Anthropic)
 - `src/git_recap/__main__.py` — `python -m git_recap` entry point.
 - `src/git_recap/services/orchestrator.py` — Chains Fetch→Normalize→Summarize. `run_daily(date)` and `run_range(since, until)`.
 - `src/git_recap/services/date_utils.py` — `date_range`, `weekly_range`, `monthly_range`, `yearly_range`, `catchup_range`, `monthly_chunks`.
-- `src/git_recap/cli/main.py` — Typer app. Subcommands: `fetch`, `normalize`, `summarize`, `run`, `ask`. All three data commands support `--force/-f` and checkpoint catch-up mode.
+- `src/git_recap/cli/main.py` — Typer app. Subcommands: `fetch`, `normalize`, `summarize`, `run`, `ask`. `fetch`, `normalize`, `summarize daily`, `run` all support checkpoint catch-up and `--weekly/--monthly/--yearly` options. `fetch`, `normalize`, `summarize daily` also support `--force/-f`.
 - `src/git_recap/api/app.py` — FastAPI app. Routes in `api/routes/`. `StaticFiles` mount for `frontend/`.
 
 ### Data directory layout
@@ -80,7 +80,7 @@ data/state/                         → checkpoints.json (last_fetch/normalize/s
 
 ### Checkpoint & catch-up
 
-All three services (fetch, normalize, summarize daily) share `data/state/checkpoints.json`:
+All four commands (fetch, normalize, summarize daily, run) share `data/state/checkpoints.json`:
 ```json
 {
   "last_fetch_date": "2026-02-17",
@@ -89,7 +89,7 @@ All three services (fetch, normalize, summarize daily) share `data/state/checkpo
 }
 ```
 
-Each service updates only its own key after successful processing. CLI catch-up flow (applies to `fetch`, `normalize`, `summarize daily`):
+Each service updates only its own key after successful processing. CLI catch-up flow (applies to `fetch`, `normalize`, `summarize daily`, `run`):
 - No args + checkpoint exists → `catchup_range(last_date)` → range method call
 - No args + no checkpoint → run today only
 - Empty date list → "Already up to date."

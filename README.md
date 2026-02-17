@@ -66,10 +66,11 @@ git-recap summarize daily --weekly 2025-7
 # fetch 전용 옵션
 git-recap fetch --type prs 2025-02-16   # PR만 수집 (prs, commits, issues)
 
-# catch-up: checkpoint 이후 ~ 오늘 (fetch, normalize, summarize daily 공통)
+# catch-up: checkpoint 이후 ~ 오늘 (fetch, normalize, summarize daily, run 공통)
 git-recap fetch                         # last_fetch_date 이후 자동 수집
 git-recap normalize                     # last_normalize_date 이후 자동 변환
 git-recap summarize daily               # last_summarize_date 이후 자동 요약
+git-recap run                           # last_summarize_date 이후 전체 파이프라인
 
 # --force/-f: 기존 데이터 무시하고 재처리 (fetch, normalize, summarize daily 공통)
 git-recap fetch --since 2025-02-01 --until 2025-02-16 --force
@@ -79,6 +80,10 @@ git-recap summarize daily --weekly 2025-7 --force
 # 전체 파이프라인 (fetch → normalize → summarize)
 git-recap run 2025-02-16                # 단일 날짜
 git-recap run --since 2025-02-01 --until 2025-02-16  # 기간 범위
+git-recap run --weekly 2025-7                          # ISO 주 단위
+git-recap run --monthly 2025-2                         # 월 단위
+git-recap run --yearly 2025                            # 연 단위
+git-recap run                           # catch-up (last_summarize_date 이후 자동)
 
 # 자유 질문
 git-recap ask "이번 달 주요 성과는?"
@@ -186,7 +191,7 @@ git-recap/
 │   ├── yearly.md
 │   └── query.md
 ├── designs/                    # 모듈별 상세 설계 문서
-├── tests/unit/                 # 403개 단위 테스트
+├── tests/unit/                 # 409개 단위 테스트
 ├── pyproject.toml
 └── .env.example
 ```
