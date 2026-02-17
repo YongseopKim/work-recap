@@ -1,5 +1,3 @@
-import pytest
-
 from git_recap.models import (
     Activity,
     ActivityKind,

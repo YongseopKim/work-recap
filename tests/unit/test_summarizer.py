@@ -1048,3 +1048,64 @@ class TestCascadeStaleness:
         # 8. Regenerate yearly
         summarizer.yearly(2025)
         assert mock_llm.chat.call_count == 3
+
+
+# ── Parallel daily_range 테스트 ──
+
+
+class TestParallelDailyRange:
+    def test_parallel_basic_range(self, test_config, mock_llm, prompts_dir):
+        """parallel daily_range produces same results as sequential."""
+        dates = ["2025-02-14", "2025-02-15", "2025-02-16"]
+        for d in dates:
+            _save_normalized(test_config, d)
+        summarizer = SummarizerService(test_config, mock_llm)
+        results = summarizer.daily_range("2025-02-14", "2025-02-16", max_workers=3)
+        assert len(results) == 3
+        assert all(r["status"] == "success" for r in results)
+
+    def test_parallel_failure_resilience(self, test_config, mock_llm, prompts_dir):
+        """parallel: middle date fails, others succeed."""
+        _save_normalized(test_config, "2025-02-14")
+        # 2025-02-15: no normalized data
+        _save_normalized(test_config, "2025-02-16")
+
+        summarizer = SummarizerService(test_config, mock_llm)
+        results = summarizer.daily_range("2025-02-14", "2025-02-16", max_workers=3)
+        statuses = {r["date"]: r["status"] for r in results}
+        assert statuses["2025-02-14"] == "success"
+        assert statuses["2025-02-15"] == "failed"
+        assert statuses["2025-02-16"] == "success"
+
+    def test_parallel_checkpoint_is_max_date(self, test_config, mock_llm, prompts_dir):
+        """parallel: checkpoint should be max successful date."""
+        dates = ["2025-02-14", "2025-02-15", "2025-02-16"]
+        for d in dates:
+            _save_normalized(test_config, d)
+        summarizer = SummarizerService(test_config, mock_llm)
+        summarizer.daily_range("2025-02-14", "2025-02-16", max_workers=3)
+
+        from git_recap.models import load_json
+
+        cp = load_json(test_config.checkpoints_path)
+        assert cp["last_summarize_date"] == "2025-02-16"
+
+    def test_sequential_when_max_workers_1(self, test_config, mock_llm, prompts_dir):
+        """max_workers=1 uses sequential execution."""
+        dates = ["2025-02-14", "2025-02-15"]
+        for d in dates:
+            _save_normalized(test_config, d)
+        summarizer = SummarizerService(test_config, mock_llm)
+        results = summarizer.daily_range("2025-02-14", "2025-02-15", max_workers=1)
+        assert len(results) == 2
+        assert all(r["status"] == "success" for r in results)
+
+    def test_parallel_results_in_date_order(self, test_config, mock_llm, prompts_dir):
+        """parallel: results returned in date order."""
+        dates = ["2025-02-14", "2025-02-15", "2025-02-16"]
+        for d in dates:
+            _save_normalized(test_config, d)
+        summarizer = SummarizerService(test_config, mock_llm)
+        results = summarizer.daily_range("2025-02-14", "2025-02-16", max_workers=3)
+        result_dates = [r["date"] for r in results]
+        assert result_dates == dates

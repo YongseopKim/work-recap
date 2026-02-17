@@ -1,5 +1,6 @@
 """DailyStateStore tests — per-date timestamp state for staleness detection."""
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import pytest
@@ -259,3 +260,60 @@ class TestStaleDates:
     def test_empty_input(self, store):
         result = store.stale_dates("fetch", [])
         assert result == []
+
+
+# ── Thread safety ──
+
+
+class TestThreadSafety:
+    def test_concurrent_set_timestamp(self, tmp_path):
+        """10 threads writing different dates concurrently should not corrupt data."""
+        store = DailyStateStore(tmp_path / "daily_state.json")
+
+        def write_date(i):
+            date_str = f"2025-02-{i + 1:02d}"
+            ts = datetime(2025, 2, i + 1, 10, 0, 0, tzinfo=timezone.utc)
+            store.set_timestamp("fetch", date_str, ts)
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            list(executor.map(write_date, range(10)))
+
+        # All 10 dates should be written correctly
+        for i in range(10):
+            date_str = f"2025-02-{i + 1:02d}"
+            ts = store.get_timestamp("fetch", date_str)
+            expected = datetime(2025, 2, i + 1, 10, 0, 0, tzinfo=timezone.utc)
+            assert ts == expected, f"Date {date_str}: expected {expected}, got {ts}"
+
+    def test_concurrent_set_and_get(self, tmp_path):
+        """Concurrent reads and writes should not raise or corrupt."""
+        store = DailyStateStore(tmp_path / "daily_state.json")
+
+        # Pre-populate some data
+        for i in range(5):
+            store.set_timestamp(
+                "fetch",
+                f"2025-02-{i + 1:02d}",
+                datetime(2025, 2, i + 1, 10, 0, 0, tzinfo=timezone.utc),
+            )
+
+        errors = []
+
+        def worker(i):
+            try:
+                if i % 2 == 0:
+                    # Writer
+                    date_str = f"2025-02-{i + 1:02d}"
+                    ts = datetime(2025, 2, i + 1, 12, 0, 0, tzinfo=timezone.utc)
+                    store.set_timestamp("normalize", date_str, ts)
+                else:
+                    # Reader
+                    date_str = f"2025-02-{(i % 5) + 1:02d}"
+                    store.get_timestamp("fetch", date_str)
+            except Exception as e:
+                errors.append(e)
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            list(executor.map(worker, range(20)))
+
+        assert errors == [], f"Errors during concurrent access: {errors}"

@@ -264,11 +264,15 @@ class TestRunRangeOptimized:
                 call_order.append("fetch_range") or []
             )
         )
-        mocks["normalizer"].normalize_range.side_effect = lambda s, u, force=False, progress=None: (
-            call_order.append("normalize_range") or []
+        mocks["normalizer"].normalize_range.side_effect = (
+            lambda s, u, force=False, progress=None, max_workers=1: (
+                call_order.append("normalize_range") or []
+            )
         )
-        mocks["summarizer"].daily_range.side_effect = lambda s, u, force=False, progress=None: (
-            call_order.append("daily_range") or []
+        mocks["summarizer"].daily_range.side_effect = (
+            lambda s, u, force=False, progress=None, max_workers=1: (
+                call_order.append("daily_range") or []
+            )
         )
 
         orchestrator_with_config.run_range("2025-02-14", "2025-02-15")
@@ -503,10 +507,10 @@ class TestRunRangeForcePassthrough:
             "2025-02-14", "2025-02-14", types=None, force=True, progress=None
         )
         mocks["normalizer"].normalize_range.assert_called_once_with(
-            "2025-02-14", "2025-02-14", force=True, progress=None
+            "2025-02-14", "2025-02-14", force=True, progress=None, max_workers=1
         )
         mocks["summarizer"].daily_range.assert_called_once_with(
-            "2025-02-14", "2025-02-14", force=True, progress=None
+            "2025-02-14", "2025-02-14", force=True, progress=None, max_workers=1
         )
 
     def test_force_false_by_default(self, mocks, mock_config):
@@ -524,10 +528,10 @@ class TestRunRangeForcePassthrough:
             "2025-02-14", "2025-02-14", types=None, force=False, progress=None
         )
         mocks["normalizer"].normalize_range.assert_called_once_with(
-            "2025-02-14", "2025-02-14", force=False, progress=None
+            "2025-02-14", "2025-02-14", force=False, progress=None, max_workers=1
         )
         mocks["summarizer"].daily_range.assert_called_once_with(
-            "2025-02-14", "2025-02-14", force=False, progress=None
+            "2025-02-14", "2025-02-14", force=False, progress=None, max_workers=1
         )
 
 
@@ -617,9 +621,48 @@ class TestProgressCallback:
             "2025-02-14", "2025-02-14", types=None, force=False, progress=cb
         )
         mocks["normalizer"].normalize_range.assert_called_once_with(
-            "2025-02-14", "2025-02-14", force=False, progress=cb
+            "2025-02-14", "2025-02-14", force=False, progress=cb, max_workers=1
         )
         mocks["summarizer"].daily_range.assert_called_once_with(
-            "2025-02-14", "2025-02-14", force=False, progress=cb
+            "2025-02-14", "2025-02-14", force=False, progress=cb, max_workers=1
         )
         assert cb.call_count >= 3  # Phase 1/3, 2/3, 3/3
+
+
+# ── max_workers passthrough ──
+
+
+class TestRunRangeMaxWorkers:
+    def test_max_workers_passed_to_services(self, mocks, mock_config):
+        """run_range(max_workers=5) → normalize_range/daily_range에 전달."""
+        mocks["fetcher"].fetch_range.return_value = []
+        mocks["normalizer"].normalize_range.return_value = []
+        mocks["summarizer"].daily_range.return_value = []
+
+        orchestrator = OrchestratorService(
+            mocks["fetcher"], mocks["normalizer"], mocks["summarizer"], config=mock_config
+        )
+        orchestrator.run_range("2025-02-14", "2025-02-16", max_workers=5)
+
+        _, kwargs = mocks["normalizer"].normalize_range.call_args
+        assert kwargs.get("max_workers") == 5
+
+        _, kwargs = mocks["summarizer"].daily_range.call_args
+        assert kwargs.get("max_workers") == 5
+
+    def test_max_workers_default_1(self, mocks, mock_config):
+        """run_range() 기본 max_workers=1."""
+        mocks["fetcher"].fetch_range.return_value = []
+        mocks["normalizer"].normalize_range.return_value = []
+        mocks["summarizer"].daily_range.return_value = []
+
+        orchestrator = OrchestratorService(
+            mocks["fetcher"], mocks["normalizer"], mocks["summarizer"], config=mock_config
+        )
+        orchestrator.run_range("2025-02-14", "2025-02-16")
+
+        _, kwargs = mocks["normalizer"].normalize_range.call_args
+        assert kwargs.get("max_workers") == 1
+
+        _, kwargs = mocks["summarizer"].daily_range.call_args
+        assert kwargs.get("max_workers") == 1

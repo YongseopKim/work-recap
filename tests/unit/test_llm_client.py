@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -193,3 +194,27 @@ class TestTimeoutAndRetry:
         """기본값 timeout=120, max_retries=3."""
         LLMClient("openai", "key", "gpt-4o-mini")
         mock_openai_cls.assert_called_once_with(api_key="key", timeout=120.0, max_retries=3)
+
+
+class TestThreadSafety:
+    @patch("git_recap.infra.llm_client.OpenAI")
+    def test_concurrent_chat_usage_accumulation(self, mock_openai_cls):
+        """10 threads calling chat() concurrently should accumulate usage correctly."""
+        mock_instance = MagicMock()
+        mock_instance.chat.completions.create.return_value = _openai_response(
+            prompt=100, completion=50, total=150
+        )
+        mock_openai_cls.return_value = mock_instance
+
+        client = LLMClient("openai", "key", "gpt-4o-mini")
+
+        def call_chat(i):
+            client.chat(f"system_{i}", f"user_{i}")
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            list(executor.map(call_chat, range(10)))
+
+        assert client.usage.prompt_tokens == 1000
+        assert client.usage.completion_tokens == 500
+        assert client.usage.total_tokens == 1500
+        assert client.usage.call_count == 10

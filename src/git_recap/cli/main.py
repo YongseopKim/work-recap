@@ -291,8 +291,9 @@ def normalize(
     yearly: int = typer.Option(None, help="Year, e.g. 2026"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-normalize even if data exists"),
     enrich: bool = typer.Option(
-        False, "--enrich", "-e", help="Enrich activities with LLM (change_summary, intent)"
+        True, "--enrich/--no-enrich", help="Enrich activities with LLM (change_summary, intent)"
     ),
+    workers: int = typer.Option(None, "--workers", "-w", help="Parallel workers (default: config)"),
 ) -> None:
     """Normalize raw PR data into activities and stats."""
     logger.info("Command: normalize date=%s force=%s enrich=%s", target_date, force, enrich)
@@ -315,6 +316,7 @@ def normalize(
             dates = [date.today().isoformat()]
 
     config = _get_config()
+    max_workers = workers if workers is not None else config.max_workers
 
     try:
         ds = DailyStateStore(config.daily_state_path)
@@ -328,6 +330,7 @@ def normalize(
                 range_ep[1],
                 force=force,
                 progress=_progress,
+                max_workers=max_workers,
             )
             _print_range_results("Normalized", range_results)
         else:
@@ -354,6 +357,7 @@ def summarize_daily(
     monthly: str = typer.Option(None, help="YEAR-MONTH, e.g. 2026-2"),
     yearly: int = typer.Option(None, help="Year, e.g. 2026"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-summarize even if data exists"),
+    workers: int = typer.Option(None, "--workers", "-w", help="Parallel workers (default: config)"),
 ) -> None:
     """Generate daily summary."""
     logger.info("Command: summarize daily date=%s force=%s", target_date, force)
@@ -376,6 +380,7 @@ def summarize_daily(
             dates = [date.today().isoformat()]
 
     config = _get_config()
+    max_workers = workers if workers is not None else config.max_workers
 
     try:
         llm = _get_llm_client(config)
@@ -389,6 +394,7 @@ def summarize_daily(
                 range_ep[1],
                 force=force,
                 progress=_progress,
+                max_workers=max_workers,
             )
             _print_range_results("Daily summary", range_results)
         else:
@@ -473,9 +479,15 @@ def run(
     monthly: str = typer.Option(None, help="YEAR-MONTH, e.g. 2026-2"),
     yearly: int = typer.Option(None, help="Year, e.g. 2026"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-run even if data exists"),
+    enrich: bool = typer.Option(
+        True, "--enrich/--no-enrich", help="Enrich activities with LLM (change_summary, intent)"
+    ),
+    workers: int = typer.Option(None, "--workers", "-w", help="Parallel workers (default: config)"),
 ) -> None:
     """Run full pipeline (fetch → normalize → summarize)."""
-    logger.info("Command: run date=%s types=%s force=%s", target_date, type, force)
+    logger.info(
+        "Command: run date=%s types=%s force=%s enrich=%s", target_date, type, force, enrich
+    )
     # --type 검증
     types: set[str] | None = None
     if type is not None:
@@ -503,20 +515,26 @@ def run(
             dates = [date.today().isoformat()]
 
     config = _get_config()
+    max_workers = workers if workers is not None else config.max_workers
 
     try:
         ghes = _get_ghes_client(config)
         llm = _get_llm_client(config)
         ds = DailyStateStore(config.daily_state_path)
         fetcher = FetcherService(config, ghes, daily_state=ds)
-        normalizer = NormalizerService(config, daily_state=ds)
+        normalizer = NormalizerService(config, daily_state=ds, llm=llm if enrich else None)
         summarizer = SummarizerService(config, llm, daily_state=ds)
         orchestrator = OrchestratorService(fetcher, normalizer, summarizer, config=config)
 
         range_ep = endpoints or catchup_endpoints
         if range_ep:
             results = orchestrator.run_range(
-                range_ep[0], range_ep[1], force=force, types=types, progress=_progress
+                range_ep[0],
+                range_ep[1],
+                force=force,
+                types=types,
+                progress=_progress,
+                max_workers=max_workers,
             )
             succeeded = sum(1 for r in results if r["status"] == "success")
             skipped = sum(1 for r in results if r["status"] == "skipped")

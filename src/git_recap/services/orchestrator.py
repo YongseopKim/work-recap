@@ -83,6 +83,7 @@ class OrchestratorService:
         force: bool = False,
         types: set[str] | None = None,
         progress: Callable[[str], None] | None = None,
+        max_workers: int = 1,
     ) -> list[dict]:
         """
         기간 범위 backfill using bulk operations.
@@ -93,7 +94,14 @@ class OrchestratorService:
         Returns:
             [{date, status, path?, error?}] 날짜별 결과
         """
-        logger.info("Pipeline range: %s..%s (force=%s, types=%s)", since, until, force, types)
+        logger.info(
+            "Pipeline range: %s..%s (force=%s, types=%s, workers=%d)",
+            since,
+            until,
+            force,
+            types,
+            max_workers,
+        )
         start = date.fromisoformat(since)
         end = date.fromisoformat(until)
         if start > end:
@@ -108,13 +116,13 @@ class OrchestratorService:
         if progress:
             progress(f"Phase 2/3: Normalizing {since}..{until}")
         normalize_results = self._normalizer.normalize_range(
-            since, until, force=force, progress=progress
+            since, until, force=force, progress=progress, max_workers=max_workers
         )
         logger.info("Phase complete: normalize → summarize (%s..%s)", since, until)
         if progress:
             progress(f"Phase 3/3: Summarizing {since}..{until}")
         summarize_results = self._summarizer.daily_range(
-            since, until, force=force, progress=progress
+            since, until, force=force, progress=progress, max_workers=max_workers
         )
 
         results = self._merge_results(fetch_results, normalize_results, summarize_results)

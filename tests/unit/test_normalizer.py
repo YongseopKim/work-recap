@@ -1421,3 +1421,78 @@ class TestActivityNewFields:
         act = activity_from_dict(d)
         assert act.change_summary == ""
         assert act.intent == ""
+
+
+# ── Parallel normalize_range 테스트 ──
+
+
+class TestParallelNormalizeRange:
+    def _prepare_raw(self, test_config, dates):
+        for d in dates:
+            _save_raw(
+                test_config,
+                [
+                    _make_pr(
+                        author="testuser", created_at=f"{d}T09:00:00Z", updated_at=f"{d}T15:00:00Z"
+                    )
+                ],
+                date=d,
+            )
+
+    def test_parallel_basic_range(self, test_config):
+        """parallel normalize_range produces same results as sequential."""
+        dates = ["2025-02-14", "2025-02-15", "2025-02-16"]
+        self._prepare_raw(test_config, dates)
+        normalizer = NormalizerService(test_config)
+        results = normalizer.normalize_range("2025-02-14", "2025-02-16", max_workers=3)
+        assert len(results) == 3
+        assert all(r["status"] == "success" for r in results)
+
+    def test_parallel_failure_resilience(self, test_config):
+        """parallel: middle date fails, others succeed."""
+        _save_raw(
+            test_config,
+            [_make_pr(author="testuser", created_at="2025-02-14T09:00:00Z")],
+            date="2025-02-14",
+        )
+        # 2025-02-15: no raw data
+        _save_raw(
+            test_config,
+            [_make_pr(author="testuser", created_at="2025-02-16T09:00:00Z")],
+            date="2025-02-16",
+        )
+
+        normalizer = NormalizerService(test_config)
+        results = normalizer.normalize_range("2025-02-14", "2025-02-16", max_workers=3)
+        statuses = {r["date"]: r["status"] for r in results}
+        assert statuses["2025-02-14"] == "success"
+        assert statuses["2025-02-15"] == "failed"
+        assert statuses["2025-02-16"] == "success"
+
+    def test_parallel_checkpoint_is_max_date(self, test_config):
+        """parallel: checkpoint should be max successful date, not random."""
+        dates = ["2025-02-14", "2025-02-15", "2025-02-16"]
+        self._prepare_raw(test_config, dates)
+        normalizer = NormalizerService(test_config)
+        normalizer.normalize_range("2025-02-14", "2025-02-16", max_workers=3)
+
+        cp = load_json(test_config.checkpoints_path)
+        assert cp["last_normalize_date"] == "2025-02-16"
+
+    def test_sequential_when_max_workers_1(self, test_config):
+        """max_workers=1 uses sequential execution (default behavior)."""
+        dates = ["2025-02-14", "2025-02-15"]
+        self._prepare_raw(test_config, dates)
+        normalizer = NormalizerService(test_config)
+        results = normalizer.normalize_range("2025-02-14", "2025-02-15", max_workers=1)
+        assert len(results) == 2
+        assert all(r["status"] == "success" for r in results)
+
+    def test_parallel_results_in_date_order(self, test_config):
+        """parallel: results should be returned in date order regardless of finish order."""
+        dates = ["2025-02-14", "2025-02-15", "2025-02-16"]
+        self._prepare_raw(test_config, dates)
+        normalizer = NormalizerService(test_config)
+        results = normalizer.normalize_range("2025-02-14", "2025-02-16", max_workers=3)
+        result_dates = [r["date"] for r in results]
+        assert result_dates == dates

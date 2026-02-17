@@ -476,6 +476,7 @@ class TestNormalizeDateRange:
             "2025-02-16",
             force=False,
             progress=ANY,
+            max_workers=5,
         )
         assert "3 day(s)" in result.output
 
@@ -562,6 +563,7 @@ class TestSummarizeDailyDateRange:
             "2025-02-16",
             force=False,
             progress=ANY,
+            max_workers=5,
         )
         assert "3 day(s)" in result.output
 
@@ -739,7 +741,12 @@ class TestRun:
         assert result.exit_code == 0
         assert "3 succeeded" in result.output
         mock_orch.return_value.run_range.assert_called_once_with(
-            "2026-02-15", "2026-02-17", force=False, types=None, progress=ANY
+            "2026-02-15",
+            "2026-02-17",
+            force=False,
+            types=None,
+            progress=ANY,
+            max_workers=5,
         )
 
     @patch("git_recap.cli.main.date_utils")
@@ -858,7 +865,12 @@ class TestRunForce:
         assert result.exit_code == 0
         assert "2 succeeded" in result.output
         mock_orch.return_value.run_range.assert_called_once_with(
-            "2025-02-14", "2025-02-15", force=True, types=None, progress=ANY
+            "2025-02-14",
+            "2025-02-15",
+            force=True,
+            types=None,
+            progress=ANY,
+            max_workers=5,
         )
 
     @patch("git_recap.cli.main.OrchestratorService")
@@ -883,7 +895,12 @@ class TestRunForce:
         )
         assert result.exit_code == 0
         mock_orch.return_value.run_range.assert_called_once_with(
-            "2025-02-14", "2025-02-14", force=True, types=None, progress=ANY
+            "2025-02-14",
+            "2025-02-14",
+            force=True,
+            types=None,
+            progress=ANY,
+            max_workers=5,
         )
 
     @patch("git_recap.cli.main.OrchestratorService")
@@ -1009,6 +1026,7 @@ class TestNormalizeCatchUp:
             "2026-02-17",
             force=False,
             progress=ANY,
+            max_workers=5,
         )
 
     @patch("git_recap.cli.main.date_utils")
@@ -1045,6 +1063,7 @@ class TestNormalizeForce:
             "2025-02-15",
             force=True,
             progress=ANY,
+            max_workers=5,
         )
 
     @patch("git_recap.cli.main.NormalizerService")
@@ -1126,6 +1145,7 @@ class TestSummarizeDailyCatchUp:
             "2026-02-17",
             force=False,
             progress=ANY,
+            max_workers=5,
         )
 
     @patch("git_recap.cli.main.date_utils")
@@ -1162,6 +1182,7 @@ class TestSummarizeDailyForce:
             "2025-02-15",
             force=True,
             progress=ANY,
+            max_workers=5,
         )
 
 
@@ -1287,7 +1308,12 @@ class TestRunTypeFilter:
         )
         assert result.exit_code == 0
         mock_orch.return_value.run_range.assert_called_once_with(
-            "2025-02-14", "2025-02-15", force=False, types={"commits"}, progress=ANY
+            "2025-02-14",
+            "2025-02-15",
+            force=False,
+            types={"commits"},
+            progress=ANY,
+            max_workers=5,
         )
 
     def test_type_invalid(self):
@@ -1320,7 +1346,12 @@ class TestRunTypeFilter:
         )
         assert result.exit_code == 0
         mock_orch.return_value.run_range.assert_called_once_with(
-            "2025-02-14", "2025-02-14", force=True, types={"issues"}, progress=ANY
+            "2025-02-14",
+            "2025-02-14",
+            force=True,
+            types={"issues"},
+            progress=ANY,
+            max_workers=5,
         )
 
 
@@ -1471,3 +1502,143 @@ class TestTokenUsageDisplay:
         result = runner.invoke(app, ["summarize", "yearly", "2025"])
         assert result.exit_code == 0
         assert "Token usage:" in result.output
+
+
+# ── Enrich 기본값 + run enrich 테스트 ──
+
+
+class TestEnrichDefault:
+    @patch("git_recap.cli.main.NormalizerService")
+    def test_normalize_enrich_default_true(self, mock_cls):
+        """normalize 기본값이 --enrich (True)."""
+        mock_cls.return_value.normalize.return_value = (
+            Path("/data/activities.jsonl"),
+            Path("/data/stats.json"),
+        )
+        result = runner.invoke(app, ["normalize", "2025-02-16"])
+        assert result.exit_code == 0
+        # LLM should be passed (enrich=True by default)
+        _, kwargs = mock_cls.call_args
+        assert kwargs.get("llm") is not None
+
+    @patch("git_recap.cli.main.NormalizerService")
+    def test_normalize_no_enrich(self, mock_cls):
+        """--no-enrich → LLM 미전달."""
+        mock_cls.return_value.normalize.return_value = (
+            Path("/data/activities.jsonl"),
+            Path("/data/stats.json"),
+        )
+        result = runner.invoke(app, ["normalize", "--no-enrich", "2025-02-16"])
+        assert result.exit_code == 0
+        _, kwargs = mock_cls.call_args
+        assert kwargs.get("llm") is None
+
+
+class TestRunEnrich:
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_default_enrich_true(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        """run 기본값은 --enrich (True) → normalizer에 LLM 전달."""
+        mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
+        result = runner.invoke(app, ["run", "2025-02-16"])
+        assert result.exit_code == 0
+        _, kwargs = mock_norm.call_args
+        assert kwargs.get("llm") is not None
+
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_no_enrich(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        """run --no-enrich → normalizer에 LLM 미전달."""
+        mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
+        result = runner.invoke(app, ["run", "--no-enrich", "2025-02-16"])
+        assert result.exit_code == 0
+        _, kwargs = mock_norm.call_args
+        assert kwargs.get("llm") is None
+
+
+# ── --workers 옵션 테스트 ──
+
+
+class TestWorkersOption:
+    @patch("git_recap.cli.main.NormalizerService")
+    def test_normalize_workers(self, mock_cls):
+        """normalize --workers 5 → normalize_range(max_workers=5)."""
+        mock_cls.return_value.normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        result = runner.invoke(
+            app, ["normalize", "--since", "2025-02-14", "--until", "2025-02-14", "--workers", "5"]
+        )
+        assert result.exit_code == 0
+        _, kwargs = mock_cls.return_value.normalize_range.call_args
+        assert kwargs.get("max_workers") == 5
+
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_summarize_daily_workers(self, mock_cls):
+        """summarize daily --workers 3 → daily_range(max_workers=3)."""
+        mock_cls.return_value.daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        result = runner.invoke(
+            app,
+            [
+                "summarize",
+                "daily",
+                "--since",
+                "2025-02-14",
+                "--until",
+                "2025-02-14",
+                "--workers",
+                "3",
+            ],
+        )
+        assert result.exit_code == 0
+        _, kwargs = mock_cls.return_value.daily_range.call_args
+        assert kwargs.get("max_workers") == 3
+
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_workers(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        """run --workers 5 → run_range(max_workers=5)."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2025-02-14", "status": "success", "path": "/p1"},
+        ]
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--since",
+                "2025-02-14",
+                "--until",
+                "2025-02-14",
+                "--workers",
+                "5",
+            ],
+        )
+        assert result.exit_code == 0
+        _, kwargs = mock_orch.return_value.run_range.call_args
+        assert kwargs.get("max_workers") == 5
+
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_workers_default_from_config(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        """run --workers 미지정 → config.max_workers 사용."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2025-02-14", "status": "success", "path": "/p1"},
+        ]
+        result = runner.invoke(
+            app,
+            ["run", "--since", "2025-02-14", "--until", "2025-02-14"],
+        )
+        assert result.exit_code == 0
+        _, kwargs = mock_orch.return_value.run_range.call_args
+        # Should use config.max_workers (default=5)
+        assert kwargs.get("max_workers") == 5
