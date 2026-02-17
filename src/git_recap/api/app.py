@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from git_recap.api.routes import pipeline, query, summary
+from git_recap.api.routes import fetch, normalize, pipeline, query, summarize_pipeline, summary
 from git_recap.exceptions import GitRecapError
 from git_recap.logging_config import setup_logging
 
@@ -26,6 +26,13 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(pipeline.router, prefix="/api/pipeline", tags=["pipeline"])
+    app.include_router(fetch.router, prefix="/api/pipeline/fetch", tags=["fetch"])
+    app.include_router(normalize.router, prefix="/api/pipeline/normalize", tags=["normalize"])
+    app.include_router(
+        summarize_pipeline.router,
+        prefix="/api/pipeline/summarize",
+        tags=["summarize"],
+    )
     app.include_router(summary.router, prefix="/api/summary", tags=["summary"])
     app.include_router(query.router, prefix="/api", tags=["query"])
 
