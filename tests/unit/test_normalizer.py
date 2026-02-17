@@ -1,4 +1,5 @@
 import json
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -1341,12 +1342,30 @@ class TestLLMEnrichment:
         assert activities[0].change_summary == ""
         assert activities[0].intent == ""
 
+    def test_no_llm_logs_skip_reason(self, test_config, caplog):
+        """LLM 미주입 시 skip 사유 로깅."""
+        normalizer = NormalizerService(test_config)
+        activities = self._make_activities()
+        with caplog.at_level(logging.INFO, logger="git_recap.services.normalizer"):
+            normalizer._enrich_activities(activities)
+
+        assert any("LLM client not configured" in r.message for r in caplog.records)
+
     def test_empty_activities_no_llm_call(self, test_config):
         """빈 activities 시 LLM 미호출."""
         mock_llm = MagicMock()
         normalizer = NormalizerService(test_config, llm=mock_llm)
         normalizer._enrich_activities([])
         mock_llm.chat.assert_not_called()
+
+    def test_empty_activities_logs_skip_reason(self, test_config, caplog):
+        """빈 activities 시 skip 사유 로깅."""
+        mock_llm = MagicMock()
+        normalizer = NormalizerService(test_config, llm=mock_llm)
+        with caplog.at_level(logging.INFO, logger="git_recap.services.normalizer"):
+            normalizer._enrich_activities([])
+
+        assert any("no activities" in r.message for r in caplog.records)
 
     def test_enrichment_in_normalize_pipeline(self, test_config):
         """normalize() 호출 시 enrichment가 activities에 반영."""
