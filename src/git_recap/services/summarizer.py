@@ -55,7 +55,9 @@ class SummarizerService:
         logger.debug("Loaded %d activities for %s", len(activities), target_date)
 
         if not activities:
-            logger.info("No activities for %s, writing marker file", target_date)
+            logger.info(
+                "No activities for %s, skipping LLM call and writing marker file", target_date
+            )
             output_path = self._config.daily_summary_path(target_date)
             marker = (
                 f"# {target_date} Daily Summary\n\n"

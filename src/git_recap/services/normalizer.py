@@ -218,7 +218,11 @@ class NormalizerService:
 
     def _enrich_activities(self, activities: list[Activity]) -> None:
         """LLM으로 change_summary/intent 분류. 실패 시 빈 필드로 계속."""
-        if self._llm is None or not activities:
+        if not activities:
+            logger.info("Skipping LLM enrichment: no activities")
+            return
+        if self._llm is None:
+            logger.info("Skipping LLM enrichment: LLM client not configured (use --enrich)")
             return
 
         logger.info("Enriching %d activities with LLM", len(activities))

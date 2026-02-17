@@ -1,3 +1,4 @@
+import logging
 import shutil
 from datetime import date
 from pathlib import Path
@@ -467,6 +468,17 @@ class TestDailyEmptyActivities:
 
         cp = _load_json(test_config.checkpoints_path)
         assert cp["last_summarize_date"] == DATE
+
+    def test_empty_activities_logs_llm_skip(self, summarizer, mock_llm, test_config, caplog):
+        """빈 activities → LLM skip 사유 로깅."""
+        norm_dir = test_config.date_normalized_dir(DATE)
+        save_jsonl([], norm_dir / "activities.jsonl")
+        save_json(DailyStats(date=DATE), norm_dir / "stats.json")
+
+        with caplog.at_level(logging.INFO, logger="git_recap.services.summarizer"):
+            summarizer.daily(DATE)
+
+        assert any("skipping LLM" in r.message for r in caplog.records)
 
     def test_empty_in_daily_range_is_success(self, summarizer, mock_llm, test_config):
         """daily_range에서 빈 날짜는 'success' 상태."""
