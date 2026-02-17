@@ -122,13 +122,17 @@ class OrchestratorService:
         for d in sorted(all_dates):
             failed_step = None
             failed_error = None
+            all_skipped = True
 
             for step_name, by_date in phases:
                 entry = by_date.get(d, {})
                 if entry.get("status") == "failed":
                     failed_step = step_name
                     failed_error = entry.get("error", "unknown error")
+                    all_skipped = False
                     break
+                if entry.get("status") != "skipped":
+                    all_skipped = False
 
             if failed_step:
                 merged.append(
@@ -138,6 +142,8 @@ class OrchestratorService:
                         "error": f"Pipeline failed at '{failed_step}': {failed_error}",
                     }
                 )
+            elif all_skipped:
+                merged.append({"date": d, "status": "skipped"})
             else:
                 result: dict = {"date": d, "status": "success"}
                 if self._config:

@@ -418,6 +418,65 @@ class TestRunRangeOptimized:
         mocks["fetcher"].fetch_range.assert_not_called()
 
 
+class TestRunRangeSkipped:
+    """Tests that all-skipped phases produce skipped status in merged results."""
+
+    def test_all_phases_skipped(self, orchestrator_with_config, mocks):
+        """3개 phase 모두 skipped → merged 결과도 skipped."""
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "skipped"},
+            {"date": "2025-02-15", "status": "skipped"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "skipped"},
+            {"date": "2025-02-15", "status": "skipped"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-14", "status": "skipped"},
+            {"date": "2025-02-15", "status": "skipped"},
+        ]
+
+        results = orchestrator_with_config.run_range("2025-02-14", "2025-02-15")
+        assert len(results) == 2
+        assert all(r["status"] == "skipped" for r in results)
+        assert "path" not in results[0]
+
+    def test_mixed_skipped_and_success(self, orchestrator_with_config, mocks):
+        """일부 skipped + 일부 success → 각각 올바른 status."""
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "skipped"},
+            {"date": "2025-02-15", "status": "success"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "skipped"},
+            {"date": "2025-02-15", "status": "success"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-14", "status": "skipped"},
+            {"date": "2025-02-15", "status": "success"},
+        ]
+
+        results = orchestrator_with_config.run_range("2025-02-14", "2025-02-15")
+        assert results[0]["status"] == "skipped"
+        assert results[1]["status"] == "success"
+        assert "path" in results[1]
+
+    def test_partial_skipped_counts_as_success(self, orchestrator_with_config, mocks):
+        """fetch skipped + normalize/summarize success → success (일부만 재처리)."""
+        mocks["fetcher"].fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "skipped"},
+        ]
+        mocks["normalizer"].normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        mocks["summarizer"].daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+
+        results = orchestrator_with_config.run_range("2025-02-14", "2025-02-14")
+        assert results[0]["status"] == "success"
+
+
 class TestRunRangeForcePassthrough:
     """Tests that force=True is passed through to all 3 services."""
 

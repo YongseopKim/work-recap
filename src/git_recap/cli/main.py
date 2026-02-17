@@ -456,13 +456,15 @@ def run(
         if range_ep:
             results = orchestrator.run_range(range_ep[0], range_ep[1], force=force)
             succeeded = sum(1 for r in results if r["status"] == "success")
-            typer.echo(f"Range complete: {succeeded}/{len(results)} succeeded")
+            skipped = sum(1 for r in results if r["status"] == "skipped")
+            failed = sum(1 for r in results if r["status"] == "failed")
+            typer.echo(f"Range complete: {succeeded} succeeded, {skipped} skipped, {failed} failed")
             for r in results:
-                status_mark = "✓" if r["status"] == "success" else "✗"
+                mark = {"success": "✓", "skipped": "—", "failed": "✗"}.get(r["status"], "?")
                 msg = r.get("path", r.get("error", ""))
-                typer.echo(f"  {status_mark} {r['date']}: {msg}")
+                typer.echo(f"  {mark} {r['date']}: {msg}")
             ghes.close()
-            if succeeded < len(results):
+            if failed > 0:
                 raise typer.Exit(code=1)
         else:
             path = orchestrator.run_daily(dates[0])

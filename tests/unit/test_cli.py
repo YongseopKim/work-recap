@@ -650,7 +650,7 @@ class TestRun:
             ],
         )
         assert result.exit_code == 0
-        assert "2/2 succeeded" in result.output
+        assert "2 succeeded" in result.output
 
     @patch("git_recap.cli.main.OrchestratorService")
     @patch("git_recap.cli.main.SummarizerService")
@@ -672,7 +672,8 @@ class TestRun:
             ],
         )
         assert result.exit_code == 1
-        assert "1/2 succeeded" in result.output
+        assert "1 succeeded" in result.output
+        assert "1 failed" in result.output
 
     @patch("git_recap.cli.main.OrchestratorService")
     @patch("git_recap.cli.main.SummarizerService")
@@ -718,7 +719,7 @@ class TestRun:
         ]
         result = runner.invoke(app, ["run"])
         assert result.exit_code == 0
-        assert "3/3 succeeded" in result.output
+        assert "3 succeeded" in result.output
         mock_orch.return_value.run_range.assert_called_once_with(
             "2026-02-15", "2026-02-17", force=False
         )
@@ -750,7 +751,7 @@ class TestRun:
         ]
         result = runner.invoke(app, ["run", "--weekly", "2026-7"])
         assert result.exit_code == 0
-        assert "7/7 succeeded" in result.output
+        assert "7 succeeded" in result.output
 
     @patch("git_recap.cli.main.OrchestratorService")
     @patch("git_recap.cli.main.SummarizerService")
@@ -837,7 +838,7 @@ class TestRunForce:
             ],
         )
         assert result.exit_code == 0
-        assert "2/2 succeeded" in result.output
+        assert "2 succeeded" in result.output
         mock_orch.return_value.run_range.assert_called_once_with(
             "2025-02-14", "2025-02-15", force=True
         )
@@ -866,6 +867,26 @@ class TestRunForce:
         mock_orch.return_value.run_range.assert_called_once_with(
             "2025-02-14", "2025-02-14", force=True
         )
+
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_range_with_skipped(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        """skipped 날짜는 — 마크로 표시."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2025-02-14", "status": "skipped"},
+            {"date": "2025-02-15", "status": "success", "path": "/p1"},
+        ]
+        result = runner.invoke(
+            app,
+            ["run", "--since", "2025-02-14", "--until", "2025-02-15"],
+        )
+        assert result.exit_code == 0
+        assert "1 succeeded" in result.output
+        assert "1 skipped" in result.output
+        assert "\u2014 2025-02-14" in result.output  # — mark
+        assert "\u2713 2025-02-15" in result.output  # ✓ mark
 
 
 # ── Checkpoint 헬퍼 테스트 ──
