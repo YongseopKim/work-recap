@@ -386,6 +386,10 @@ class SummarizerService:
                 f"+{act.get('additions', 0)}/-{act.get('deletions', 0)} "
                 f"URL: {act['url']}"
             )
+            if act.get("intent"):
+                line += f"\n  Intent: {act['intent']}"
+            if act.get("change_summary"):
+                line += f"\n  Change Summary: {act['change_summary']}"
             if act.get("files"):
                 file_list = ", ".join(act["files"][:10])
                 line += f"\n  Files: {file_list}"

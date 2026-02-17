@@ -409,6 +409,110 @@ class TestFormatActivities:
         assert "Reviews:" not in result
         assert "Comments:" not in result
 
+    def test_intent_included(self):
+        activities = [
+            {
+                "kind": "pr_authored",
+                "title": "Fix login",
+                "repo": "org/repo",
+                "additions": 5,
+                "deletions": 2,
+                "url": "https://ghes/pull/1",
+                "files": [],
+                "intent": "bugfix",
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Intent: bugfix" in result
+
+    def test_change_summary_included(self):
+        activities = [
+            {
+                "kind": "commit",
+                "title": "Update deps",
+                "repo": "org/repo",
+                "additions": 3,
+                "deletions": 1,
+                "url": "https://ghes/commit/abc",
+                "files": [],
+                "change_summary": "의존성 라이브러리를 최신 버전으로 업데이트",
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Change Summary: 의존성 라이브러리를 최신 버전으로 업데이트" in result
+
+    def test_empty_intent_not_shown(self):
+        activities = [
+            {
+                "kind": "pr_authored",
+                "title": "PR",
+                "repo": "org/repo",
+                "additions": 0,
+                "deletions": 0,
+                "url": "u",
+                "files": [],
+                "intent": "",
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Intent:" not in result
+
+    def test_empty_change_summary_not_shown(self):
+        activities = [
+            {
+                "kind": "pr_authored",
+                "title": "PR",
+                "repo": "org/repo",
+                "additions": 0,
+                "deletions": 0,
+                "url": "u",
+                "files": [],
+                "change_summary": "",
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Change Summary:" not in result
+
+    def test_intent_and_change_summary_order(self):
+        activities = [
+            {
+                "kind": "pr_authored",
+                "title": "Add auth",
+                "repo": "org/repo",
+                "additions": 50,
+                "deletions": 10,
+                "url": "https://ghes/pull/5",
+                "files": ["src/auth.py"],
+                "intent": "feature",
+                "change_summary": "JWT 기반 인증 로직 추가",
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        intent_pos = result.index("Intent: feature")
+        summary_pos = result.index("Change Summary: JWT")
+        assert intent_pos < summary_pos
+
+    def test_commit_with_enriched_fields(self):
+        activities = [
+            {
+                "kind": "commit",
+                "title": "fix: null pointer in parser",
+                "repo": "org/repo",
+                "additions": 12,
+                "deletions": 3,
+                "url": "https://ghes/commit/abc123",
+                "files": ["src/parser.py"],
+                "body": "Fixes #42",
+                "intent": "bugfix",
+                "change_summary": "파서에서 발생하던 NullPointer 예외를 수정",
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Intent: bugfix" in result
+        assert "Change Summary: 파서에서 발생하던 NullPointer 예외를 수정" in result
+        assert "Body: Fixes #42" in result
+        assert "Files: src/parser.py" in result
+
 
 class TestDaily:
     def test_generates_daily_summary(self, summarizer, mock_llm, test_config):
