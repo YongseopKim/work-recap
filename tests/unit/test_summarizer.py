@@ -97,14 +97,18 @@ def _save_monthly_summary(test_config, year, month, content="# Monthly\nContent"
 
 class TestRenderPrompt:
     def test_renders_template_with_vars(self, summarizer, test_config):
-        result = summarizer._render_prompt("daily.md", date="2025-02-16", stats={
-            "authored_count": 3,
-            "reviewed_count": 1,
-            "commented_count": 0,
-            "total_additions": 100,
-            "total_deletions": 20,
-            "repos_touched": ["org/a", "org/b"],
-        })
+        result = summarizer._render_prompt(
+            "daily.md",
+            date="2025-02-16",
+            stats={
+                "authored_count": 3,
+                "reviewed_count": 1,
+                "commented_count": 0,
+                "total_additions": 100,
+                "total_deletions": 20,
+                "repos_touched": ["org/a", "org/b"],
+            },
+        )
         assert "2025-02-16" in result
         assert "3" in result  # authored_count
         assert "org/a" in result
@@ -295,3 +299,130 @@ class TestQuery:
     def test_no_context(self, summarizer):
         with pytest.raises(SummarizeError, match="No summary data available"):
             summarizer.query("질문?")
+
+
+# ── _is_date_summarized 테스트 ──
+
+
+class TestIsDateSummarized:
+    def test_summary_exists(self, summarizer, test_config):
+        """daily summary 파일 존재 → True."""
+        _save_daily_summary(test_config, DATE)
+        assert summarizer._is_date_summarized(DATE) is True
+
+    def test_summary_not_exists(self, summarizer):
+        """daily summary 파일 없음 → False."""
+        assert summarizer._is_date_summarized("2099-01-01") is False
+
+
+# ── Summarize Checkpoint 테스트 ──
+
+
+class TestSummarizeCheckpoint:
+    def test_creates_checkpoint_file(self, summarizer, test_config):
+        """daily() 후 checkpoints.json에 last_summarize_date."""
+        _save_normalized(test_config)
+        summarizer.daily(DATE)
+
+        from git_recap.models import load_json
+
+        cp = load_json(test_config.checkpoints_path)
+        assert cp["last_summarize_date"] == DATE
+
+    def test_updates_existing_checkpoint(self, summarizer, test_config):
+        """두 번 daily() → 마지막 날짜로 갱신."""
+        date2 = "2025-02-17"
+        _save_normalized(test_config, DATE)
+        _save_normalized(test_config, date2)
+        summarizer.daily(DATE)
+        summarizer.daily(date2)
+
+        from git_recap.models import load_json
+
+        cp = load_json(test_config.checkpoints_path)
+        assert cp["last_summarize_date"] == date2
+
+    def test_preserves_other_keys(self, summarizer, test_config):
+        """last_fetch_date 보존 확인."""
+        import json
+
+        cp_path = test_config.checkpoints_path
+        cp_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(cp_path, "w") as f:
+            json.dump({"last_fetch_date": "2025-02-16"}, f)
+
+        _save_normalized(test_config)
+        summarizer.daily(DATE)
+
+        from git_recap.models import load_json
+
+        cp = load_json(cp_path)
+        assert cp["last_fetch_date"] == "2025-02-16"
+        assert cp["last_summarize_date"] == DATE
+
+
+# ── daily_range 테스트 ──
+
+
+class TestDailyRange:
+    def test_basic_range(self, summarizer, test_config):
+        """3일 range → 3개 success."""
+        for d in ["2025-02-14", "2025-02-15", "2025-02-16"]:
+            _save_normalized(test_config, d)
+        results = summarizer.daily_range("2025-02-14", "2025-02-16")
+        assert len(results) == 3
+        assert all(r["status"] == "success" for r in results)
+
+    def test_skip_existing(self, summarizer, test_config):
+        """중간 날짜 pre-create → skipped."""
+        for d in ["2025-02-14", "2025-02-15", "2025-02-16"]:
+            _save_normalized(test_config, d)
+        # Pre-create summary for middle date
+        _save_daily_summary(test_config, "2025-02-15")
+
+        results = summarizer.daily_range("2025-02-14", "2025-02-16")
+        statuses = {r["date"]: r["status"] for r in results}
+        assert statuses["2025-02-15"] == "skipped"
+        assert statuses["2025-02-14"] == "success"
+        assert statuses["2025-02-16"] == "success"
+
+    def test_force_override(self, summarizer, test_config):
+        """force=True → skip 없이 전부 success."""
+        for d in ["2025-02-14", "2025-02-15", "2025-02-16"]:
+            _save_normalized(test_config, d)
+        _save_daily_summary(test_config, "2025-02-15")
+
+        results = summarizer.daily_range("2025-02-14", "2025-02-16", force=True)
+        assert all(r["status"] == "success" for r in results)
+
+    def test_failure_resilience(self, summarizer, test_config):
+        """중간 날짜 normalized 없음 → failed, 나머지 success."""
+        _save_normalized(test_config, "2025-02-14")
+        # 2025-02-15: no normalized data
+        _save_normalized(test_config, "2025-02-16")
+
+        results = summarizer.daily_range("2025-02-14", "2025-02-16")
+        statuses = {r["date"]: r["status"] for r in results}
+        assert statuses["2025-02-14"] == "success"
+        assert statuses["2025-02-15"] == "failed"
+        assert statuses["2025-02-16"] == "success"
+
+    def test_checkpoint_per_date(self, summarizer, test_config):
+        """last_summarize_date == 마지막 성공 날짜."""
+        for d in ["2025-02-14", "2025-02-15", "2025-02-16"]:
+            _save_normalized(test_config, d)
+        summarizer.daily_range("2025-02-14", "2025-02-16")
+
+        from git_recap.models import load_json
+
+        cp = load_json(test_config.checkpoints_path)
+        assert cp["last_summarize_date"] == "2025-02-16"
+
+    def test_returns_list_of_dicts(self, summarizer, test_config):
+        """반환 형식 검증."""
+        _save_normalized(test_config, DATE)
+        results = summarizer.daily_range(DATE, DATE)
+        assert isinstance(results, list)
+        assert len(results) == 1
+        assert "date" in results[0]
+        assert "status" in results[0]

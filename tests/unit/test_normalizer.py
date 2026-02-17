@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 from git_recap.exceptions import NormalizeError
@@ -8,7 +6,6 @@ from git_recap.models import (
     ActivityKind,
     Comment,
     CommitRaw,
-    DailyStats,
     FileChange,
     IssueRaw,
     PRRaw,
@@ -59,6 +56,7 @@ def _make_pr(
 
 def _review(author="reviewer1", submitted_at="2025-02-16T12:00:00Z"):
     from git_recap.models import Review
+
     return Review(
         author=author,
         state="APPROVED",
@@ -158,29 +156,35 @@ class TestConvertActivities:
         assert result[0].ts == "2025-02-16T09:00:00Z"
 
     def test_reviewed_pr(self, normalizer):
-        prs = [_make_pr(
-            author="other",
-            reviews=[_review(author="testuser")],
-        )]
+        prs = [
+            _make_pr(
+                author="other",
+                reviews=[_review(author="testuser")],
+            )
+        ]
         result = normalizer._convert_activities(prs, DATE)
         assert len(result) == 1
         assert result[0].kind == ActivityKind.PR_REVIEWED
 
     def test_commented_pr(self, normalizer):
-        prs = [_make_pr(
-            author="other",
-            comments=[_comment(author="testuser")],
-        )]
+        prs = [
+            _make_pr(
+                author="other",
+                comments=[_comment(author="testuser")],
+            )
+        ]
         result = normalizer._convert_activities(prs, DATE)
         assert len(result) == 1
         assert result[0].kind == ActivityKind.PR_COMMENTED
 
     def test_self_review_excluded(self, normalizer):
         """자기 PR에 대한 review는 PR_REVIEWED 생성 안함."""
-        prs = [_make_pr(
-            author="testuser",
-            reviews=[_review(author="testuser")],
-        )]
+        prs = [
+            _make_pr(
+                author="testuser",
+                reviews=[_review(author="testuser")],
+            )
+        ]
         result = normalizer._convert_activities(prs, DATE)
         kinds = [a.kind for a in result]
         assert ActivityKind.PR_REVIEWED not in kinds
@@ -188,11 +192,13 @@ class TestConvertActivities:
 
     def test_multiple_kinds_from_one_pr(self, normalizer):
         """한 PR에서 reviewed + commented 가능."""
-        prs = [_make_pr(
-            author="other",
-            reviews=[_review(author="testuser")],
-            comments=[_comment(author="testuser")],
-        )]
+        prs = [
+            _make_pr(
+                author="other",
+                reviews=[_review(author="testuser")],
+                comments=[_comment(author="testuser")],
+            )
+        ]
         result = normalizer._convert_activities(prs, DATE)
         kinds = {a.kind for a in result}
         assert ActivityKind.PR_REVIEWED in kinds
@@ -200,10 +206,12 @@ class TestConvertActivities:
 
     def test_date_filtering(self, normalizer):
         """target_date에 해당하지 않는 activity는 제외."""
-        prs = [_make_pr(
-            author="testuser",
-            created_at="2025-02-15T09:00:00Z",  # 전날
-        )]
+        prs = [
+            _make_pr(
+                author="testuser",
+                created_at="2025-02-15T09:00:00Z",  # 전날
+            )
+        ]
         result = normalizer._convert_activities(prs, DATE)
         assert len(result) == 0
 
@@ -221,26 +229,30 @@ class TestConvertActivities:
 
     def test_one_review_per_pr(self, normalizer):
         """같은 PR에 여러 review를 남겨도 1개 activity."""
-        prs = [_make_pr(
-            author="other",
-            reviews=[
-                _review(author="testuser", submitted_at="2025-02-16T10:00:00Z"),
-                _review(author="testuser", submitted_at="2025-02-16T14:00:00Z"),
-            ],
-        )]
+        prs = [
+            _make_pr(
+                author="other",
+                reviews=[
+                    _review(author="testuser", submitted_at="2025-02-16T10:00:00Z"),
+                    _review(author="testuser", submitted_at="2025-02-16T14:00:00Z"),
+                ],
+            )
+        ]
         result = normalizer._convert_activities(prs, DATE)
         reviewed = [a for a in result if a.kind == ActivityKind.PR_REVIEWED]
         assert len(reviewed) == 1
 
     def test_comment_evidence_urls(self, normalizer):
         """여러 comment의 URL이 evidence_urls에 모두 포함."""
-        prs = [_make_pr(
-            author="other",
-            comments=[
-                _comment(author="testuser", created_at="2025-02-16T10:00:00Z"),
-                _comment(author="testuser", created_at="2025-02-16T11:00:00Z"),
-            ],
-        )]
+        prs = [
+            _make_pr(
+                author="other",
+                comments=[
+                    _comment(author="testuser", created_at="2025-02-16T10:00:00Z"),
+                    _comment(author="testuser", created_at="2025-02-16T11:00:00Z"),
+                ],
+            )
+        ]
         result = normalizer._convert_activities(prs, DATE)
         commented = [a for a in result if a.kind == ActivityKind.PR_COMMENTED]
         assert len(commented) == 1
@@ -255,10 +267,12 @@ class TestConvertActivities:
 
     def test_author_commenting_own_pr(self, normalizer):
         """author가 자기 PR에 댓글도 PR_COMMENTED 생성."""
-        prs = [_make_pr(
-            author="testuser",
-            comments=[_comment(author="testuser")],
-        )]
+        prs = [
+            _make_pr(
+                author="testuser",
+                comments=[_comment(author="testuser")],
+            )
+        ]
         result = normalizer._convert_activities(prs, DATE)
         kinds = {a.kind for a in result}
         assert ActivityKind.PR_AUTHORED in kinds
@@ -273,10 +287,12 @@ class TestConvertActivities:
 
     def test_reviewed_pr_review_bodies(self, normalizer):
         """PR_REVIEWED에 review_bodies가 reviewer의 review body를 포함."""
-        prs = [_make_pr(
-            author="other",
-            reviews=[_review(author="testuser")],
-        )]
+        prs = [
+            _make_pr(
+                author="other",
+                reviews=[_review(author="testuser")],
+            )
+        ]
         # _review의 기본 body는 "" — 실제 리뷰 body 지정
         prs[0].reviews[0].body = "LGTM, nice work!"
         result = normalizer._convert_activities(prs, DATE)
@@ -289,14 +305,48 @@ class TestConvertActivities:
 class TestComputeStats:
     def test_counts(self):
         activities = [
-            Activity(ts="t", kind=ActivityKind.PR_AUTHORED, repo="r", pr_number=1,
-                     title="t", url="u", summary="s", additions=10, deletions=2),
-            Activity(ts="t", kind=ActivityKind.PR_AUTHORED, repo="r", pr_number=2,
-                     title="t", url="u", summary="s", additions=20, deletions=5),
-            Activity(ts="t", kind=ActivityKind.PR_REVIEWED, repo="r", pr_number=3,
-                     title="t", url="u", summary="s", additions=50, deletions=10),
-            Activity(ts="t", kind=ActivityKind.PR_COMMENTED, repo="r2", pr_number=4,
-                     title="t", url="u", summary="s"),
+            Activity(
+                ts="t",
+                kind=ActivityKind.PR_AUTHORED,
+                repo="r",
+                pr_number=1,
+                title="t",
+                url="u",
+                summary="s",
+                additions=10,
+                deletions=2,
+            ),
+            Activity(
+                ts="t",
+                kind=ActivityKind.PR_AUTHORED,
+                repo="r",
+                pr_number=2,
+                title="t",
+                url="u",
+                summary="s",
+                additions=20,
+                deletions=5,
+            ),
+            Activity(
+                ts="t",
+                kind=ActivityKind.PR_REVIEWED,
+                repo="r",
+                pr_number=3,
+                title="t",
+                url="u",
+                summary="s",
+                additions=50,
+                deletions=10,
+            ),
+            Activity(
+                ts="t",
+                kind=ActivityKind.PR_COMMENTED,
+                repo="r2",
+                pr_number=4,
+                title="t",
+                url="u",
+                summary="s",
+            ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
         assert stats.authored_count == 2
@@ -305,10 +355,28 @@ class TestComputeStats:
 
     def test_additions_only_from_authored(self):
         activities = [
-            Activity(ts="t", kind=ActivityKind.PR_AUTHORED, repo="r", pr_number=1,
-                     title="t", url="u", summary="s", additions=10, deletions=2),
-            Activity(ts="t", kind=ActivityKind.PR_REVIEWED, repo="r", pr_number=2,
-                     title="t", url="u", summary="s", additions=100, deletions=50),
+            Activity(
+                ts="t",
+                kind=ActivityKind.PR_AUTHORED,
+                repo="r",
+                pr_number=1,
+                title="t",
+                url="u",
+                summary="s",
+                additions=10,
+                deletions=2,
+            ),
+            Activity(
+                ts="t",
+                kind=ActivityKind.PR_REVIEWED,
+                repo="r",
+                pr_number=2,
+                title="t",
+                url="u",
+                summary="s",
+                additions=100,
+                deletions=50,
+            ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
         assert stats.total_additions == 10
@@ -316,20 +384,48 @@ class TestComputeStats:
 
     def test_repos_touched(self):
         activities = [
-            Activity(ts="t", kind=ActivityKind.PR_AUTHORED, repo="org/b", pr_number=1,
-                     title="t", url="u", summary="s"),
-            Activity(ts="t", kind=ActivityKind.PR_REVIEWED, repo="org/a", pr_number=2,
-                     title="t", url="u", summary="s"),
-            Activity(ts="t", kind=ActivityKind.PR_COMMENTED, repo="org/b", pr_number=3,
-                     title="t", url="u", summary="s"),
+            Activity(
+                ts="t",
+                kind=ActivityKind.PR_AUTHORED,
+                repo="org/b",
+                pr_number=1,
+                title="t",
+                url="u",
+                summary="s",
+            ),
+            Activity(
+                ts="t",
+                kind=ActivityKind.PR_REVIEWED,
+                repo="org/a",
+                pr_number=2,
+                title="t",
+                url="u",
+                summary="s",
+            ),
+            Activity(
+                ts="t",
+                kind=ActivityKind.PR_COMMENTED,
+                repo="org/b",
+                pr_number=3,
+                title="t",
+                url="u",
+                summary="s",
+            ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
         assert stats.repos_touched == ["org/a", "org/b"]
 
     def test_authored_prs_list(self):
         activities = [
-            Activity(ts="t", kind=ActivityKind.PR_AUTHORED, repo="org/r", pr_number=1,
-                     title="PR1", url="u1", summary="s"),
+            Activity(
+                ts="t",
+                kind=ActivityKind.PR_AUTHORED,
+                repo="org/r",
+                pr_number=1,
+                title="PR1",
+                url="u1",
+                summary="s",
+            ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
         assert len(stats.authored_prs) == 1
@@ -337,8 +433,15 @@ class TestComputeStats:
 
     def test_reviewed_prs_list(self):
         activities = [
-            Activity(ts="t", kind=ActivityKind.PR_REVIEWED, repo="org/r", pr_number=2,
-                     title="PR2", url="u2", summary="s"),
+            Activity(
+                ts="t",
+                kind=ActivityKind.PR_REVIEWED,
+                repo="org/r",
+                pr_number=2,
+                title="PR2",
+                url="u2",
+                summary="s",
+            ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
         assert len(stats.reviewed_prs) == 1
@@ -527,20 +630,24 @@ class TestConvertIssueActivities:
         assert result[0].title == "Bug report"
 
     def test_issue_commented(self, normalizer):
-        issues = [_make_issue(
-            author="other",
-            comments=[_comment(author="testuser", created_at="2025-02-16T11:00:00Z")],
-        )]
+        issues = [
+            _make_issue(
+                author="other",
+                comments=[_comment(author="testuser", created_at="2025-02-16T11:00:00Z")],
+            )
+        ]
         result = normalizer._convert_issue_activities(issues, DATE)
         assert len(result) == 1
         assert result[0].kind == ActivityKind.ISSUE_COMMENTED
 
     def test_both_authored_and_commented(self, normalizer):
         """한 issue에서 authored + commented 둘 다 생성 가능."""
-        issues = [_make_issue(
-            author="testuser",
-            comments=[_comment(author="testuser", created_at="2025-02-16T11:00:00Z")],
-        )]
+        issues = [
+            _make_issue(
+                author="testuser",
+                comments=[_comment(author="testuser", created_at="2025-02-16T11:00:00Z")],
+            )
+        ]
         result = normalizer._convert_issue_activities(issues, DATE)
         kinds = {a.kind for a in result}
         assert ActivityKind.ISSUE_AUTHORED in kinds
@@ -552,10 +659,12 @@ class TestConvertIssueActivities:
         assert len(result) == 0
 
     def test_date_filtering_commented(self, normalizer):
-        issues = [_make_issue(
-            author="other",
-            comments=[_comment(author="testuser", created_at="2025-02-15T23:59:59Z")],
-        )]
+        issues = [
+            _make_issue(
+                author="other",
+                comments=[_comment(author="testuser", created_at="2025-02-15T23:59:59Z")],
+            )
+        ]
         result = normalizer._convert_issue_activities(issues, DATE)
         assert len(result) == 0
 
@@ -575,24 +684,33 @@ class TestConvertIssueActivities:
 
     def test_issue_commented_bodies(self, normalizer):
         """ISSUE_COMMENTED에 comment_bodies가 user의 코멘트 본문을 포함."""
-        issues = [_make_issue(
-            author="other",
-            comments=[
-                _comment(author="testuser", created_at="2025-02-16T10:00:00Z",
-                         body="I can reproduce this"),
-                _comment(author="testuser", created_at="2025-02-16T11:00:00Z",
-                         body="Found the root cause"),
-                _comment(author="someone", created_at="2025-02-16T12:00:00Z",
-                         body="Other person comment"),
-            ],
-        )]
+        issues = [
+            _make_issue(
+                author="other",
+                comments=[
+                    _comment(
+                        author="testuser",
+                        created_at="2025-02-16T10:00:00Z",
+                        body="I can reproduce this",
+                    ),
+                    _comment(
+                        author="testuser",
+                        created_at="2025-02-16T11:00:00Z",
+                        body="Found the root cause",
+                    ),
+                    _comment(
+                        author="someone",
+                        created_at="2025-02-16T12:00:00Z",
+                        body="Other person comment",
+                    ),
+                ],
+            )
+        ]
         result = normalizer._convert_issue_activities(issues, DATE)
         commented = [a for a in result if a.kind == ActivityKind.ISSUE_COMMENTED]
         assert len(commented) == 1
         assert commented[0].body == "Description"  # issue body
-        assert commented[0].comment_bodies == [
-            "I can reproduce this", "Found the root cause"
-        ]
+        assert commented[0].comment_bodies == ["I can reproduce this", "Found the root cause"]
 
     def test_empty_issues(self, normalizer):
         result = normalizer._convert_issue_activities([], DATE)
@@ -605,8 +723,18 @@ class TestConvertIssueActivities:
 class TestComputeStatsExtended:
     def test_commit_count(self):
         activities = [
-            Activity(ts="t", kind=ActivityKind.COMMIT, repo="r", pr_number=0,
-                     title="t", url="u", summary="s", sha="abc", additions=15, deletions=5),
+            Activity(
+                ts="t",
+                kind=ActivityKind.COMMIT,
+                repo="r",
+                pr_number=0,
+                title="t",
+                url="u",
+                summary="s",
+                sha="abc",
+                additions=15,
+                deletions=5,
+            ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
         assert stats.commit_count == 1
@@ -615,10 +743,29 @@ class TestComputeStatsExtended:
     def test_additions_include_commits(self):
         """total_additions/deletions는 authored PR + commit 합산."""
         activities = [
-            Activity(ts="t", kind=ActivityKind.PR_AUTHORED, repo="r", pr_number=1,
-                     title="t", url="u", summary="s", additions=10, deletions=2),
-            Activity(ts="t", kind=ActivityKind.COMMIT, repo="r", pr_number=0,
-                     title="t", url="u", summary="s", sha="abc", additions=20, deletions=5),
+            Activity(
+                ts="t",
+                kind=ActivityKind.PR_AUTHORED,
+                repo="r",
+                pr_number=1,
+                title="t",
+                url="u",
+                summary="s",
+                additions=10,
+                deletions=2,
+            ),
+            Activity(
+                ts="t",
+                kind=ActivityKind.COMMIT,
+                repo="r",
+                pr_number=0,
+                title="t",
+                url="u",
+                summary="s",
+                sha="abc",
+                additions=20,
+                deletions=5,
+            ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
         assert stats.total_additions == 30
@@ -626,10 +773,24 @@ class TestComputeStatsExtended:
 
     def test_issue_counts(self):
         activities = [
-            Activity(ts="t", kind=ActivityKind.ISSUE_AUTHORED, repo="r", pr_number=10,
-                     title="t", url="u", summary="s"),
-            Activity(ts="t", kind=ActivityKind.ISSUE_COMMENTED, repo="r", pr_number=10,
-                     title="t", url="u2", summary="s"),
+            Activity(
+                ts="t",
+                kind=ActivityKind.ISSUE_AUTHORED,
+                repo="r",
+                pr_number=10,
+                title="t",
+                url="u",
+                summary="s",
+            ),
+            Activity(
+                ts="t",
+                kind=ActivityKind.ISSUE_COMMENTED,
+                repo="r",
+                pr_number=10,
+                title="t",
+                url="u2",
+                summary="s",
+            ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
         assert stats.issue_authored_count == 1
@@ -639,12 +800,34 @@ class TestComputeStatsExtended:
     def test_repos_touched_all_types(self):
         """모든 활동 유형에서 repos_touched 수집."""
         activities = [
-            Activity(ts="t", kind=ActivityKind.PR_AUTHORED, repo="org/a", pr_number=1,
-                     title="t", url="u", summary="s"),
-            Activity(ts="t", kind=ActivityKind.COMMIT, repo="org/b", pr_number=0,
-                     title="t", url="u", summary="s", sha="abc"),
-            Activity(ts="t", kind=ActivityKind.ISSUE_AUTHORED, repo="org/c", pr_number=10,
-                     title="t", url="u", summary="s"),
+            Activity(
+                ts="t",
+                kind=ActivityKind.PR_AUTHORED,
+                repo="org/a",
+                pr_number=1,
+                title="t",
+                url="u",
+                summary="s",
+            ),
+            Activity(
+                ts="t",
+                kind=ActivityKind.COMMIT,
+                repo="org/b",
+                pr_number=0,
+                title="t",
+                url="u",
+                summary="s",
+                sha="abc",
+            ),
+            Activity(
+                ts="t",
+                kind=ActivityKind.ISSUE_AUTHORED,
+                repo="org/c",
+                pr_number=10,
+                title="t",
+                url="u",
+                summary="s",
+            ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
         assert stats.repos_touched == ["org/a", "org/b", "org/c"]
@@ -695,9 +878,15 @@ class TestNormalizeWithCommitsAndIssues:
         """모든 활동이 시간순 정렬."""
         _save_raw(test_config, [_make_pr(author="testuser", created_at="2025-02-16T15:00:00Z")])
         _save_raw_commits(test_config, [_make_commit(committed_at="2025-02-16T09:00:00Z")])
-        _save_raw_issues(test_config, [_make_issue(
-            author="testuser", created_at="2025-02-16T12:00:00Z",
-        )])
+        _save_raw_issues(
+            test_config,
+            [
+                _make_issue(
+                    author="testuser",
+                    created_at="2025-02-16T12:00:00Z",
+                )
+            ],
+        )
 
         act_path, _ = normalizer.normalize(DATE)
         activities = load_jsonl(act_path)
@@ -706,5 +895,187 @@ class TestNormalizeWithCommitsAndIssues:
         assert timestamps == sorted(timestamps)
 
 
-# load_jsonl import
-from git_recap.models import load_jsonl
+# ── _is_date_normalized 테스트 ──
+
+
+class TestIsDateNormalized:
+    def test_all_files_exist(self, normalizer, test_config):
+        """activities.jsonl + stats.json 모두 존재 → True."""
+        norm_dir = test_config.date_normalized_dir(DATE)
+        norm_dir.mkdir(parents=True, exist_ok=True)
+        (norm_dir / "activities.jsonl").write_text("")
+        (norm_dir / "stats.json").write_text("{}")
+        assert normalizer._is_date_normalized(DATE) is True
+
+    def test_missing_activities(self, normalizer, test_config):
+        """stats.json만 존재 → False."""
+        norm_dir = test_config.date_normalized_dir(DATE)
+        norm_dir.mkdir(parents=True, exist_ok=True)
+        (norm_dir / "stats.json").write_text("{}")
+        assert normalizer._is_date_normalized(DATE) is False
+
+    def test_missing_stats(self, normalizer, test_config):
+        """activities.jsonl만 존재 → False."""
+        norm_dir = test_config.date_normalized_dir(DATE)
+        norm_dir.mkdir(parents=True, exist_ok=True)
+        (norm_dir / "activities.jsonl").write_text("")
+        assert normalizer._is_date_normalized(DATE) is False
+
+    def test_dir_not_exist(self, normalizer):
+        """디렉토리 없음 → False."""
+        assert normalizer._is_date_normalized("2099-01-01") is False
+
+
+# ── Normalize Checkpoint 테스트 ──
+
+
+class TestNormalizeCheckpoint:
+    def test_creates_checkpoint_file(self, normalizer, test_config):
+        """normalize 후 checkpoints.json에 last_normalize_date."""
+        _save_raw(test_config, [_make_pr(author="testuser")])
+        normalizer.normalize(DATE)
+
+        cp = load_json(test_config.checkpoints_path)
+        assert cp["last_normalize_date"] == DATE
+
+    def test_updates_existing_checkpoint(self, normalizer, test_config):
+        """두 번 normalize → 마지막 날짜로 갱신."""
+        date2 = "2025-02-17"
+        _save_raw(test_config, [_make_pr(author="testuser")])
+        _save_raw(
+            test_config,
+            [
+                _make_pr(
+                    author="testuser",
+                    created_at="2025-02-17T09:00:00Z",
+                    updated_at="2025-02-17T15:00:00Z",
+                )
+            ],
+            date=date2,
+        )
+        normalizer.normalize(DATE)
+        normalizer.normalize(date2)
+
+        cp = load_json(test_config.checkpoints_path)
+        assert cp["last_normalize_date"] == date2
+
+    def test_preserves_other_keys(self, normalizer, test_config):
+        """last_fetch_date 보존 확인."""
+        import json
+
+        cp_path = test_config.checkpoints_path
+        cp_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(cp_path, "w") as f:
+            json.dump({"last_fetch_date": "2025-02-16"}, f)
+
+        _save_raw(test_config, [_make_pr(author="testuser")])
+        normalizer.normalize(DATE)
+
+        cp = load_json(cp_path)
+        assert cp["last_fetch_date"] == "2025-02-16"
+        assert cp["last_normalize_date"] == DATE
+
+
+# ── normalize_range 테스트 ──
+
+
+class TestNormalizeRange:
+    def _prepare_raw(self, test_config, dates):
+        """여러 날짜의 raw 데이터 생성."""
+        for d in dates:
+            _save_raw(
+                test_config,
+                [
+                    _make_pr(
+                        author="testuser", created_at=f"{d}T09:00:00Z", updated_at=f"{d}T15:00:00Z"
+                    )
+                ],
+                date=d,
+            )
+
+    def test_basic_range(self, normalizer, test_config):
+        """3일 range → 3개 success."""
+        dates = ["2025-02-14", "2025-02-15", "2025-02-16"]
+        self._prepare_raw(test_config, dates)
+        results = normalizer.normalize_range("2025-02-14", "2025-02-16")
+        assert len(results) == 3
+        assert all(r["status"] == "success" for r in results)
+
+    def test_skip_existing(self, normalizer, test_config):
+        """중간 날짜 pre-create → skipped."""
+        dates = ["2025-02-14", "2025-02-15", "2025-02-16"]
+        self._prepare_raw(test_config, dates)
+        # Pre-create normalized for middle date
+        norm_dir = test_config.date_normalized_dir("2025-02-15")
+        norm_dir.mkdir(parents=True, exist_ok=True)
+        (norm_dir / "activities.jsonl").write_text("")
+        (norm_dir / "stats.json").write_text("{}")
+
+        results = normalizer.normalize_range("2025-02-14", "2025-02-16")
+        statuses = {r["date"]: r["status"] for r in results}
+        assert statuses["2025-02-15"] == "skipped"
+        assert statuses["2025-02-14"] == "success"
+        assert statuses["2025-02-16"] == "success"
+
+    def test_force_override(self, normalizer, test_config):
+        """force=True → skip 없이 전부 success."""
+        dates = ["2025-02-14", "2025-02-15", "2025-02-16"]
+        self._prepare_raw(test_config, dates)
+        # Pre-create normalized for middle date
+        norm_dir = test_config.date_normalized_dir("2025-02-15")
+        norm_dir.mkdir(parents=True, exist_ok=True)
+        (norm_dir / "activities.jsonl").write_text("")
+        (norm_dir / "stats.json").write_text("{}")
+
+        results = normalizer.normalize_range("2025-02-14", "2025-02-16", force=True)
+        assert all(r["status"] == "success" for r in results)
+
+    def test_failure_resilience(self, normalizer, test_config):
+        """중간 날짜 raw 없음 → failed, 나머지 success."""
+        _save_raw(
+            test_config,
+            [
+                _make_pr(
+                    author="testuser",
+                    created_at="2025-02-14T09:00:00Z",
+                    updated_at="2025-02-14T15:00:00Z",
+                )
+            ],
+            date="2025-02-14",
+        )
+        # 2025-02-15: no raw data
+        _save_raw(
+            test_config,
+            [
+                _make_pr(
+                    author="testuser",
+                    created_at="2025-02-16T09:00:00Z",
+                    updated_at="2025-02-16T15:00:00Z",
+                )
+            ],
+            date="2025-02-16",
+        )
+
+        results = normalizer.normalize_range("2025-02-14", "2025-02-16")
+        statuses = {r["date"]: r["status"] for r in results}
+        assert statuses["2025-02-14"] == "success"
+        assert statuses["2025-02-15"] == "failed"
+        assert statuses["2025-02-16"] == "success"
+
+    def test_checkpoint_per_date(self, normalizer, test_config):
+        """last_normalize_date == 마지막 성공 날짜."""
+        dates = ["2025-02-14", "2025-02-15", "2025-02-16"]
+        self._prepare_raw(test_config, dates)
+        normalizer.normalize_range("2025-02-14", "2025-02-16")
+
+        cp = load_json(test_config.checkpoints_path)
+        assert cp["last_normalize_date"] == "2025-02-16"
+
+    def test_returns_list_of_dicts(self, normalizer, test_config):
+        """반환 형식 검증."""
+        self._prepare_raw(test_config, ["2025-02-16"])
+        results = normalizer.normalize_range("2025-02-16", "2025-02-16")
+        assert isinstance(results, list)
+        assert len(results) == 1
+        assert "date" in results[0]
+        assert "status" in results[0]

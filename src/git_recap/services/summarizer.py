@@ -1,5 +1,6 @@
 """Activity/Stats 데이터와 하위 summary를 LLM에 전달하여 markdown summary를 생성."""
 
+import json
 import logging
 from datetime import date, timedelta
 from pathlib import Path
@@ -10,6 +11,7 @@ from git_recap.config import AppConfig
 from git_recap.exceptions import SummarizeError
 from git_recap.infra.llm_client import LLMClient
 from git_recap.models import load_json, load_jsonl
+from git_recap.services.date_utils import date_range
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,28 @@ class SummarizerService:
         self._save_markdown(output_path, response)
 
         logger.info("Generated daily summary: %s", output_path)
+
+        self._update_checkpoint(target_date)
         return output_path
+
+    def daily_range(self, since: str, until: str, force: bool = False) -> list[dict]:
+        """날짜 범위 순회하며 daily summary 생성. skip/force/resilience 지원."""
+        dates = date_range(since, until)
+        results: list[dict] = []
+
+        for d in dates:
+            try:
+                if not force and self._is_date_summarized(d):
+                    results.append({"date": d, "status": "skipped"})
+                    continue
+
+                self.daily(d)
+                results.append({"date": d, "status": "success"})
+            except Exception as e:
+                logger.warning("Failed to summarize %s: %s", d, e)
+                results.append({"date": d, "status": "failed", "error": str(e)})
+
+        return results
 
     def weekly(self, year: int, week: int) -> Path:
         """Weekly summary 생성."""
@@ -169,6 +192,26 @@ class SummarizerService:
                 contents.append(path.read_text(encoding="utf-8"))
 
         return "\n\n---\n\n".join(contents)
+
+    # ── Checkpoint / Skip ──
+
+    def _is_date_summarized(self, date_str: str) -> bool:
+        """daily summary 파일이 존재하면 True."""
+        return self._config.daily_summary_path(date_str).exists()
+
+    def _update_checkpoint(self, target_date: str) -> None:
+        """last_summarize_date 키 업데이트."""
+        cp_path = self._config.checkpoints_path
+        cp_path.parent.mkdir(parents=True, exist_ok=True)
+
+        checkpoints = {}
+        if cp_path.exists():
+            checkpoints = load_json(cp_path)
+
+        checkpoints["last_summarize_date"] = target_date
+
+        with open(cp_path, "w", encoding="utf-8") as f:
+            json.dump(checkpoints, f, indent=2)
 
     # ── 유틸리티 ──
 

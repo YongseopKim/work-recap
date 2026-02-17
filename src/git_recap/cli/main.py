@@ -2,7 +2,6 @@
 
 import json
 from datetime import date
-from pathlib import Path
 
 import typer
 
@@ -49,6 +48,24 @@ def _read_last_fetch_date(config: AppConfig) -> str | None:
     with open(cp_path, encoding="utf-8") as f:
         data = json.load(f)
     return data.get("last_fetch_date")
+
+
+def _read_last_normalize_date(config: AppConfig) -> str | None:
+    cp_path = config.checkpoints_path
+    if not cp_path.exists():
+        return None
+    with open(cp_path, encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("last_normalize_date")
+
+
+def _read_last_summarize_date(config: AppConfig) -> str | None:
+    cp_path = config.checkpoints_path
+    if not cp_path.exists():
+        return None
+    with open(cp_path, encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("last_summarize_date")
 
 
 def _parse_weekly(value: str) -> tuple[int, int]:
@@ -213,34 +230,70 @@ def fetch(
         _handle_error(e)
 
 
+def _print_range_results(label: str, range_results: list[dict]) -> None:
+    """Range 결과를 succeeded/skipped/failed 카운트 + 날짜별 마크로 출력."""
+    succeeded = sum(1 for r in range_results if r["status"] == "success")
+    skipped = sum(1 for r in range_results if r["status"] == "skipped")
+    failed = sum(1 for r in range_results if r["status"] == "failed")
+    typer.echo(
+        f"{label} {len(range_results)} day(s): "
+        f"{succeeded} succeeded, {skipped} skipped, {failed} failed"
+    )
+    for r in range_results:
+        mark = {"success": "+", "skipped": "=", "failed": "!"}[r["status"]]
+        typer.echo(f"  {mark} {r['date']}: {r['status']}")
+    if failed > 0:
+        raise typer.Exit(code=1)
+
+
 @app.command()
 def normalize(
     target_date: str = typer.Argument(
-        default=None, help="Target date (YYYY-MM-DD). Default: today"
+        default=None, help="Target date (YYYY-MM-DD). Default: today or catch-up"
     ),
     since: str = typer.Option(None, help="Range start (YYYY-MM-DD)"),
     until: str = typer.Option(None, help="Range end (YYYY-MM-DD)"),
     weekly: str = typer.Option(None, help="YEAR-WEEK, e.g. 2026-7"),
     monthly: str = typer.Option(None, help="YEAR-MONTH, e.g. 2026-2"),
     yearly: int = typer.Option(None, help="Year, e.g. 2026"),
+    force: bool = typer.Option(False, "--force", "-f", help="Re-normalize even if data exists"),
 ) -> None:
     """Normalize raw PR data into activities and stats."""
     dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
+    endpoints = _resolve_range_endpoints(target_date, since, until, weekly, monthly, yearly)
+
+    # catch-up 모드
+    catchup_endpoints: tuple[str, str] | None = None
     if dates is None:
-        dates = [date.today().isoformat()]
+        config = _get_config()
+        last = _read_last_normalize_date(config)
+        if last:
+            s, u = date_utils.catchup_range(last)
+            dates = date_utils.date_range(s, u)
+            if not dates:
+                typer.echo("Already up to date.")
+                return
+            catchup_endpoints = (s, u)
+        else:
+            dates = [date.today().isoformat()]
 
     config = _get_config()
 
     try:
         service = NormalizerService(config)
-        results: list[tuple[str, Path, Path]] = []
-        for d in dates:
-            act_path, stats_path = service.normalize(d)
-            results.append((d, act_path, stats_path))
 
-        typer.echo(f"Normalized {len(dates)} day(s)")
-        for d, act_path, stats_path in results:
-            typer.echo(f"  {d}: {act_path}, {stats_path}")
+        range_ep = endpoints or catchup_endpoints
+        if range_ep:
+            range_results = service.normalize_range(
+                range_ep[0],
+                range_ep[1],
+                force=force,
+            )
+            _print_range_results("Normalized", range_results)
+        else:
+            act_path, stats_path = service.normalize(dates[0])
+            typer.echo("Normalized 1 day(s)")
+            typer.echo(f"  {dates[0]}: {act_path}, {stats_path}")
     except GitRecapError as e:
         _handle_error(e)
 
@@ -251,35 +304,51 @@ def normalize(
 @summarize_app.command("daily")
 def summarize_daily(
     target_date: str = typer.Argument(
-        default=None, help="Target date (YYYY-MM-DD). Default: today"
+        default=None, help="Target date (YYYY-MM-DD). Default: today or catch-up"
     ),
     since: str = typer.Option(None, help="Range start (YYYY-MM-DD)"),
     until: str = typer.Option(None, help="Range end (YYYY-MM-DD)"),
     weekly: str = typer.Option(None, help="YEAR-WEEK, e.g. 2026-7"),
     monthly: str = typer.Option(None, help="YEAR-MONTH, e.g. 2026-2"),
     yearly: int = typer.Option(None, help="Year, e.g. 2026"),
+    force: bool = typer.Option(False, "--force", "-f", help="Re-summarize even if data exists"),
 ) -> None:
     """Generate daily summary."""
     dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
+    endpoints = _resolve_range_endpoints(target_date, since, until, weekly, monthly, yearly)
+
+    # catch-up 모드
+    catchup_endpoints: tuple[str, str] | None = None
     if dates is None:
-        dates = [date.today().isoformat()]
+        config = _get_config()
+        last = _read_last_summarize_date(config)
+        if last:
+            s, u = date_utils.catchup_range(last)
+            dates = date_utils.date_range(s, u)
+            if not dates:
+                typer.echo("Already up to date.")
+                return
+            catchup_endpoints = (s, u)
+        else:
+            dates = [date.today().isoformat()]
 
     config = _get_config()
 
     try:
         llm = _get_llm_client(config)
         service = SummarizerService(config, llm)
-        results: list[tuple[str, Path]] = []
-        for d in dates:
-            path = service.daily(d)
-            results.append((d, path))
 
-        if len(dates) > 1:
-            typer.echo(f"Daily summary {len(dates)} day(s)")
-            for d, path in results:
-                typer.echo(f"  {d}: {path}")
+        range_ep = endpoints or catchup_endpoints
+        if range_ep:
+            range_results = service.daily_range(
+                range_ep[0],
+                range_ep[1],
+                force=force,
+            )
+            _print_range_results("Daily summary", range_results)
         else:
-            typer.echo(f"Daily summary → {results[0][1]}")
+            path = service.daily(dates[0])
+            typer.echo(f"Daily summary → {path}")
     except GitRecapError as e:
         _handle_error(e)
 

@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install (editable, with dev deps)
 pip install -e ".[dev]"
 
-# Run unit tests (352 tests, integration excluded by default)
+# Run unit tests (395 tests, integration excluded by default)
 pytest
 
 # Run integration tests (require .env with real credentials)
@@ -53,12 +53,12 @@ Infrastructure (GHESClient: httpx, LLMClient: OpenAI/Anthropic)
 
 - `src/git_recap/config.py` — `AppConfig` (pydantic-settings), derives all data paths. Env vars from `.env`.
 - `src/git_recap/models.py` — Pydantic/dataclass models (`PRRaw`, `CommitRaw`, `IssueRaw`, `Activity`, `DailyStats`) + JSON/JSONL serialization utilities. `Activity` preserves text context: `body` (PR/commit/issue body), `review_bodies`, `comment_bodies`.
-- `src/git_recap/services/fetcher.py` — Searches GHES for PRs (3 axes: author/reviewed-by/commenter), commits, issues. Deduplicates, enriches, filters noise (bots, LGTM). `fetch(date)` returns `dict[str, Path]`. `fetch_range(since, until)` uses monthly chunked range queries for 30x fewer API calls, with skip/force/resilience.
-- `src/git_recap/services/normalizer.py` — Converts raw data → `Activity` records + `DailyStats`. Preserves body/review/comment text in Activity fields. Filters by actual timestamp (not search date). Self-reviews excluded.
-- `src/git_recap/services/summarizer.py` — Renders Jinja2 prompt templates (`prompts/`), calls LLM, saves markdown.
+- `src/git_recap/services/fetcher.py` — Searches GHES for PRs (3 axes: author/reviewed-by/commenter), commits, issues. Deduplicates, enriches, filters noise (bots, LGTM). `fetch(date)` returns `dict[str, Path]`. `fetch_range(since, until)` uses monthly chunked range queries for 30x fewer API calls, with skip/force/resilience. Updates `last_fetch_date` checkpoint.
+- `src/git_recap/services/normalizer.py` — Converts raw data → `Activity` records + `DailyStats`. Preserves body/review/comment text in Activity fields. Filters by actual timestamp (not search date). Self-reviews excluded. `normalize_range(since, until, force)` with skip/force/resilience. Updates `last_normalize_date` checkpoint.
+- `src/git_recap/services/summarizer.py` — Renders Jinja2 prompt templates (`prompts/`), calls LLM, saves markdown. `daily_range(since, until, force)` with skip/force/resilience. Updates `last_summarize_date` checkpoint.
 - `src/git_recap/services/orchestrator.py` — Chains Fetch→Normalize→Summarize. `run_daily(date)` and `run_range(since, until)`.
 - `src/git_recap/services/date_utils.py` — `date_range`, `weekly_range`, `monthly_range`, `yearly_range`, `catchup_range`, `monthly_chunks`.
-- `src/git_recap/cli/main.py` — Typer app. Subcommands: `fetch`, `normalize`, `summarize`, `run`, `ask`.
+- `src/git_recap/cli/main.py` — Typer app. Subcommands: `fetch`, `normalize`, `summarize`, `run`, `ask`. All three data commands support `--force/-f` and checkpoint catch-up mode.
 - `src/git_recap/api/app.py` — FastAPI app. Routes in `api/routes/`. `StaticFiles` mount for `frontend/`.
 
 ### Data directory layout
@@ -71,8 +71,26 @@ data/summaries/{YYYY}/daily/        → {MM}-{DD}.md
 data/summaries/{YYYY}/weekly/       → W{NN}.md
 data/summaries/{YYYY}/monthly/      → {MM}.md
 data/summaries/{YYYY}/              → yearly.md
-data/state/                         → checkpoints.json, jobs/
+data/state/                         → checkpoints.json (last_fetch/normalize/summarize_date), jobs/
 ```
+
+### Checkpoint & catch-up
+
+All three services (fetch, normalize, summarize daily) share `data/state/checkpoints.json`:
+```json
+{
+  "last_fetch_date": "2026-02-17",
+  "last_normalize_date": "2026-02-17",
+  "last_summarize_date": "2026-02-17"
+}
+```
+
+Each service updates only its own key after successful processing. CLI catch-up flow (applies to `fetch`, `normalize`, `summarize daily`):
+- No args + checkpoint exists → `catchup_range(last_date)` → range method call
+- No args + no checkpoint → run today only
+- Empty date list → "Already up to date."
+- `--force/-f` flag → skip detection disabled, reprocess all dates
+- Range methods (`fetch_range`, `normalize_range`, `daily_range`) return `list[dict]` with `status` per date (success/skipped/failed)
 
 ## Testing patterns
 

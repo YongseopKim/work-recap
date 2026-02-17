@@ -445,53 +445,49 @@ class TestNormalize:
 class TestNormalizeDateRange:
     @patch("git_recap.cli.main.NormalizerService")
     def test_normalize_since_until(self, mock_cls):
-        mock_cls.return_value.normalize.return_value = (
-            Path("/data/activities.jsonl"),
-            Path("/data/stats.json"),
-        )
+        mock_cls.return_value.normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+            {"date": "2025-02-16", "status": "success"},
+        ]
         result = runner.invoke(
             app,
-            [
-                "normalize",
-                "--since",
-                "2025-02-14",
-                "--until",
-                "2025-02-16",
-            ],
+            ["normalize", "--since", "2025-02-14", "--until", "2025-02-16"],
         )
         assert result.exit_code == 0
-        assert mock_cls.return_value.normalize.call_count == 3
+        mock_cls.return_value.normalize_range.assert_called_once_with(
+            "2025-02-14",
+            "2025-02-16",
+            force=False,
+        )
         assert "3 day(s)" in result.output
 
     @patch("git_recap.cli.main.NormalizerService")
     def test_normalize_weekly(self, mock_cls):
-        mock_cls.return_value.normalize.return_value = (
-            Path("/data/activities.jsonl"),
-            Path("/data/stats.json"),
-        )
+        mock_cls.return_value.normalize_range.return_value = [
+            {"date": f"2026-02-{9 + i:02d}", "status": "success"} for i in range(7)
+        ]
         result = runner.invoke(app, ["normalize", "--weekly", "2026-7"])
         assert result.exit_code == 0
-        assert mock_cls.return_value.normalize.call_count == 7
+        mock_cls.return_value.normalize_range.assert_called_once()
 
     @patch("git_recap.cli.main.NormalizerService")
     def test_normalize_monthly(self, mock_cls):
-        mock_cls.return_value.normalize.return_value = (
-            Path("/data/activities.jsonl"),
-            Path("/data/stats.json"),
-        )
+        mock_cls.return_value.normalize_range.return_value = [
+            {"date": f"2026-02-{i + 1:02d}", "status": "success"} for i in range(28)
+        ]
         result = runner.invoke(app, ["normalize", "--monthly", "2026-2"])
         assert result.exit_code == 0
-        assert mock_cls.return_value.normalize.call_count == 28
+        mock_cls.return_value.normalize_range.assert_called_once()
 
     @patch("git_recap.cli.main.NormalizerService")
     def test_normalize_yearly(self, mock_cls):
-        mock_cls.return_value.normalize.return_value = (
-            Path("/data/activities.jsonl"),
-            Path("/data/stats.json"),
-        )
+        mock_cls.return_value.normalize_range.return_value = [
+            {"date": f"2026-01-{i + 1:02d}", "status": "success"} for i in range(365)
+        ]
         result = runner.invoke(app, ["normalize", "--yearly", "2026"])
         assert result.exit_code == 0
-        assert mock_cls.return_value.normalize.call_count == 365
+        mock_cls.return_value.normalize_range.assert_called_once()
 
     def test_normalize_since_without_until(self):
         result = runner.invoke(app, ["normalize", "--since", "2025-02-14"])
@@ -512,22 +508,17 @@ class TestNormalizeDateRange:
 
     @patch("git_recap.cli.main.NormalizerService")
     def test_normalize_output_shows_date_count(self, mock_cls):
-        mock_cls.return_value.normalize.return_value = (
-            Path("/data/activities.jsonl"),
-            Path("/data/stats.json"),
-        )
+        mock_cls.return_value.normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+            {"date": "2025-02-16", "status": "success"},
+        ]
         result = runner.invoke(
             app,
-            [
-                "normalize",
-                "--since",
-                "2025-02-14",
-                "--until",
-                "2025-02-16",
-            ],
+            ["normalize", "--since", "2025-02-14", "--until", "2025-02-16"],
         )
         assert result.exit_code == 0
-        assert "Normalized 3 day(s)" in result.output
+        assert "3 day(s)" in result.output
         assert "2025-02-14" in result.output
         assert "2025-02-15" in result.output
         assert "2025-02-16" in result.output
@@ -539,35 +530,40 @@ class TestNormalizeDateRange:
 class TestSummarizeDailyDateRange:
     @patch("git_recap.cli.main.SummarizerService")
     def test_summarize_daily_since_until(self, mock_cls):
-        mock_cls.return_value.daily.return_value = Path("/data/daily.md")
+        mock_cls.return_value.daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+            {"date": "2025-02-16", "status": "success"},
+        ]
         result = runner.invoke(
             app,
-            [
-                "summarize",
-                "daily",
-                "--since",
-                "2025-02-14",
-                "--until",
-                "2025-02-16",
-            ],
+            ["summarize", "daily", "--since", "2025-02-14", "--until", "2025-02-16"],
         )
         assert result.exit_code == 0
-        assert mock_cls.return_value.daily.call_count == 3
+        mock_cls.return_value.daily_range.assert_called_once_with(
+            "2025-02-14",
+            "2025-02-16",
+            force=False,
+        )
         assert "3 day(s)" in result.output
 
     @patch("git_recap.cli.main.SummarizerService")
     def test_summarize_daily_weekly(self, mock_cls):
-        mock_cls.return_value.daily.return_value = Path("/data/daily.md")
+        mock_cls.return_value.daily_range.return_value = [
+            {"date": f"2026-02-{9 + i:02d}", "status": "success"} for i in range(7)
+        ]
         result = runner.invoke(app, ["summarize", "daily", "--weekly", "2026-7"])
         assert result.exit_code == 0
-        assert mock_cls.return_value.daily.call_count == 7
+        mock_cls.return_value.daily_range.assert_called_once()
 
     @patch("git_recap.cli.main.SummarizerService")
     def test_summarize_daily_monthly(self, mock_cls):
-        mock_cls.return_value.daily.return_value = Path("/data/daily.md")
+        mock_cls.return_value.daily_range.return_value = [
+            {"date": f"2026-02-{i + 1:02d}", "status": "success"} for i in range(28)
+        ]
         result = runner.invoke(app, ["summarize", "daily", "--monthly", "2026-2"])
         assert result.exit_code == 0
-        assert mock_cls.return_value.daily.call_count == 28
+        mock_cls.return_value.daily_range.assert_called_once()
 
     def test_summarize_daily_mutual_exclusion(self):
         result = runner.invoke(
@@ -712,3 +708,291 @@ class TestAsk:
         result = runner.invoke(app, ["ask", "질문?", "--months", "6"])
         assert result.exit_code == 0
         mock_cls.return_value.query.assert_called_once_with("질문?", months_back=6)
+
+
+# ── Checkpoint 헬퍼 테스트 ──
+
+
+class TestReadCheckpointHelpers:
+    def test_read_last_normalize_date_no_file(self):
+        """파일 없으면 None."""
+        from git_recap.cli.main import _read_last_normalize_date
+
+        config = _mock_config()
+        assert _read_last_normalize_date(config) is None
+
+    def test_read_last_normalize_date_with_key(self, tmp_path):
+        """last_normalize_date 키가 있으면 반환."""
+        import json
+        from git_recap.cli.main import _read_last_normalize_date
+
+        config = _mock_config()
+        config.data_dir = tmp_path / "data"
+        (config.data_dir / "state").mkdir(parents=True)
+        with open(config.checkpoints_path, "w") as f:
+            json.dump({"last_normalize_date": "2025-02-16"}, f)
+        assert _read_last_normalize_date(config) == "2025-02-16"
+
+    def test_read_last_normalize_date_missing_key(self, tmp_path):
+        """키 없으면 None."""
+        import json
+        from git_recap.cli.main import _read_last_normalize_date
+
+        config = _mock_config()
+        config.data_dir = tmp_path / "data"
+        (config.data_dir / "state").mkdir(parents=True)
+        with open(config.checkpoints_path, "w") as f:
+            json.dump({"last_fetch_date": "2025-02-16"}, f)
+        assert _read_last_normalize_date(config) is None
+
+    def test_read_last_summarize_date_no_file(self):
+        """파일 없으면 None."""
+        from git_recap.cli.main import _read_last_summarize_date
+
+        config = _mock_config()
+        assert _read_last_summarize_date(config) is None
+
+    def test_read_last_summarize_date_with_key(self, tmp_path):
+        """last_summarize_date 키가 있으면 반환."""
+        import json
+        from git_recap.cli.main import _read_last_summarize_date
+
+        config = _mock_config()
+        config.data_dir = tmp_path / "data"
+        (config.data_dir / "state").mkdir(parents=True)
+        with open(config.checkpoints_path, "w") as f:
+            json.dump({"last_summarize_date": "2025-02-16"}, f)
+        assert _read_last_summarize_date(config) == "2025-02-16"
+
+    def test_read_last_summarize_date_missing_key(self, tmp_path):
+        """키 없으면 None."""
+        import json
+        from git_recap.cli.main import _read_last_summarize_date
+
+        config = _mock_config()
+        config.data_dir = tmp_path / "data"
+        (config.data_dir / "state").mkdir(parents=True)
+        with open(config.checkpoints_path, "w") as f:
+            json.dump({"last_fetch_date": "2025-02-16"}, f)
+        assert _read_last_summarize_date(config) is None
+
+
+# ── Normalize Catch-Up 테스트 ──
+
+
+class TestNormalizeCatchUp:
+    @patch("git_recap.cli.main.NormalizerService")
+    def test_no_args_no_checkpoint(self, mock_cls):
+        """인자 없고 checkpoint 없으면 오늘만 normalize."""
+        mock_cls.return_value.normalize.return_value = (
+            Path("/data/activities.jsonl"),
+            Path("/data/stats.json"),
+        )
+        result = runner.invoke(app, ["normalize"])
+        assert result.exit_code == 0
+        mock_cls.return_value.normalize.assert_called_once()
+
+    @patch("git_recap.cli.main.date_utils")
+    @patch("git_recap.cli.main._read_last_normalize_date")
+    @patch("git_recap.cli.main.NormalizerService")
+    def test_no_args_with_checkpoint(self, mock_cls, mock_read, mock_du):
+        """인자 없고 checkpoint 있으면 catch-up → normalize_range 호출."""
+        mock_read.return_value = "2026-02-14"
+        mock_du.catchup_range.return_value = ("2026-02-15", "2026-02-17")
+        mock_du.date_range.return_value = ["2026-02-15", "2026-02-16", "2026-02-17"]
+        mock_cls.return_value.normalize_range.return_value = [
+            {"date": "2026-02-15", "status": "success"},
+            {"date": "2026-02-16", "status": "success"},
+            {"date": "2026-02-17", "status": "success"},
+        ]
+        result = runner.invoke(app, ["normalize"])
+        assert result.exit_code == 0
+        mock_cls.return_value.normalize_range.assert_called_once_with(
+            "2026-02-15",
+            "2026-02-17",
+            force=False,
+        )
+
+    @patch("git_recap.cli.main.date_utils")
+    @patch("git_recap.cli.main._read_last_normalize_date")
+    @patch("git_recap.cli.main.NormalizerService")
+    def test_already_up_to_date(self, mock_cls, mock_read, mock_du):
+        """날짜 목록 비어있으면 'Already up to date.'."""
+        mock_read.return_value = "2026-02-17"
+        mock_du.catchup_range.return_value = ("2026-02-18", "2026-02-17")
+        mock_du.date_range.return_value = []
+        result = runner.invoke(app, ["normalize"])
+        assert result.exit_code == 0
+        assert "Already up to date" in result.output
+
+
+# ── Normalize Force 테스트 ──
+
+
+class TestNormalizeForce:
+    @patch("git_recap.cli.main.NormalizerService")
+    def test_force_flag(self, mock_cls):
+        """--force → force=True 전달."""
+        mock_cls.return_value.normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+        ]
+        result = runner.invoke(
+            app,
+            ["normalize", "--since", "2025-02-14", "--until", "2025-02-15", "--force"],
+        )
+        assert result.exit_code == 0
+        mock_cls.return_value.normalize_range.assert_called_once_with(
+            "2025-02-14",
+            "2025-02-15",
+            force=True,
+        )
+
+    @patch("git_recap.cli.main.NormalizerService")
+    def test_force_short_flag(self, mock_cls):
+        """-f 단축 플래그."""
+        mock_cls.return_value.normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        result = runner.invoke(
+            app,
+            ["normalize", "--since", "2025-02-14", "--until", "2025-02-14", "-f"],
+        )
+        assert result.exit_code == 0
+
+
+# ── Normalize Range Output 테스트 ──
+
+
+class TestNormalizeRangeOutput:
+    @patch("git_recap.cli.main.NormalizerService")
+    def test_succeeded_skipped_failed_counts(self, mock_cls):
+        """succeeded/skipped/failed 카운트 출력."""
+        mock_cls.return_value.normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "skipped"},
+            {"date": "2025-02-16", "status": "failed", "error": "no raw"},
+        ]
+        result = runner.invoke(
+            app,
+            ["normalize", "--since", "2025-02-14", "--until", "2025-02-16"],
+        )
+        assert "1 succeeded" in result.output
+        assert "1 skipped" in result.output
+        assert "1 failed" in result.output
+
+    @patch("git_recap.cli.main.NormalizerService")
+    def test_failed_exits_1(self, mock_cls):
+        """failed 시 exit code 1."""
+        mock_cls.return_value.normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "failed", "error": "no raw"},
+        ]
+        result = runner.invoke(
+            app,
+            ["normalize", "--since", "2025-02-14", "--until", "2025-02-15"],
+        )
+        assert result.exit_code == 1
+
+
+# ── Summarize Daily Catch-Up 테스트 ──
+
+
+class TestSummarizeDailyCatchUp:
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_no_args_no_checkpoint(self, mock_cls):
+        """인자 없고 checkpoint 없으면 오늘만 summarize."""
+        mock_cls.return_value.daily.return_value = Path("/data/daily.md")
+        result = runner.invoke(app, ["summarize", "daily"])
+        assert result.exit_code == 0
+        mock_cls.return_value.daily.assert_called_once()
+
+    @patch("git_recap.cli.main.date_utils")
+    @patch("git_recap.cli.main._read_last_summarize_date")
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_no_args_with_checkpoint(self, mock_cls, mock_read, mock_du):
+        """인자 없고 checkpoint 있으면 catch-up → daily_range 호출."""
+        mock_read.return_value = "2026-02-14"
+        mock_du.catchup_range.return_value = ("2026-02-15", "2026-02-17")
+        mock_du.date_range.return_value = ["2026-02-15", "2026-02-16", "2026-02-17"]
+        mock_cls.return_value.daily_range.return_value = [
+            {"date": "2026-02-15", "status": "success"},
+            {"date": "2026-02-16", "status": "success"},
+            {"date": "2026-02-17", "status": "success"},
+        ]
+        result = runner.invoke(app, ["summarize", "daily"])
+        assert result.exit_code == 0
+        mock_cls.return_value.daily_range.assert_called_once_with(
+            "2026-02-15",
+            "2026-02-17",
+            force=False,
+        )
+
+    @patch("git_recap.cli.main.date_utils")
+    @patch("git_recap.cli.main._read_last_summarize_date")
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_already_up_to_date(self, mock_cls, mock_read, mock_du):
+        """날짜 목록 비어있으면 'Already up to date.'."""
+        mock_read.return_value = "2026-02-17"
+        mock_du.catchup_range.return_value = ("2026-02-18", "2026-02-17")
+        mock_du.date_range.return_value = []
+        result = runner.invoke(app, ["summarize", "daily"])
+        assert result.exit_code == 0
+        assert "Already up to date" in result.output
+
+
+# ── Summarize Daily Force 테스트 ──
+
+
+class TestSummarizeDailyForce:
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_force_flag(self, mock_cls):
+        """--force 전달."""
+        mock_cls.return_value.daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+        ]
+        result = runner.invoke(
+            app,
+            ["summarize", "daily", "--since", "2025-02-14", "--until", "2025-02-15", "--force"],
+        )
+        assert result.exit_code == 0
+        mock_cls.return_value.daily_range.assert_called_once_with(
+            "2025-02-14",
+            "2025-02-15",
+            force=True,
+        )
+
+
+# ── Summarize Daily Range Output 테스트 ──
+
+
+class TestSummarizeDailyRangeOutput:
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_succeeded_skipped_failed_counts(self, mock_cls):
+        """카운트 출력."""
+        mock_cls.return_value.daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "skipped"},
+            {"date": "2025-02-16", "status": "failed", "error": "no data"},
+        ]
+        result = runner.invoke(
+            app,
+            ["summarize", "daily", "--since", "2025-02-14", "--until", "2025-02-16"],
+        )
+        assert "1 succeeded" in result.output
+        assert "1 skipped" in result.output
+        assert "1 failed" in result.output
+
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_failed_exits_1(self, mock_cls):
+        """failed 시 exit code 1."""
+        mock_cls.return_value.daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "failed", "error": "no data"},
+        ]
+        result = runner.invoke(
+            app,
+            ["summarize", "daily", "--since", "2025-02-14", "--until", "2025-02-15"],
+        )
+        assert result.exit_code == 1

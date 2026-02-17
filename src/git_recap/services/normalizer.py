@@ -1,10 +1,12 @@
 """Raw PR/Commit/Issue 데이터를 정규화된 Activity + DailyStats로 변환하는 서비스."""
 
+import json
 import logging
 from pathlib import Path
 
 from git_recap.config import AppConfig
 from git_recap.exceptions import NormalizeError
+from git_recap.services.date_utils import date_range
 from git_recap.models import (
     Activity,
     ActivityKind,
@@ -89,15 +91,55 @@ class NormalizerService:
 
         logger.info(
             "Normalized %d activities for %s → %s",
-            len(activities), target_date, out_dir,
+            len(activities),
+            target_date,
+            out_dir,
         )
+
+        self._update_checkpoint(target_date)
         return activities_path, stats_path
+
+    def normalize_range(self, since: str, until: str, force: bool = False) -> list[dict]:
+        """날짜 범위 순회하며 normalize. skip/force/resilience 지원."""
+        dates = date_range(since, until)
+        results: list[dict] = []
+
+        for d in dates:
+            try:
+                if not force and self._is_date_normalized(d):
+                    results.append({"date": d, "status": "skipped"})
+                    continue
+
+                self.normalize(d)
+                results.append({"date": d, "status": "success"})
+            except Exception as e:
+                logger.warning("Failed to normalize %s: %s", d, e)
+                results.append({"date": d, "status": "failed", "error": str(e)})
+
+        return results
+
+    def _is_date_normalized(self, date_str: str) -> bool:
+        """activities.jsonl + stats.json 모두 존재하면 True."""
+        norm_dir = self._config.date_normalized_dir(date_str)
+        return (norm_dir / "activities.jsonl").exists() and (norm_dir / "stats.json").exists()
+
+    def _update_checkpoint(self, target_date: str) -> None:
+        """last_normalize_date 키 업데이트."""
+        cp_path = self._config.checkpoints_path
+        cp_path.parent.mkdir(parents=True, exist_ok=True)
+
+        checkpoints = {}
+        if cp_path.exists():
+            checkpoints = load_json(cp_path)
+
+        checkpoints["last_normalize_date"] = target_date
+
+        with open(cp_path, "w", encoding="utf-8") as f:
+            json.dump(checkpoints, f, indent=2)
 
     # ── Activity 변환 ──
 
-    def _convert_activities(
-        self, prs: list[PRRaw], target_date: str
-    ) -> list[Activity]:
+    def _convert_activities(self, prs: list[PRRaw], target_date: str) -> list[Activity]:
         """
         PR 목록에서 사용자의 활동을 추출.
 
@@ -114,20 +156,19 @@ class NormalizerService:
 
             # PR_AUTHORED
             if is_author and self._matches_date(pr.created_at, target_date):
-                activities.append(
-                    self._make_activity(pr, ActivityKind.PR_AUTHORED, pr.created_at)
-                )
+                activities.append(self._make_activity(pr, ActivityKind.PR_AUTHORED, pr.created_at))
 
             # PR_REVIEWED (self-review 제외)
             if not is_author:
                 for review in pr.reviews:
-                    if (
-                        review.author.lower() == self._username.lower()
-                        and self._matches_date(review.submitted_at, target_date)
+                    if review.author.lower() == self._username.lower() and self._matches_date(
+                        review.submitted_at, target_date
                     ):
                         activities.append(
                             self._make_activity(
-                                pr, ActivityKind.PR_REVIEWED, review.submitted_at,
+                                pr,
+                                ActivityKind.PR_REVIEWED,
+                                review.submitted_at,
                                 evidence_urls=[review.url],
                                 review_bodies=[review.body],
                             )
@@ -136,7 +177,8 @@ class NormalizerService:
 
             # PR_COMMENTED
             user_comments = [
-                c for c in pr.comments
+                c
+                for c in pr.comments
                 if c.author.lower() == self._username.lower()
                 and self._matches_date(c.created_at, target_date)
             ]
@@ -144,7 +186,9 @@ class NormalizerService:
                 earliest = min(user_comments, key=lambda c: c.created_at)
                 activities.append(
                     self._make_activity(
-                        pr, ActivityKind.PR_COMMENTED, earliest.created_at,
+                        pr,
+                        ActivityKind.PR_COMMENTED,
+                        earliest.created_at,
                         evidence_urls=[c.url for c in user_comments],
                     )
                 )
@@ -170,68 +214,72 @@ class NormalizerService:
             total_dels = sum(f.deletions for f in commit.files)
             file_names = [f.filename for f in commit.files]
 
-            activities.append(Activity(
-                ts=commit.committed_at,
-                kind=ActivityKind.COMMIT,
-                repo=commit.repo,
-                pr_number=0,
-                title=title,
-                url=commit.url,
-                summary=f"commit: {title} ({commit.repo}) +{total_adds}/-{total_dels}",
-                sha=commit.sha,
-                body=commit.message,
-                files=file_names,
-                additions=total_adds,
-                deletions=total_dels,
-            ))
+            activities.append(
+                Activity(
+                    ts=commit.committed_at,
+                    kind=ActivityKind.COMMIT,
+                    repo=commit.repo,
+                    pr_number=0,
+                    title=title,
+                    url=commit.url,
+                    summary=f"commit: {title} ({commit.repo}) +{total_adds}/-{total_dels}",
+                    sha=commit.sha,
+                    body=commit.message,
+                    files=file_names,
+                    additions=total_adds,
+                    deletions=total_dels,
+                )
+            )
         return activities
 
     # ── Issue → Activity 변환 ──
 
-    def _convert_issue_activities(
-        self, issues: list[IssueRaw], target_date: str
-    ) -> list[Activity]:
+    def _convert_issue_activities(self, issues: list[IssueRaw], target_date: str) -> list[Activity]:
         """Issue 목록에서 ISSUE_AUTHORED / ISSUE_COMMENTED Activity를 생성."""
         activities: list[Activity] = []
         for issue in issues:
             # ISSUE_AUTHORED
-            if (
-                issue.author.lower() == self._username.lower()
-                and self._matches_date(issue.created_at, target_date)
+            if issue.author.lower() == self._username.lower() and self._matches_date(
+                issue.created_at, target_date
             ):
-                activities.append(Activity(
-                    ts=issue.created_at,
-                    kind=ActivityKind.ISSUE_AUTHORED,
-                    repo=issue.repo,
-                    pr_number=issue.number,
-                    title=issue.title,
-                    url=issue.url,
-                    summary=f"issue_authored: {issue.title} ({issue.repo})",
-                    body=issue.body,
-                    labels=issue.labels,
-                ))
+                activities.append(
+                    Activity(
+                        ts=issue.created_at,
+                        kind=ActivityKind.ISSUE_AUTHORED,
+                        repo=issue.repo,
+                        pr_number=issue.number,
+                        title=issue.title,
+                        url=issue.url,
+                        summary=f"issue_authored: {issue.title} ({issue.repo})",
+                        body=issue.body,
+                        labels=issue.labels,
+                    )
+                )
 
             # ISSUE_COMMENTED
             user_comments = [
-                c for c in issue.comments
+                c
+                for c in issue.comments
                 if c.author.lower() == self._username.lower()
                 and self._matches_date(c.created_at, target_date)
             ]
             if user_comments:
                 earliest = min(user_comments, key=lambda c: c.created_at)
-                activities.append(Activity(
-                    ts=earliest.created_at,
-                    kind=ActivityKind.ISSUE_COMMENTED,
-                    repo=issue.repo,
-                    pr_number=issue.number,
-                    title=issue.title,
-                    url=issue.url,
-                    summary=f"issue_commented: {issue.title} ({issue.repo})",
-                    body=issue.body,
-                    comment_bodies=[c.body for c in user_comments],
-                    labels=issue.labels,
-                    evidence_urls=[c.url for c in user_comments],
-                ))
+                activities.append(
+                    Activity(
+                        ts=earliest.created_at,
+                        kind=ActivityKind.ISSUE_COMMENTED,
+                        repo=issue.repo,
+                        pr_number=issue.number,
+                        title=issue.title,
+                        url=issue.url,
+                        summary=f"issue_commented: {issue.title} ({issue.repo})",
+                        body=issue.body,
+                        comment_bodies=[c.body for c in user_comments],
+                        labels=issue.labels,
+                        evidence_urls=[c.url for c in user_comments],
+                    )
+                )
         return activities
 
     def _make_activity(
@@ -283,10 +331,7 @@ class NormalizerService:
         if len(dirs) > 3:
             dir_hint += " 외"
 
-        return (
-            f"{kind.value}: [{dir_hint}] "
-            f"{len(pr.files)}개 파일 변경 ({pr.repo}) +{adds}/-{dels}"
-        )
+        return f"{kind.value}: [{dir_hint}] {len(pr.files)}개 파일 변경 ({pr.repo}) +{adds}/-{dels}"
 
     # ── 날짜 필터링 ──
 
@@ -307,14 +352,8 @@ class NormalizerService:
         issue_commented = [a for a in activities if a.kind == ActivityKind.ISSUE_COMMENTED]
 
         # additions/deletions: authored PR + commit 합산
-        total_adds = (
-            sum(a.additions for a in authored)
-            + sum(a.additions for a in commits)
-        )
-        total_dels = (
-            sum(a.deletions for a in authored)
-            + sum(a.deletions for a in commits)
-        )
+        total_adds = sum(a.additions for a in authored) + sum(a.additions for a in commits)
+        total_dels = sum(a.deletions for a in authored) + sum(a.deletions for a in commits)
 
         repos = sorted(set(a.repo for a in activities))
 
@@ -326,23 +365,15 @@ class NormalizerService:
             total_additions=total_adds,
             total_deletions=total_dels,
             repos_touched=repos,
-            authored_prs=[
-                {"url": a.url, "title": a.title, "repo": a.repo}
-                for a in authored
-            ],
-            reviewed_prs=[
-                {"url": a.url, "title": a.title, "repo": a.repo}
-                for a in reviewed
-            ],
+            authored_prs=[{"url": a.url, "title": a.title, "repo": a.repo} for a in authored],
+            reviewed_prs=[{"url": a.url, "title": a.title, "repo": a.repo} for a in reviewed],
             commit_count=len(commits),
             issue_authored_count=len(issue_authored),
             issue_commented_count=len(issue_commented),
             commits=[
-                {"url": a.url, "title": a.title, "repo": a.repo, "sha": a.sha}
-                for a in commits
+                {"url": a.url, "title": a.title, "repo": a.repo, "sha": a.sha} for a in commits
             ],
             authored_issues=[
-                {"url": a.url, "title": a.title, "repo": a.repo}
-                for a in issue_authored
+                {"url": a.url, "title": a.title, "repo": a.repo} for a in issue_authored
             ],
         )
