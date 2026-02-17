@@ -31,13 +31,15 @@ class TestLLMClientInit:
     def test_openai_provider(self, mock_openai_cls):
         client = LLMClient("openai", "test-key", "gpt-4o-mini")
         assert client._provider == "openai"
-        mock_openai_cls.assert_called_once_with(api_key="test-key")
+        mock_openai_cls.assert_called_once_with(api_key="test-key", timeout=120.0, max_retries=3)
 
     @patch("git_recap.infra.llm_client.anthropic")
     def test_anthropic_provider(self, mock_anthropic_mod):
         client = LLMClient("anthropic", "test-key", "claude-sonnet-4-5-20250929")
         assert client._provider == "anthropic"
-        mock_anthropic_mod.Anthropic.assert_called_once_with(api_key="test-key")
+        mock_anthropic_mod.Anthropic.assert_called_once_with(
+            api_key="test-key", timeout=120.0, max_retries=3
+        )
 
     def test_unsupported_provider(self):
         with pytest.raises(SummarizeError, match="Unsupported LLM provider"):
@@ -119,9 +121,7 @@ class TestTokenUsageTracking:
     def test_anthropic_single_call_usage(self, mock_anthropic_mod):
         """단일 Anthropic 호출 후 usage 누적."""
         mock_instance = MagicMock()
-        mock_instance.messages.create.return_value = _anthropic_response(
-            input_t=150, output_t=75
-        )
+        mock_instance.messages.create.return_value = _anthropic_response(input_t=150, output_t=75)
         mock_anthropic_mod.Anthropic.return_value = mock_instance
 
         client = LLMClient("anthropic", "key", "claude-sonnet-4-5-20250929")
@@ -171,3 +171,25 @@ class TestTokenUsageTracking:
 
         assert client.usage.call_count == 1
         assert client.usage.total_tokens == 150
+
+
+class TestTimeoutAndRetry:
+    @patch("git_recap.infra.llm_client.OpenAI")
+    def test_openai_custom_timeout_and_retries(self, mock_openai_cls):
+        """커스텀 timeout/max_retries가 OpenAI에 전달."""
+        LLMClient("openai", "key", "gpt-4o-mini", timeout=60.0, max_retries=5)
+        mock_openai_cls.assert_called_once_with(api_key="key", timeout=60.0, max_retries=5)
+
+    @patch("git_recap.infra.llm_client.anthropic")
+    def test_anthropic_custom_timeout_and_retries(self, mock_anthropic_mod):
+        """커스텀 timeout/max_retries가 Anthropic에 전달."""
+        LLMClient("anthropic", "key", "claude-sonnet-4-5-20250929", timeout=30.0, max_retries=1)
+        mock_anthropic_mod.Anthropic.assert_called_once_with(
+            api_key="key", timeout=30.0, max_retries=1
+        )
+
+    @patch("git_recap.infra.llm_client.OpenAI")
+    def test_default_timeout_and_retries(self, mock_openai_cls):
+        """기본값 timeout=120, max_retries=3."""
+        LLMClient("openai", "key", "gpt-4o-mini")
+        mock_openai_cls.assert_called_once_with(api_key="key", timeout=120.0, max_retries=3)

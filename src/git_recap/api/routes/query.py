@@ -23,7 +23,11 @@ class QueryRequest(BaseModel):
 
 
 def _run_query_task(
-    job_id: str, question: str, months: int, config: AppConfig, store: JobStore,
+    job_id: str,
+    question: str,
+    months: int,
+    config: AppConfig,
+    store: JobStore,
 ) -> None:
     """BackgroundTask: 자유 질문 실행."""
     logger.info("Background task start: query (job=%s)", job_id)

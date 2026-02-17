@@ -438,6 +438,48 @@ class TestDaily:
         assert "1" in system_prompt  # authored_count
 
 
+class TestDailyEmptyActivities:
+    def test_empty_activities_writes_marker(self, summarizer, mock_llm, test_config):
+        """빈 activities → 마커 파일 작성, LLM 미호출."""
+        norm_dir = test_config.date_normalized_dir(DATE)
+        save_jsonl([], norm_dir / "activities.jsonl")
+        save_json(
+            DailyStats(date=DATE),
+            norm_dir / "stats.json",
+        )
+
+        path = summarizer.daily(DATE)
+        assert path.exists()
+        content = path.read_text(encoding="utf-8")
+        assert "No activity on this day" in content
+        assert DATE in content
+        mock_llm.chat.assert_not_called()
+
+    def test_empty_activities_updates_checkpoint(self, summarizer, test_config):
+        """빈 activities도 checkpoint 정상 업데이트."""
+        norm_dir = test_config.date_normalized_dir(DATE)
+        save_jsonl([], norm_dir / "activities.jsonl")
+        save_json(DailyStats(date=DATE), norm_dir / "stats.json")
+
+        summarizer.daily(DATE)
+
+        from git_recap.models import load_json as _load_json
+
+        cp = _load_json(test_config.checkpoints_path)
+        assert cp["last_summarize_date"] == DATE
+
+    def test_empty_in_daily_range_is_success(self, summarizer, mock_llm, test_config):
+        """daily_range에서 빈 날짜는 'success' 상태."""
+        norm_dir = test_config.date_normalized_dir(DATE)
+        save_jsonl([], norm_dir / "activities.jsonl")
+        save_json(DailyStats(date=DATE), norm_dir / "stats.json")
+
+        results = summarizer.daily_range(DATE, DATE, force=True)
+        assert len(results) == 1
+        assert results[0]["status"] == "success"
+        mock_llm.chat.assert_not_called()
+
+
 class TestWeekly:
     def test_generates_weekly_summary(self, summarizer, mock_llm, test_config):
         # 2025-W07: Mon=2025-02-10 ~ Sun=2025-02-16

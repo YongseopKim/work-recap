@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -50,19 +51,27 @@ class FetcherService:
         self._username = config.username
         self._daily_state = daily_state
 
-    def fetch(self, target_date: str, types: set[str] | None = None) -> dict[str, Path]:
+    def fetch(
+        self,
+        target_date: str,
+        types: set[str] | None = None,
+        progress: Callable[[str], None] | None = None,
+    ) -> dict[str, Path]:
         """
         지정 날짜의 PR/Commit/Issue 활동을 수집하여 파일로 저장.
 
         Args:
             target_date: "YYYY-MM-DD"
             types: 수집할 타입 {"prs", "commits", "issues"}. None이면 전부.
+            progress: 진행 상황 콜백.
 
         Returns:
             타입별 저장 경로 dict (예: {"prs": Path, "commits": Path})
         """
         active = types or {"prs", "commits", "issues"}
         logger.info("Fetching %s for %s", ", ".join(sorted(active)), target_date)
+        if progress:
+            progress(f"Fetching {target_date}...")
         results: dict[str, Path] = {}
 
         if "prs" in active:
@@ -99,13 +108,14 @@ class FetcherService:
         until: str,
         types: set[str] | None = None,
         force: bool = False,
+        progress: Callable[[str], None] | None = None,
     ) -> list[dict]:
         """월 단위 chunk 검색 → 날짜별 enrich/save. 실패 시 계속 진행."""
         active = types or {"prs", "commits", "issues"}
         all_dates = date_range(since, until)
-        logger.info(
-            "fetch_range %s..%s (%d dates, force=%s)", since, until, len(all_dates), force
-        )
+        logger.info("fetch_range %s..%s (%d dates, force=%s)", since, until, len(all_dates), force)
+        if progress:
+            progress(f"Fetching {since}..{until} ({len(all_dates)} dates)")
         results: list[dict] = []
         processed: set[str] = set()
 
@@ -129,6 +139,8 @@ class FetcherService:
 
         for chunk_start, chunk_end in chunks:
             logger.debug("Processing chunk %s..%s", chunk_start, chunk_end)
+            if progress:
+                progress(f"  Fetch chunk {chunk_start}..{chunk_end}")
             try:
                 # Range search per chunk
                 pr_map: dict[str, dict] = {}

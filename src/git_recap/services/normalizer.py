@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from git_recap.infra.llm_client import LLMClient
     from git_recap.services.daily_state import DailyStateStore
+
+from jinja2 import Template
 
 from git_recap.config import AppConfig
 from git_recap.exceptions import NormalizeError
@@ -32,17 +36,26 @@ logger = logging.getLogger(__name__)
 
 
 class NormalizerService:
-    def __init__(self, config: AppConfig, daily_state: DailyStateStore | None = None) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        daily_state: DailyStateStore | None = None,
+        llm: LLMClient | None = None,
+    ) -> None:
         self._config = config
         self._username = config.username
         self._daily_state = daily_state
+        self._llm = llm
 
-    def normalize(self, target_date: str) -> tuple[Path, Path]:
+    def normalize(
+        self, target_date: str, progress: Callable[[str], None] | None = None
+    ) -> tuple[Path, Path]:
         """
         Raw PR 데이터를 Activity 목록과 통계로 변환.
 
         Args:
             target_date: "YYYY-MM-DD"
+            progress: 진행 상황 콜백.
 
         Returns:
             (activities_path, stats_path)
@@ -51,6 +64,8 @@ class NormalizerService:
             NormalizeError: 입력 파일 없음 또는 파싱 실패
         """
         logger.info("Normalizing %s", target_date)
+        if progress:
+            progress(f"Normalizing {target_date}...")
         raw_path = self._config.date_raw_dir(target_date) / "prs.json"
         if not raw_path.exists():
             raise NormalizeError(f"Raw file not found: {raw_path}")
@@ -89,6 +104,8 @@ class NormalizerService:
         activities = pr_activities + commit_activities + issue_activities
         activities.sort(key=lambda a: a.ts)
 
+        self._enrich_activities(activities)
+
         stats = self._compute_stats(activities, target_date)
 
         out_dir = self._config.date_normalized_dir(target_date)
@@ -108,10 +125,18 @@ class NormalizerService:
         self._update_checkpoint(target_date)
         return activities_path, stats_path
 
-    def normalize_range(self, since: str, until: str, force: bool = False) -> list[dict]:
+    def normalize_range(
+        self,
+        since: str,
+        until: str,
+        force: bool = False,
+        progress: Callable[[str], None] | None = None,
+    ) -> list[dict]:
         """날짜 범위 순회하며 normalize. skip/force/resilience 지원."""
         dates = date_range(since, until)
         logger.info("normalize_range %s..%s (%d dates, force=%s)", since, until, len(dates), force)
+        if progress:
+            progress(f"Normalizing {since}..{until} ({len(dates)} dates)")
         results: list[dict] = []
 
         for d in dates:
@@ -120,7 +145,7 @@ class NormalizerService:
                     results.append({"date": d, "status": "skipped"})
                     continue
 
-                self.normalize(d)
+                self.normalize(d, progress=progress)
                 results.append({"date": d, "status": "success"})
             except Exception as e:
                 logger.warning("Failed to normalize %s: %s", d, e)
@@ -151,6 +176,60 @@ class NormalizerService:
 
         if self._daily_state is not None:
             self._daily_state.set_timestamp("normalize", target_date)
+
+    # ── LLM Enrichment ──
+
+    def _enrich_activities(self, activities: list[Activity]) -> None:
+        """LLM으로 change_summary/intent 분류. 실패 시 빈 필드로 계속."""
+        if self._llm is None or not activities:
+            return
+
+        logger.info("Enriching %d activities with LLM", len(activities))
+        try:
+            template_path = self._config.prompts_dir / "enrich.md"
+            if not template_path.exists():
+                logger.warning("Enrich template not found: %s", template_path)
+                return
+
+            template_text = template_path.read_text(encoding="utf-8")
+            template = Template(template_text)
+
+            act_dicts = []
+            for act in activities:
+                act_dicts.append(
+                    {
+                        "kind": act.kind.value,
+                        "title": act.title,
+                        "repo": act.repo,
+                        "body": act.body,
+                        "files": act.files,
+                        "file_patches": act.file_patches,
+                        "review_bodies": act.review_bodies,
+                        "comment_bodies": act.comment_bodies,
+                    }
+                )
+
+            prompt = template.render(activities=act_dicts)
+            response = self._llm.chat("You are a code change classifier.", prompt)
+
+            # Parse JSON response
+            text = response.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+                if text.endswith("```"):
+                    text = text[:-3]
+                text = text.strip()
+
+            enrichments = json.loads(text)
+            for entry in enrichments:
+                idx = entry.get("index")
+                if idx is not None and 0 <= idx < len(activities):
+                    activities[idx].change_summary = entry.get("change_summary", "")
+                    activities[idx].intent = entry.get("intent", "")
+
+            logger.info("Enrichment complete: %d activities enriched", len(enrichments))
+        except Exception as e:
+            logger.warning("LLM enrichment failed, continuing without enrichment: %s", e)
 
     # ── Activity 변환 ──
 

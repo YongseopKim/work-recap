@@ -115,8 +115,13 @@ class TestComment:
 
     def test_creation_with_inline_fields(self):
         c = Comment(
-            "user", "body", "2025-02-16T10:00:00Z", "url",
-            path="src/auth.py", line=42, diff_hunk="@@ -40,3 +40,5 @@",
+            "user",
+            "body",
+            "2025-02-16T10:00:00Z",
+            "url",
+            path="src/auth.py",
+            line=42,
+            diff_hunk="@@ -40,3 +40,5 @@",
         )
         assert c.path == "src/auth.py"
         assert c.line == 42
@@ -247,8 +252,13 @@ class TestActivity:
     def test_backward_compat_no_text_fields(self):
         """옛 데이터(body/review_bodies/comment_bodies 없음)로 from_dict 호출 시 정상 동작."""
         d = {
-            "ts": "t", "kind": "pr_authored", "repo": "r",
-            "pr_number": 1, "title": "t", "url": "u", "summary": "s",
+            "ts": "t",
+            "kind": "pr_authored",
+            "repo": "r",
+            "pr_number": 1,
+            "title": "t",
+            "url": "u",
+            "summary": "s",
         }
         act = activity_from_dict(d)
         assert act.body == ""
@@ -258,8 +268,13 @@ class TestActivity:
     def test_file_patches_and_comment_contexts_defaults(self):
         """file_patches/comment_contexts 기본값 빈 dict/list."""
         act = Activity(
-            ts="t", kind=ActivityKind.PR_AUTHORED, repo="r",
-            pr_number=1, title="t", url="u", summary="s",
+            ts="t",
+            kind=ActivityKind.PR_AUTHORED,
+            repo="r",
+            pr_number=1,
+            title="t",
+            url="u",
+            summary="s",
         )
         assert act.file_patches == {}
         assert act.comment_contexts == []
@@ -267,8 +282,13 @@ class TestActivity:
     def test_file_patches_roundtrip(self, tmp_path):
         """file_patches 포함 왕복 변환."""
         act = Activity(
-            ts="t", kind=ActivityKind.PR_AUTHORED, repo="r",
-            pr_number=1, title="t", url="u", summary="s",
+            ts="t",
+            kind=ActivityKind.PR_AUTHORED,
+            repo="r",
+            pr_number=1,
+            title="t",
+            url="u",
+            summary="s",
             file_patches={"src/auth.py": "@@ -1 +1 @@\n+new"},
         )
         path = tmp_path / "act.jsonl"
@@ -281,8 +301,13 @@ class TestActivity:
         """comment_contexts 포함 왕복 변환."""
         ctx = [{"path": "src/auth.py", "line": 42, "diff_hunk": "@@", "body": "Fix this"}]
         act = Activity(
-            ts="t", kind=ActivityKind.PR_REVIEWED, repo="r",
-            pr_number=1, title="t", url="u", summary="s",
+            ts="t",
+            kind=ActivityKind.PR_REVIEWED,
+            repo="r",
+            pr_number=1,
+            title="t",
+            url="u",
+            summary="s",
             comment_contexts=ctx,
         )
         path = tmp_path / "act.jsonl"
@@ -294,8 +319,13 @@ class TestActivity:
     def test_backward_compat_no_patches_contexts(self):
         """옛 데이터(file_patches/comment_contexts 없음)로 from_dict 호출 시 정상 동작."""
         d = {
-            "ts": "t", "kind": "pr_authored", "repo": "r",
-            "pr_number": 1, "title": "t", "url": "u", "summary": "s",
+            "ts": "t",
+            "kind": "pr_authored",
+            "repo": "r",
+            "pr_number": 1,
+            "title": "t",
+            "url": "u",
+            "summary": "s",
         }
         act = activity_from_dict(d)
         assert act.file_patches == {}
@@ -469,8 +499,12 @@ def _make_sample_issue_raw() -> IssueRaw:
         labels=["bug", "priority-high"],
         author="testuser",
         comments=[
-            Comment("other", "I can reproduce", "2025-02-16T10:00:00Z",
-                    "https://github.example.com/org/repo/issues/10#comment-1"),
+            Comment(
+                "other",
+                "I can reproduce",
+                "2025-02-16T10:00:00Z",
+                "https://github.example.com/org/repo/issues/10#comment-1",
+            ),
         ],
     )
 
@@ -511,10 +545,16 @@ class TestIssueRaw:
 
     def test_closed_issue_roundtrip(self, tmp_path):
         issue = IssueRaw(
-            url="u", api_url="a", number=2, title="t", body="b",
-            state="closed", created_at="2025-01-01T00:00:00Z",
+            url="u",
+            api_url="a",
+            number=2,
+            title="t",
+            body="b",
+            state="closed",
+            created_at="2025-01-01T00:00:00Z",
             updated_at="2025-01-02T00:00:00Z",
-            closed_at="2025-01-02T00:00:00Z", repo="org/repo",
+            closed_at="2025-01-02T00:00:00Z",
+            repo="org/repo",
         )
         path = tmp_path / "issue.json"
         save_json([issue], path)
@@ -557,8 +597,13 @@ class TestActivityWithSha:
     def test_backward_compat_no_sha(self):
         """옛 데이터(sha 없음)로 from_dict 호출 시 정상 동작."""
         d = {
-            "ts": "t", "kind": "pr_authored", "repo": "r",
-            "pr_number": 1, "title": "t", "url": "u", "summary": "s",
+            "ts": "t",
+            "kind": "pr_authored",
+            "repo": "r",
+            "pr_number": 1,
+            "title": "t",
+            "url": "u",
+            "summary": "s",
         }
         act = activity_from_dict(d)
         assert act.sha == ""

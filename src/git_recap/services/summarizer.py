@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from datetime import date, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -35,9 +36,11 @@ class SummarizerService:
 
     # ── Public API ──
 
-    def daily(self, target_date: str) -> Path:
+    def daily(self, target_date: str, progress: Callable[[str], None] | None = None) -> Path:
         """Daily summary 생성."""
         logger.info("Summarizing daily: %s", target_date)
+        if progress:
+            progress(f"Summarizing {target_date}...")
         norm_dir = self._config.date_normalized_dir(target_date)
         activities_path = norm_dir / "activities.jsonl"
         stats_path = norm_dir / "stats.json"
@@ -51,9 +54,22 @@ class SummarizerService:
         stats = load_json(stats_path)
         logger.debug("Loaded %d activities for %s", len(activities), target_date)
 
+        if not activities:
+            logger.info("No activities for %s, writing marker file", target_date)
+            output_path = self._config.daily_summary_path(target_date)
+            marker = (
+                f"# {target_date} Daily Summary\n\n"
+                "활동이 없는 날입니다. (No activity on this day.)\n"
+            )
+            self._save_markdown(output_path, marker)
+            self._update_checkpoint(target_date)
+            return output_path
+
         system_prompt = self._render_prompt("daily.md", date=target_date, stats=stats)
         user_content = self._format_activities(activities)
-        logger.debug("LLM prompt: system=%d chars, user=%d chars", len(system_prompt), len(user_content))
+        logger.debug(
+            "LLM prompt: system=%d chars, user=%d chars", len(system_prompt), len(user_content)
+        )
 
         response = self._llm.chat(system_prompt, user_content)
 
@@ -65,10 +81,18 @@ class SummarizerService:
         self._update_checkpoint(target_date)
         return output_path
 
-    def daily_range(self, since: str, until: str, force: bool = False) -> list[dict]:
+    def daily_range(
+        self,
+        since: str,
+        until: str,
+        force: bool = False,
+        progress: Callable[[str], None] | None = None,
+    ) -> list[dict]:
         """날짜 범위 순회하며 daily summary 생성. skip/force/resilience 지원."""
         dates = date_range(since, until)
         logger.info("daily_range %s..%s (%d dates, force=%s)", since, until, len(dates), force)
+        if progress:
+            progress(f"Summarizing {since}..{until} ({len(dates)} dates)")
         results: list[dict] = []
 
         for d in dates:
@@ -77,7 +101,7 @@ class SummarizerService:
                     results.append({"date": d, "status": "skipped"})
                     continue
 
-                self.daily(d)
+                self.daily(d, progress=progress)
                 results.append({"date": d, "status": "success"})
             except Exception as e:
                 logger.warning("Failed to summarize %s: %s", d, e)

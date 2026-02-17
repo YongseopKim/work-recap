@@ -31,6 +31,7 @@ def main(
     level = logging.DEBUG if verbose else logging.INFO
     setup_logging(level)
 
+
 VALID_TYPES = {"prs", "commits", "issues"}
 
 
@@ -53,6 +54,11 @@ def _get_llm_client(config: AppConfig):
 def _handle_error(e: GitRecapError) -> None:
     typer.echo(f"Error: {e}", err=True)
     raise typer.Exit(code=1)
+
+
+def _progress(msg: str) -> None:
+    """진행 상황 콜백."""
+    typer.echo(msg)
 
 
 def _print_token_usage(llm) -> None:
@@ -233,6 +239,7 @@ def fetch(
                     range_ep[1],
                     types=types,
                     force=force,
+                    progress=_progress,
                 )
                 succeeded = sum(1 for r in range_results if r["status"] == "success")
                 skipped = sum(1 for r in range_results if r["status"] == "skipped")
@@ -283,9 +290,12 @@ def normalize(
     monthly: str = typer.Option(None, help="YEAR-MONTH, e.g. 2026-2"),
     yearly: int = typer.Option(None, help="Year, e.g. 2026"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-normalize even if data exists"),
+    enrich: bool = typer.Option(
+        False, "--enrich", "-e", help="Enrich activities with LLM (change_summary, intent)"
+    ),
 ) -> None:
     """Normalize raw PR data into activities and stats."""
-    logger.info("Command: normalize date=%s force=%s", target_date, force)
+    logger.info("Command: normalize date=%s force=%s enrich=%s", target_date, force, enrich)
     dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
     endpoints = _resolve_range_endpoints(target_date, since, until, weekly, monthly, yearly)
 
@@ -308,7 +318,8 @@ def normalize(
 
     try:
         ds = DailyStateStore(config.daily_state_path)
-        service = NormalizerService(config, daily_state=ds)
+        llm = _get_llm_client(config) if enrich else None
+        service = NormalizerService(config, daily_state=ds, llm=llm)
 
         range_ep = endpoints or catchup_endpoints
         if range_ep:
@@ -316,12 +327,15 @@ def normalize(
                 range_ep[0],
                 range_ep[1],
                 force=force,
+                progress=_progress,
             )
             _print_range_results("Normalized", range_results)
         else:
             act_path, stats_path = service.normalize(dates[0])
             typer.echo("Normalized 1 day(s)")
             typer.echo(f"  {dates[0]}: {act_path}, {stats_path}")
+        if llm:
+            _print_token_usage(llm)
     except GitRecapError as e:
         _handle_error(e)
 
@@ -374,6 +388,7 @@ def summarize_daily(
                 range_ep[0],
                 range_ep[1],
                 force=force,
+                progress=_progress,
             )
             _print_range_results("Daily summary", range_results)
         else:
@@ -500,7 +515,9 @@ def run(
 
         range_ep = endpoints or catchup_endpoints
         if range_ep:
-            results = orchestrator.run_range(range_ep[0], range_ep[1], force=force, types=types)
+            results = orchestrator.run_range(
+                range_ep[0], range_ep[1], force=force, types=types, progress=_progress
+            )
             succeeded = sum(1 for r in results if r["status"] == "success")
             skipped = sum(1 for r in results if r["status"] == "skipped")
             failed = sum(1 for r in results if r["status"] == "failed")

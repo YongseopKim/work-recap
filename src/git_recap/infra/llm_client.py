@@ -1,6 +1,7 @@
 """Provider-agnostic LLM client."""
 
 import logging
+import time
 
 import anthropic
 from openai import OpenAI
@@ -10,19 +11,34 @@ from git_recap.models import TokenUsage
 
 logger = logging.getLogger(__name__)
 
+LLM_TIMEOUT = 120.0
+LLM_MAX_RETRIES = 3
+
 
 class LLMClient:
     """Provider-agnostic LLM client. OpenAI와 Anthropic을 동일 인터페이스로 호출."""
 
-    def __init__(self, provider: str, api_key: str, model: str) -> None:
+    def __init__(
+        self,
+        provider: str,
+        api_key: str,
+        model: str,
+        *,
+        timeout: float = LLM_TIMEOUT,
+        max_retries: int = LLM_MAX_RETRIES,
+    ) -> None:
         self._provider = provider
         self._model = model
         self._usage = TokenUsage()
 
         if provider == "openai":
-            self._openai = OpenAI(api_key=api_key)
+            self._openai = OpenAI(api_key=api_key, timeout=timeout, max_retries=max_retries)
         elif provider == "anthropic":
-            self._anthropic = anthropic.Anthropic(api_key=api_key)
+            self._anthropic = anthropic.Anthropic(
+                api_key=api_key,
+                timeout=timeout,
+                max_retries=max_retries,
+            )
         else:
             raise SummarizeError(f"Unsupported LLM provider: {provider}")
 
@@ -48,16 +64,19 @@ class LLMClient:
             len(user_content),
         )
         try:
+            t0 = time.monotonic()
             if self._provider == "openai":
                 text, call_usage = self._chat_openai(system_prompt, user_content)
             else:
                 text, call_usage = self._chat_anthropic(system_prompt, user_content)
+            elapsed = time.monotonic() - t0
             self._usage = self._usage + call_usage
             logger.info(
-                "LLM tokens: prompt=%d completion=%d total=%d",
+                "LLM tokens: prompt=%d completion=%d total=%d (%.1fs)",
                 call_usage.prompt_tokens,
                 call_usage.completion_tokens,
                 call_usage.total_tokens,
+                elapsed,
             )
             logger.debug("LLM response: %d chars", len(text))
             return text

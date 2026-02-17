@@ -1,3 +1,6 @@
+import json
+from unittest.mock import MagicMock
+
 import pytest
 
 from git_recap.exceptions import NormalizeError
@@ -1266,3 +1269,155 @@ class TestNormalizerDailyStateIntegration:
         normalizer.normalize(DATE)
 
         mock_ds.set_timestamp.assert_called_once_with("normalize", DATE)
+
+
+# ── LLM Enrichment 테스트 ──
+
+
+class TestLLMEnrichment:
+    def _make_activities(self):
+        return [
+            Activity(
+                ts=f"{DATE}T09:00:00Z",
+                kind=ActivityKind.PR_AUTHORED,
+                repo="org/repo",
+                pr_number=1,
+                title="Add auth feature",
+                url="https://ghes/org/repo/pull/1",
+                summary="pr_authored: Add auth feature",
+                files=["src/auth.py"],
+                additions=10,
+                deletions=3,
+            ),
+        ]
+
+    def test_llm_sets_change_summary_and_intent(self, test_config):
+        """LLM 주입 시 change_summary/intent 설정."""
+        import shutil
+        from pathlib import Path
+
+        src_prompts = Path(__file__).parents[2] / "prompts"
+        for f in src_prompts.glob("*.md"):
+            shutil.copy(f, test_config.prompts_dir / f.name)
+
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = json.dumps(
+            [{"index": 0, "change_summary": "인증 기능 추가", "intent": "feature"}]
+        )
+
+        normalizer = NormalizerService(test_config, llm=mock_llm)
+        activities = self._make_activities()
+        normalizer._enrich_activities(activities)
+
+        assert activities[0].change_summary == "인증 기능 추가"
+        assert activities[0].intent == "feature"
+        mock_llm.chat.assert_called_once()
+
+    def test_llm_failure_graceful_degradation(self, test_config):
+        """LLM 실패 시 빈 필드로 계속."""
+        import shutil
+        from pathlib import Path
+
+        src_prompts = Path(__file__).parents[2] / "prompts"
+        for f in src_prompts.glob("*.md"):
+            shutil.copy(f, test_config.prompts_dir / f.name)
+
+        mock_llm = MagicMock()
+        mock_llm.chat.side_effect = RuntimeError("API error")
+
+        normalizer = NormalizerService(test_config, llm=mock_llm)
+        activities = self._make_activities()
+        normalizer._enrich_activities(activities)
+
+        assert activities[0].change_summary == ""
+        assert activities[0].intent == ""
+
+    def test_no_llm_leaves_fields_empty(self, test_config):
+        """LLM 미주입 시 빈 필드."""
+        normalizer = NormalizerService(test_config)
+        activities = self._make_activities()
+        normalizer._enrich_activities(activities)
+
+        assert activities[0].change_summary == ""
+        assert activities[0].intent == ""
+
+    def test_empty_activities_no_llm_call(self, test_config):
+        """빈 activities 시 LLM 미호출."""
+        mock_llm = MagicMock()
+        normalizer = NormalizerService(test_config, llm=mock_llm)
+        normalizer._enrich_activities([])
+        mock_llm.chat.assert_not_called()
+
+    def test_enrichment_in_normalize_pipeline(self, test_config):
+        """normalize() 호출 시 enrichment가 activities에 반영."""
+        import shutil
+        from pathlib import Path
+
+        src_prompts = Path(__file__).parents[2] / "prompts"
+        for f in src_prompts.glob("*.md"):
+            shutil.copy(f, test_config.prompts_dir / f.name)
+
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = json.dumps(
+            [{"index": 0, "change_summary": "기능 추가", "intent": "feature"}]
+        )
+
+        _save_raw(test_config, [_make_pr(author="testuser")])
+        normalizer = NormalizerService(test_config, llm=mock_llm)
+        act_path, _ = normalizer.normalize(DATE)
+
+        activities = load_jsonl(act_path)
+        assert activities[0]["change_summary"] == "기능 추가"
+        assert activities[0]["intent"] == "feature"
+
+
+class TestActivityNewFields:
+    def test_activity_default_values(self):
+        """Activity의 change_summary/intent 기본값은 빈 문자열."""
+        act = Activity(
+            ts="t",
+            kind=ActivityKind.PR_AUTHORED,
+            repo="r",
+            pr_number=1,
+            title="t",
+            url="u",
+            summary="s",
+        )
+        assert act.change_summary == ""
+        assert act.intent == ""
+
+    def test_activity_from_dict_with_new_fields(self):
+        """activity_from_dict가 change_summary/intent를 복원."""
+        from git_recap.models import activity_from_dict
+
+        d = {
+            "ts": "t",
+            "kind": "pr_authored",
+            "repo": "r",
+            "pr_number": 1,
+            "title": "t",
+            "url": "u",
+            "summary": "s",
+            "change_summary": "인증 기능 추가",
+            "intent": "feature",
+        }
+        act = activity_from_dict(d)
+        assert act.change_summary == "인증 기능 추가"
+        assert act.intent == "feature"
+
+    def test_activity_from_dict_without_new_fields(self):
+        """change_summary/intent 없는 dict도 역호환."""
+        from git_recap.models import activity_from_dict
+
+        d = {
+            "ts": "t",
+            "kind": "pr_authored",
+            "repo": "r",
+            "pr_number": 1,
+            "title": "t",
+            "url": "u",
+            "summary": "s",
+        }
+        act = activity_from_dict(d)
+        assert act.change_summary == ""
+        assert act.intent == ""

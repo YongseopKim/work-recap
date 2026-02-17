@@ -18,9 +18,7 @@ HAS_ENV = _env_path.exists()
 @pytest.fixture(autouse=True)
 def _use_real_env(monkeypatch):
     """Root conftest의 _use_test_env를 재override하여 real .env 사용."""
-    monkeypatch.setattr(
-        AppConfig, "model_config", {**AppConfig.model_config, "env_file": ".env"}
-    )
+    monkeypatch.setattr(AppConfig, "model_config", {**AppConfig.model_config, "env_file": ".env"})
 
 
 @pytest.fixture(scope="class")
@@ -58,9 +56,7 @@ def real_config(shared_tmp_dir):
 
         required = [config.ghes_url, config.ghes_token, config.username, config.llm_api_key]
         if not all(required):
-            pytest.skip(
-                "Required .env keys missing (ghes_url, ghes_token, username, llm_api_key)"
-            )
+            pytest.skip("Required .env keys missing (ghes_url, ghes_token, username, llm_api_key)")
 
         yield config
     finally:

@@ -20,9 +20,7 @@ class TestAppConfig:
 
     def test_default_paths(self):
         """data_dir, prompts_dir 기본값 확인."""
-        config = AppConfig(
-            ghes_url="u", ghes_token="t", username="u", llm_api_key="k"
-        )
+        config = AppConfig(ghes_url="u", ghes_token="t", username="u", llm_api_key="k")
         assert config.data_dir == Path("data")
         assert config.prompts_dir == Path("prompts")
 
@@ -42,21 +40,15 @@ class TestAppConfig:
         assert config.checkpoints_path == Path("/tmp/data/state/checkpoints.json")
         assert config.jobs_dir == Path("/tmp/data/state/jobs")
         assert config.date_raw_dir("2025-02-16") == Path("/tmp/data/raw/2025/02/16")
-        assert config.date_normalized_dir("2025-02-16") == Path(
-            "/tmp/data/normalized/2025/02/16"
-        )
+        assert config.date_normalized_dir("2025-02-16") == Path("/tmp/data/normalized/2025/02/16")
         assert config.daily_summary_path("2025-02-16") == Path(
             "/tmp/data/summaries/2025/daily/02-16.md"
         )
-        assert config.weekly_summary_path(2025, 7) == Path(
-            "/tmp/data/summaries/2025/weekly/W07.md"
-        )
+        assert config.weekly_summary_path(2025, 7) == Path("/tmp/data/summaries/2025/weekly/W07.md")
         assert config.monthly_summary_path(2025, 2) == Path(
             "/tmp/data/summaries/2025/monthly/02.md"
         )
-        assert config.yearly_summary_path(2025) == Path(
-            "/tmp/data/summaries/2025/yearly.md"
-        )
+        assert config.yearly_summary_path(2025) == Path("/tmp/data/summaries/2025/yearly.md")
 
     def test_required_fields_missing(self):
         """필수 필드 누락 시 ValidationError."""
@@ -65,7 +57,5 @@ class TestAppConfig:
 
     def test_llm_provider_default(self):
         """llm_provider 기본값은 'openai'."""
-        config = AppConfig(
-            ghes_url="u", ghes_token="t", username="u", llm_api_key="k"
-        )
+        config = AppConfig(ghes_url="u", ghes_token="t", username="u", llm_api_key="k")
         assert config.llm_provider == "openai"

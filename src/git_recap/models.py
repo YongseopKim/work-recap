@@ -135,6 +135,8 @@ class Activity:
     labels: list[str] = field(default_factory=list)
     evidence_urls: list[str] = field(default_factory=list)
     comment_contexts: list[dict] = field(default_factory=list)  # [{path, line, diff_hunk, body}]
+    change_summary: str = ""  # LLM 생성 코드 변경 요약
+    intent: str = ""  # LLM 분류: bugfix, feature, refactor, docs, chore, test, etc.
 
 
 @dataclass
@@ -325,6 +327,8 @@ def activity_from_dict(d: dict) -> Activity:
         labels=d.get("labels", []),
         evidence_urls=d.get("evidence_urls", []),
         comment_contexts=d.get("comment_contexts", []),
+        change_summary=d.get("change_summary", ""),
+        intent=d.get("intent", ""),
     )
 
 

@@ -1,6 +1,7 @@
 """Fetcher → Normalizer → Summarizer 파이프라인 오케스트레이션."""
 
 import logging
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -32,7 +33,12 @@ class OrchestratorService:
         self._summarizer = summarizer
         self._config = config
 
-    def run_daily(self, target_date: str, types: set[str] | None = None) -> Path:
+    def run_daily(
+        self,
+        target_date: str,
+        types: set[str] | None = None,
+        progress: Callable[[str], None] | None = None,
+    ) -> Path:
         """
         단일 날짜 전체 파이프라인: fetch → normalize → summarize(daily).
 
@@ -43,21 +49,27 @@ class OrchestratorService:
             StepFailedError: 어느 단계에서든 실패 시
         """
         logger.info("Pipeline start: %s (types=%s)", target_date, types)
+        if progress:
+            progress(f"Pipeline: fetch {target_date}")
 
         try:
-            self._fetcher.fetch(target_date, types=types)
+            self._fetcher.fetch(target_date, types=types, progress=progress)
         except FetchError as e:
             raise StepFailedError("fetch", e) from e
         logger.info("Phase complete: fetch → normalize (%s)", target_date)
+        if progress:
+            progress(f"Pipeline: normalize {target_date}")
 
         try:
-            self._normalizer.normalize(target_date)
+            self._normalizer.normalize(target_date, progress=progress)
         except NormalizeError as e:
             raise StepFailedError("normalize", e) from e
         logger.info("Phase complete: normalize → summarize (%s)", target_date)
+        if progress:
+            progress(f"Pipeline: summarize {target_date}")
 
         try:
-            summary_path = self._summarizer.daily(target_date)
+            summary_path = self._summarizer.daily(target_date, progress=progress)
         except SummarizeError as e:
             raise StepFailedError("summarize", e) from e
 
@@ -65,7 +77,12 @@ class OrchestratorService:
         return summary_path
 
     def run_range(
-        self, since: str, until: str, force: bool = False, types: set[str] | None = None
+        self,
+        since: str,
+        until: str,
+        force: bool = False,
+        types: set[str] | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> list[dict]:
         """
         기간 범위 backfill using bulk operations.
@@ -82,11 +99,23 @@ class OrchestratorService:
         if start > end:
             return []
 
-        fetch_results = self._fetcher.fetch_range(since, until, types=types, force=force)
+        if progress:
+            progress(f"Phase 1/3: Fetching {since}..{until}")
+        fetch_results = self._fetcher.fetch_range(
+            since, until, types=types, force=force, progress=progress
+        )
         logger.info("Phase complete: fetch → normalize (%s..%s)", since, until)
-        normalize_results = self._normalizer.normalize_range(since, until, force=force)
+        if progress:
+            progress(f"Phase 2/3: Normalizing {since}..{until}")
+        normalize_results = self._normalizer.normalize_range(
+            since, until, force=force, progress=progress
+        )
         logger.info("Phase complete: normalize → summarize (%s..%s)", since, until)
-        summarize_results = self._summarizer.daily_range(since, until, force=force)
+        if progress:
+            progress(f"Phase 3/3: Summarizing {since}..{until}")
+        summarize_results = self._summarizer.daily_range(
+            since, until, force=force, progress=progress
+        )
 
         results = self._merge_results(fetch_results, normalize_results, summarize_results)
 

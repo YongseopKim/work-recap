@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -159,6 +159,7 @@ class TestFetchDateRange:
             "2025-02-16",
             types=None,
             force=False,
+            progress=ANY,
         )
         assert "3 day(s)" in result.output
         assert "3 succeeded" in result.output
@@ -251,6 +252,7 @@ class TestFetchCatchUp:
             "2026-02-17",
             types=None,
             force=False,
+            progress=ANY,
         )
 
     @patch("git_recap.cli.main.date_utils")
@@ -272,6 +274,7 @@ class TestFetchCatchUp:
             "2026-02-17",
             types={"issues"},
             force=False,
+            progress=ANY,
         )
 
 
@@ -408,6 +411,7 @@ class TestFetchForce:
             "2025-02-15",
             types=None,
             force=True,
+            progress=ANY,
         )
 
     @patch("git_recap.cli.main.FetcherService")
@@ -471,6 +475,7 @@ class TestNormalizeDateRange:
             "2025-02-14",
             "2025-02-16",
             force=False,
+            progress=ANY,
         )
         assert "3 day(s)" in result.output
 
@@ -556,6 +561,7 @@ class TestSummarizeDailyDateRange:
             "2025-02-14",
             "2025-02-16",
             force=False,
+            progress=ANY,
         )
         assert "3 day(s)" in result.output
 
@@ -733,7 +739,7 @@ class TestRun:
         assert result.exit_code == 0
         assert "3 succeeded" in result.output
         mock_orch.return_value.run_range.assert_called_once_with(
-            "2026-02-15", "2026-02-17", force=False, types=None
+            "2026-02-15", "2026-02-17", force=False, types=None, progress=ANY
         )
 
     @patch("git_recap.cli.main.date_utils")
@@ -852,7 +858,7 @@ class TestRunForce:
         assert result.exit_code == 0
         assert "2 succeeded" in result.output
         mock_orch.return_value.run_range.assert_called_once_with(
-            "2025-02-14", "2025-02-15", force=True, types=None
+            "2025-02-14", "2025-02-15", force=True, types=None, progress=ANY
         )
 
     @patch("git_recap.cli.main.OrchestratorService")
@@ -877,7 +883,7 @@ class TestRunForce:
         )
         assert result.exit_code == 0
         mock_orch.return_value.run_range.assert_called_once_with(
-            "2025-02-14", "2025-02-14", force=True, types=None
+            "2025-02-14", "2025-02-14", force=True, types=None, progress=ANY
         )
 
     @patch("git_recap.cli.main.OrchestratorService")
@@ -1002,6 +1008,7 @@ class TestNormalizeCatchUp:
             "2026-02-15",
             "2026-02-17",
             force=False,
+            progress=ANY,
         )
 
     @patch("git_recap.cli.main.date_utils")
@@ -1037,6 +1044,7 @@ class TestNormalizeForce:
             "2025-02-14",
             "2025-02-15",
             force=True,
+            progress=ANY,
         )
 
     @patch("git_recap.cli.main.NormalizerService")
@@ -1117,6 +1125,7 @@ class TestSummarizeDailyCatchUp:
             "2026-02-15",
             "2026-02-17",
             force=False,
+            progress=ANY,
         )
 
     @patch("git_recap.cli.main.date_utils")
@@ -1152,6 +1161,7 @@ class TestSummarizeDailyForce:
             "2025-02-14",
             "2025-02-15",
             force=True,
+            progress=ANY,
         )
 
 
@@ -1277,7 +1287,7 @@ class TestRunTypeFilter:
         )
         assert result.exit_code == 0
         mock_orch.return_value.run_range.assert_called_once_with(
-            "2025-02-14", "2025-02-15", force=False, types={"commits"}
+            "2025-02-14", "2025-02-15", force=False, types={"commits"}, progress=ANY
         )
 
     def test_type_invalid(self):
@@ -1310,7 +1320,7 @@ class TestRunTypeFilter:
         )
         assert result.exit_code == 0
         mock_orch.return_value.run_range.assert_called_once_with(
-            "2025-02-14", "2025-02-14", force=True, types={"issues"}
+            "2025-02-14", "2025-02-14", force=True, types={"issues"}, progress=ANY
         )
 
 
