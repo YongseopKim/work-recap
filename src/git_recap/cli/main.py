@@ -55,6 +55,16 @@ def _handle_error(e: GitRecapError) -> None:
     raise typer.Exit(code=1)
 
 
+def _print_token_usage(llm) -> None:
+    """LLM 토큰 사용량 출력."""
+    u = llm.usage
+    if u.call_count > 0:
+        typer.echo(
+            f"Token usage: {u.prompt_tokens:,} prompt + {u.completion_tokens:,} completion"
+            f" = {u.total_tokens:,} total ({u.call_count} calls)"
+        )
+
+
 def _read_last_fetch_date(config: AppConfig) -> str | None:
     cp_path = config.checkpoints_path
     if not cp_path.exists():
@@ -369,6 +379,7 @@ def summarize_daily(
         else:
             path = service.daily(dates[0])
             typer.echo(f"Daily summary → {path}")
+        _print_token_usage(llm)
     except GitRecapError as e:
         _handle_error(e)
 
@@ -388,6 +399,7 @@ def summarize_weekly(
         service = SummarizerService(config, llm)
         path = service.weekly(year, week, force=force)
         typer.echo(f"Weekly summary → {path}")
+        _print_token_usage(llm)
     except GitRecapError as e:
         _handle_error(e)
 
@@ -407,6 +419,7 @@ def summarize_monthly(
         service = SummarizerService(config, llm)
         path = service.monthly(year, month, force=force)
         typer.echo(f"Monthly summary → {path}")
+        _print_token_usage(llm)
     except GitRecapError as e:
         _handle_error(e)
 
@@ -425,6 +438,7 @@ def summarize_yearly(
         service = SummarizerService(config, llm)
         path = service.yearly(year, force=force)
         typer.echo(f"Yearly summary → {path}")
+        _print_token_usage(llm)
     except GitRecapError as e:
         _handle_error(e)
 
@@ -496,12 +510,14 @@ def run(
                 msg = r.get("path", r.get("error", ""))
                 typer.echo(f"  {mark} {r['date']}: {msg}")
             ghes.close()
+            _print_token_usage(llm)
             if failed > 0:
                 raise typer.Exit(code=1)
         else:
             path = orchestrator.run_daily(dates[0], types=types)
             ghes.close()
             typer.echo(f"Pipeline complete → {path}")
+            _print_token_usage(llm)
     except GitRecapError as e:
         _handle_error(e)
 
@@ -523,5 +539,6 @@ def ask(
         service = SummarizerService(config, llm)
         answer = service.query(question, months_back=months)
         typer.echo(answer)
+        _print_token_usage(llm)
     except GitRecapError as e:
         _handle_error(e)

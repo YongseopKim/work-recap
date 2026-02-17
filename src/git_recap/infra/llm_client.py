@@ -6,6 +6,7 @@ import anthropic
 from openai import OpenAI
 
 from git_recap.exceptions import SummarizeError
+from git_recap.models import TokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class LLMClient:
     def __init__(self, provider: str, api_key: str, model: str) -> None:
         self._provider = provider
         self._model = model
+        self._usage = TokenUsage()
 
         if provider == "openai":
             self._openai = OpenAI(api_key=api_key)
@@ -23,6 +25,11 @@ class LLMClient:
             self._anthropic = anthropic.Anthropic(api_key=api_key)
         else:
             raise SummarizeError(f"Unsupported LLM provider: {provider}")
+
+    @property
+    def usage(self) -> TokenUsage:
+        """누적 토큰 사용량 반환."""
+        return self._usage
 
     def chat(self, system_prompt: str, user_content: str) -> str:
         """
@@ -42,17 +49,24 @@ class LLMClient:
         )
         try:
             if self._provider == "openai":
-                result = self._chat_openai(system_prompt, user_content)
+                text, call_usage = self._chat_openai(system_prompt, user_content)
             else:
-                result = self._chat_anthropic(system_prompt, user_content)
-            logger.debug("LLM response: %d chars", len(result))
-            return result
+                text, call_usage = self._chat_anthropic(system_prompt, user_content)
+            self._usage = self._usage + call_usage
+            logger.info(
+                "LLM tokens: prompt=%d completion=%d total=%d",
+                call_usage.prompt_tokens,
+                call_usage.completion_tokens,
+                call_usage.total_tokens,
+            )
+            logger.debug("LLM response: %d chars", len(text))
+            return text
         except SummarizeError:
             raise
         except Exception as e:
             raise SummarizeError(f"LLM API call failed: {e}") from e
 
-    def _chat_openai(self, system_prompt: str, user_content: str) -> str:
+    def _chat_openai(self, system_prompt: str, user_content: str) -> tuple[str, TokenUsage]:
         response = self._openai.chat.completions.create(
             model=self._model,
             messages=[
@@ -60,9 +74,16 @@ class LLMClient:
                 {"role": "user", "content": user_content},
             ],
         )
-        return response.choices[0].message.content
+        text = response.choices[0].message.content
+        usage = TokenUsage(
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=response.usage.completion_tokens,
+            total_tokens=response.usage.total_tokens,
+            call_count=1,
+        )
+        return text, usage
 
-    def _chat_anthropic(self, system_prompt: str, user_content: str) -> str:
+    def _chat_anthropic(self, system_prompt: str, user_content: str) -> tuple[str, TokenUsage]:
         response = self._anthropic.messages.create(
             model=self._model,
             max_tokens=4096,
@@ -71,4 +92,11 @@ class LLMClient:
                 {"role": "user", "content": user_content},
             ],
         )
-        return response.content[0].text
+        text = response.content[0].text
+        usage = TokenUsage(
+            prompt_tokens=response.usage.input_tokens,
+            completion_tokens=response.usage.output_tokens,
+            total_tokens=response.usage.input_tokens + response.usage.output_tokens,
+            call_count=1,
+        )
+        return text, usage

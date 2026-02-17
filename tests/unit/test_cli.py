@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 from git_recap.cli.main import app
 from git_recap.exceptions import FetchError, NormalizeError, SummarizeError, StepFailedError
 from git_recap.logging_config import reset_logging
+from git_recap.models import TokenUsage
 
 runner = CliRunner()
 
@@ -67,6 +68,7 @@ def patch_ghes(monkeypatch):
 def patch_llm(monkeypatch):
     """LLMClient mock."""
     mock_llm = MagicMock()
+    mock_llm.usage = TokenUsage()
     monkeypatch.setattr("git_recap.cli.main._get_llm_client", lambda c: mock_llm)
     return mock_llm
 
@@ -1331,3 +1333,131 @@ class TestVerboseFlag:
         runner.invoke(app, ["fetch", "2025-02-16"])
         root = logging.getLogger("git_recap")
         assert root.level == logging.INFO
+
+
+# ── Token Usage 출력 테스트 ──
+
+
+class TestTokenUsageDisplay:
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_summarize_daily_shows_usage(self, mock_cls, patch_llm):
+        """summarize daily 단일 호출 후 토큰 사용량 출력."""
+        mock_cls.return_value.daily.return_value = Path("/data/daily.md")
+        patch_llm.usage = TokenUsage(
+            prompt_tokens=1234, completion_tokens=567, total_tokens=1801, call_count=1
+        )
+        result = runner.invoke(app, ["summarize", "daily", "2025-02-16"])
+        assert result.exit_code == 0
+        assert "Token usage:" in result.output
+        assert "1,234 prompt" in result.output
+        assert "567 completion" in result.output
+        assert "1,801 total" in result.output
+        assert "1 calls" in result.output
+
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_summarize_daily_range_shows_usage(self, mock_cls, patch_llm):
+        """summarize daily range 후 토큰 사용량 출력."""
+        mock_cls.return_value.daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+        ]
+        patch_llm.usage = TokenUsage(
+            prompt_tokens=2000, completion_tokens=800, total_tokens=2800, call_count=2
+        )
+        result = runner.invoke(
+            app,
+            ["summarize", "daily", "--since", "2025-02-14", "--until", "2025-02-15"],
+        )
+        assert result.exit_code == 0
+        assert "Token usage:" in result.output
+        assert "2 calls" in result.output
+
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_single_shows_usage(self, mock_fetch, mock_norm, mock_summ, mock_orch, patch_llm):
+        """run 단일 날짜 후 토큰 사용량 출력."""
+        mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
+        patch_llm.usage = TokenUsage(
+            prompt_tokens=500, completion_tokens=200, total_tokens=700, call_count=1
+        )
+        result = runner.invoke(app, ["run", "2025-02-16"])
+        assert result.exit_code == 0
+        assert "Token usage:" in result.output
+        assert "500 prompt" in result.output
+
+    @patch("git_recap.cli.main.OrchestratorService")
+    @patch("git_recap.cli.main.SummarizerService")
+    @patch("git_recap.cli.main.NormalizerService")
+    @patch("git_recap.cli.main.FetcherService")
+    def test_run_range_shows_usage(self, mock_fetch, mock_norm, mock_summ, mock_orch, patch_llm):
+        """run range 후 토큰 사용량 출력."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2025-02-15", "status": "success", "path": "/p1"},
+            {"date": "2025-02-16", "status": "success", "path": "/p2"},
+        ]
+        patch_llm.usage = TokenUsage(
+            prompt_tokens=4000, completion_tokens=1500, total_tokens=5500, call_count=2
+        )
+        result = runner.invoke(
+            app,
+            ["run", "--since", "2025-02-15", "--until", "2025-02-16"],
+        )
+        assert result.exit_code == 0
+        assert "Token usage:" in result.output
+        assert "5,500 total" in result.output
+
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_ask_shows_usage(self, mock_cls, patch_llm):
+        """ask 후 토큰 사용량 출력."""
+        mock_cls.return_value.query.return_value = "답변입니다"
+        patch_llm.usage = TokenUsage(
+            prompt_tokens=3000, completion_tokens=1000, total_tokens=4000, call_count=1
+        )
+        result = runner.invoke(app, ["ask", "질문?"])
+        assert result.exit_code == 0
+        assert "Token usage:" in result.output
+        assert "4,000 total" in result.output
+
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_no_usage_when_zero_calls(self, mock_cls, patch_llm):
+        """LLM 호출이 0이면 토큰 사용량 미출력."""
+        mock_cls.return_value.daily.return_value = Path("/data/daily.md")
+        patch_llm.usage = TokenUsage()
+        result = runner.invoke(app, ["summarize", "daily", "2025-02-16"])
+        assert result.exit_code == 0
+        assert "Token usage:" not in result.output
+
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_summarize_weekly_shows_usage(self, mock_cls, patch_llm):
+        """summarize weekly 후 토큰 사용량 출력."""
+        mock_cls.return_value.weekly.return_value = Path("/data/weekly.md")
+        patch_llm.usage = TokenUsage(
+            prompt_tokens=5000, completion_tokens=2000, total_tokens=7000, call_count=1
+        )
+        result = runner.invoke(app, ["summarize", "weekly", "2025", "7"])
+        assert result.exit_code == 0
+        assert "Token usage:" in result.output
+
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_summarize_monthly_shows_usage(self, mock_cls, patch_llm):
+        """summarize monthly 후 토큰 사용량 출력."""
+        mock_cls.return_value.monthly.return_value = Path("/data/monthly.md")
+        patch_llm.usage = TokenUsage(
+            prompt_tokens=8000, completion_tokens=3000, total_tokens=11000, call_count=1
+        )
+        result = runner.invoke(app, ["summarize", "monthly", "2025", "2"])
+        assert result.exit_code == 0
+        assert "Token usage:" in result.output
+
+    @patch("git_recap.cli.main.SummarizerService")
+    def test_summarize_yearly_shows_usage(self, mock_cls, patch_llm):
+        """summarize yearly 후 토큰 사용량 출력."""
+        mock_cls.return_value.yearly.return_value = Path("/data/yearly.md")
+        patch_llm.usage = TokenUsage(
+            prompt_tokens=10000, completion_tokens=4000, total_tokens=14000, call_count=1
+        )
+        result = runner.invoke(app, ["summarize", "yearly", "2025"])
+        assert result.exit_code == 0
+        assert "Token usage:" in result.output
