@@ -264,6 +264,27 @@ class TestConvertActivities:
         assert ActivityKind.PR_AUTHORED in kinds
         assert ActivityKind.PR_COMMENTED in kinds
 
+    def test_authored_pr_body(self, normalizer):
+        """PR_AUTHORED에 body == pr.body 검증."""
+        prs = [_make_pr(author="testuser", body="Implements JWT-based auth")]
+        result = normalizer._convert_activities(prs, DATE)
+        assert result[0].kind == ActivityKind.PR_AUTHORED
+        assert result[0].body == "Implements JWT-based auth"
+
+    def test_reviewed_pr_review_bodies(self, normalizer):
+        """PR_REVIEWED에 review_bodies가 reviewer의 review body를 포함."""
+        prs = [_make_pr(
+            author="other",
+            reviews=[_review(author="testuser")],
+        )]
+        # _review의 기본 body는 "" — 실제 리뷰 body 지정
+        prs[0].reviews[0].body = "LGTM, nice work!"
+        result = normalizer._convert_activities(prs, DATE)
+        reviewed = [a for a in result if a.kind == ActivityKind.PR_REVIEWED]
+        assert len(reviewed) == 1
+        assert reviewed[0].review_bodies == ["LGTM, nice work!"]
+        assert reviewed[0].body == "Description"  # PR body도 보존
+
 
 class TestComputeStats:
     def test_counts(self):
@@ -475,12 +496,19 @@ class TestConvertCommitActivities:
         result = normalizer._convert_commit_activities(commits, DATE)
         assert result[0].title == "feat: short title"
 
-    def test_title_truncation(self, normalizer):
+    def test_title_no_truncation(self, normalizer):
+        """120자 넘는 첫 줄도 truncate 없이 전체 보존."""
         long_msg = "x" * 200
         commits = [_make_commit(message=long_msg)]
         result = normalizer._convert_commit_activities(commits, DATE)
-        assert len(result[0].title) == 121  # 120 + "…"
-        assert result[0].title.endswith("…")
+        assert result[0].title == "x" * 200
+
+    def test_body_is_full_message(self, normalizer):
+        """body에 전체 commit message가 보존."""
+        msg = "feat: add new feature\n\nDetailed description of the change"
+        commits = [_make_commit(message=msg)]
+        result = normalizer._convert_commit_activities(commits, DATE)
+        assert result[0].body == msg
 
     def test_empty_commits(self, normalizer):
         result = normalizer._convert_commit_activities([], DATE)
@@ -536,6 +564,35 @@ class TestConvertIssueActivities:
         result = normalizer._convert_issue_activities(issues, DATE)
         assert len(result) == 1
         assert result[0].kind == ActivityKind.ISSUE_AUTHORED
+
+    def test_issue_authored_body(self, normalizer):
+        """ISSUE_AUTHORED에 body == issue.body 검증."""
+        issues = [_make_issue(author="testuser", body="Steps to reproduce the bug")]
+        result = normalizer._convert_issue_activities(issues, DATE)
+        authored = [a for a in result if a.kind == ActivityKind.ISSUE_AUTHORED]
+        assert len(authored) == 1
+        assert authored[0].body == "Steps to reproduce the bug"
+
+    def test_issue_commented_bodies(self, normalizer):
+        """ISSUE_COMMENTED에 comment_bodies가 user의 코멘트 본문을 포함."""
+        issues = [_make_issue(
+            author="other",
+            comments=[
+                _comment(author="testuser", created_at="2025-02-16T10:00:00Z",
+                         body="I can reproduce this"),
+                _comment(author="testuser", created_at="2025-02-16T11:00:00Z",
+                         body="Found the root cause"),
+                _comment(author="someone", created_at="2025-02-16T12:00:00Z",
+                         body="Other person comment"),
+            ],
+        )]
+        result = normalizer._convert_issue_activities(issues, DATE)
+        commented = [a for a in result if a.kind == ActivityKind.ISSUE_COMMENTED]
+        assert len(commented) == 1
+        assert commented[0].body == "Description"  # issue body
+        assert commented[0].comment_bodies == [
+            "I can reproduce this", "Found the root cause"
+        ]
 
     def test_empty_issues(self, normalizer):
         result = normalizer._convert_issue_activities([], DATE)

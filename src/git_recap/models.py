@@ -121,6 +121,9 @@ class Activity:
     url: str  # PR HTML URL
     summary: str  # 스크립트가 생성하는 1줄 요약
     sha: str = ""  # commit SHA (COMMIT kind만 사용)
+    body: str = ""  # PR body / commit message / issue body
+    review_bodies: list[str] = field(default_factory=list)  # user의 review 본문
+    comment_bodies: list[str] = field(default_factory=list)  # user의 comment 본문
     files: list[str] = field(default_factory=list)
     additions: int = 0
     deletions: int = 0
@@ -285,6 +288,9 @@ def activity_from_dict(d: dict) -> Activity:
         url=d["url"],
         summary=d["summary"],
         sha=d.get("sha", ""),
+        body=d.get("body", ""),
+        review_bodies=d.get("review_bodies", []),
+        comment_bodies=d.get("comment_bodies", []),
         files=d.get("files", []),
         additions=d.get("additions", 0),
         deletions=d.get("deletions", 0),

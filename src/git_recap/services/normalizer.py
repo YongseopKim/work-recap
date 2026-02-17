@@ -129,6 +129,7 @@ class NormalizerService:
                             self._make_activity(
                                 pr, ActivityKind.PR_REVIEWED, review.submitted_at,
                                 evidence_urls=[review.url],
+                                review_bodies=[review.body],
                             )
                         )
                         break  # PR당 1개 review activity
@@ -162,9 +163,8 @@ class NormalizerService:
             if not self._matches_date(commit.committed_at, target_date):
                 continue
 
-            # 제목: commit message 첫 줄, 120자 truncate
-            first_line = commit.message.split("\n", 1)[0]
-            title = first_line[:120] + ("…" if len(first_line) > 120 else "")
+            # 제목: commit message 첫 줄 (truncation 없음)
+            title = commit.message.split("\n", 1)[0]
 
             total_adds = sum(f.additions for f in commit.files)
             total_dels = sum(f.deletions for f in commit.files)
@@ -179,6 +179,7 @@ class NormalizerService:
                 url=commit.url,
                 summary=f"commit: {title} ({commit.repo}) +{total_adds}/-{total_dels}",
                 sha=commit.sha,
+                body=commit.message,
                 files=file_names,
                 additions=total_adds,
                 deletions=total_dels,
@@ -206,6 +207,7 @@ class NormalizerService:
                     title=issue.title,
                     url=issue.url,
                     summary=f"issue_authored: {issue.title} ({issue.repo})",
+                    body=issue.body,
                     labels=issue.labels,
                 ))
 
@@ -225,6 +227,8 @@ class NormalizerService:
                     title=issue.title,
                     url=issue.url,
                     summary=f"issue_commented: {issue.title} ({issue.repo})",
+                    body=issue.body,
+                    comment_bodies=[c.body for c in user_comments],
                     labels=issue.labels,
                     evidence_urls=[c.url for c in user_comments],
                 ))
@@ -236,6 +240,7 @@ class NormalizerService:
         kind: ActivityKind,
         ts: str,
         evidence_urls: list[str] | None = None,
+        review_bodies: list[str] | None = None,
     ) -> Activity:
         total_adds = sum(f.additions for f in pr.files)
         total_dels = sum(f.deletions for f in pr.files)
@@ -249,6 +254,8 @@ class NormalizerService:
             title=pr.title,
             url=pr.url,
             summary=self._auto_summary(pr, kind, total_adds, total_dels),
+            body=pr.body,
+            review_bodies=review_bodies or [],
             files=file_names,
             additions=total_adds,
             deletions=total_dels,

@@ -186,6 +186,39 @@ class TestActivity:
         assert restored.additions == activities[0].additions
         assert restored.labels == activities[0].labels
 
+    def test_roundtrip_with_text_fields(self, tmp_path):
+        """body, review_bodies, comment_bodies 포함 왕복 변환."""
+        act = Activity(
+            ts="2025-02-16T09:00:00Z",
+            kind=ActivityKind.PR_REVIEWED,
+            repo="org/repo",
+            pr_number=1,
+            title="Add feature",
+            url="u",
+            summary="s",
+            body="PR description text",
+            review_bodies=["LGTM", "Nice work!"],
+            comment_bodies=["Needs fix here"],
+        )
+        path = tmp_path / "act.jsonl"
+        save_jsonl([act], path)
+        loaded = load_jsonl(path)
+        restored = activity_from_dict(loaded[0])
+        assert restored.body == "PR description text"
+        assert restored.review_bodies == ["LGTM", "Nice work!"]
+        assert restored.comment_bodies == ["Needs fix here"]
+
+    def test_backward_compat_no_text_fields(self):
+        """옛 데이터(body/review_bodies/comment_bodies 없음)로 from_dict 호출 시 정상 동작."""
+        d = {
+            "ts": "t", "kind": "pr_authored", "repo": "r",
+            "pr_number": 1, "title": "t", "url": "u", "summary": "s",
+        }
+        act = activity_from_dict(d)
+        assert act.body == ""
+        assert act.review_bodies == []
+        assert act.comment_bodies == []
+
 
 class TestDailyStats:
     def test_creation_defaults(self):

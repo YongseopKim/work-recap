@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install (editable, with dev deps)
 pip install -e ".[dev]"
 
-# Run unit tests (345 tests, integration excluded by default)
+# Run unit tests (352 tests, integration excluded by default)
 pytest
 
 # Run integration tests (require .env with real credentials)
@@ -52,9 +52,9 @@ Infrastructure (GHESClient: httpx, LLMClient: OpenAI/Anthropic)
 ### Key modules
 
 - `src/git_recap/config.py` — `AppConfig` (pydantic-settings), derives all data paths. Env vars from `.env`.
-- `src/git_recap/models.py` — Pydantic/dataclass models (`PRRaw`, `CommitRaw`, `IssueRaw`, `Activity`, `DailyStats`) + JSON/JSONL serialization utilities.
+- `src/git_recap/models.py` — Pydantic/dataclass models (`PRRaw`, `CommitRaw`, `IssueRaw`, `Activity`, `DailyStats`) + JSON/JSONL serialization utilities. `Activity` preserves text context: `body` (PR/commit/issue body), `review_bodies`, `comment_bodies`.
 - `src/git_recap/services/fetcher.py` — Searches GHES for PRs (3 axes: author/reviewed-by/commenter), commits, issues. Deduplicates, enriches, filters noise (bots, LGTM). `fetch(date)` returns `dict[str, Path]`. `fetch_range(since, until)` uses monthly chunked range queries for 30x fewer API calls, with skip/force/resilience.
-- `src/git_recap/services/normalizer.py` — Converts raw data → `Activity` records + `DailyStats`. Filters by actual timestamp (not search date). Self-reviews excluded.
+- `src/git_recap/services/normalizer.py` — Converts raw data → `Activity` records + `DailyStats`. Preserves body/review/comment text in Activity fields. Filters by actual timestamp (not search date). Self-reviews excluded.
 - `src/git_recap/services/summarizer.py` — Renders Jinja2 prompt templates (`prompts/`), calls LLM, saves markdown.
 - `src/git_recap/services/orchestrator.py` — Chains Fetch→Normalize→Summarize. `run_daily(date)` and `run_range(since, until)`.
 - `src/git_recap/services/date_utils.py` — `date_range`, `weekly_range`, `monthly_range`, `yearly_range`, `catchup_range`, `monthly_chunks`.
