@@ -278,6 +278,30 @@ class TestConvertActivities:
         assert ActivityKind.PR_AUTHORED in kinds
         assert ActivityKind.PR_COMMENTED in kinds
 
+    def test_commented_pr_comment_bodies(self, normalizer):
+        """PR_COMMENTED에 comment_bodies가 user의 코멘트 본문을 포함."""
+        prs = [
+            _make_pr(
+                author="other",
+                comments=[
+                    _comment(
+                        author="testuser",
+                        created_at="2025-02-16T10:00:00Z",
+                        body="This needs a fix",
+                    ),
+                    _comment(
+                        author="testuser",
+                        created_at="2025-02-16T11:00:00Z",
+                        body="Actually, looks fine now",
+                    ),
+                ],
+            )
+        ]
+        result = normalizer._convert_activities(prs, DATE)
+        commented = [a for a in result if a.kind == ActivityKind.PR_COMMENTED]
+        assert len(commented) == 1
+        assert commented[0].comment_bodies == ["This needs a fix", "Actually, looks fine now"]
+
     def test_authored_pr_body(self, normalizer):
         """PR_AUTHORED에 body == pr.body 검증."""
         prs = [_make_pr(author="testuser", body="Implements JWT-based auth")]

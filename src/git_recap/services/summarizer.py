@@ -243,6 +243,17 @@ class SummarizerService:
                 line += f"\n  Files: {file_list}"
                 if len(act["files"]) > 5:
                     line += f" 외 {len(act['files']) - 5}개"
+            if act.get("body"):
+                body = act["body"][:500]
+                if len(act["body"]) > 500:
+                    body += "..."
+                line += f"\n  Body: {body}"
+            if act.get("review_bodies"):
+                parts = [rb[:200] + ("..." if len(rb) > 200 else "") for rb in act["review_bodies"]]
+                line += f"\n  Reviews: {' | '.join(parts)}"
+            if act.get("comment_bodies"):
+                parts = [cb[:200] + ("..." if len(cb) > 200 else "") for cb in act["comment_bodies"]]
+                line += f"\n  Comments: {' | '.join(parts)}"
             lines.append(line)
 
         return "\n".join(lines)

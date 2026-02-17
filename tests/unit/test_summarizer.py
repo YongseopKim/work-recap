@@ -171,6 +171,128 @@ class TestFormatActivities:
         result = SummarizerService._format_activities(activities)
         assert "Files:" not in result
 
+    def test_body_included(self):
+        activities = [
+            {
+                "kind": "pr_authored",
+                "title": "Add feature",
+                "repo": "org/repo",
+                "additions": 10,
+                "deletions": 3,
+                "url": "https://ghes/pull/1",
+                "files": [],
+                "body": "Implements JWT-based auth for the login flow",
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Body: Implements JWT-based auth" in result
+
+    def test_review_bodies_included(self):
+        activities = [
+            {
+                "kind": "pr_reviewed",
+                "title": "Add feature",
+                "repo": "org/repo",
+                "additions": 0,
+                "deletions": 0,
+                "url": "https://ghes/pull/1",
+                "files": [],
+                "review_bodies": ["LGTM, nice work!", "One minor nit"],
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Reviews: LGTM, nice work! | One minor nit" in result
+
+    def test_comment_bodies_included(self):
+        activities = [
+            {
+                "kind": "pr_commented",
+                "title": "Add feature",
+                "repo": "org/repo",
+                "additions": 0,
+                "deletions": 0,
+                "url": "https://ghes/pull/1",
+                "files": [],
+                "comment_bodies": ["Looks good", "Fixed in next commit"],
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Comments: Looks good | Fixed in next commit" in result
+
+    def test_body_truncated_at_500(self):
+        long_body = "x" * 600
+        activities = [
+            {
+                "kind": "pr_authored",
+                "title": "Big PR",
+                "repo": "org/repo",
+                "additions": 0,
+                "deletions": 0,
+                "url": "https://ghes/pull/1",
+                "files": [],
+                "body": long_body,
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Body: " + "x" * 500 + "..." in result
+        assert "x" * 501 not in result
+
+    def test_review_body_truncated_at_200(self):
+        long_review = "r" * 300
+        activities = [
+            {
+                "kind": "pr_reviewed",
+                "title": "PR",
+                "repo": "org/repo",
+                "additions": 0,
+                "deletions": 0,
+                "url": "https://ghes/pull/1",
+                "files": [],
+                "review_bodies": [long_review],
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Reviews: " + "r" * 200 + "..." in result
+        assert "r" * 201 not in result
+
+    def test_comment_body_truncated_at_200(self):
+        long_comment = "c" * 300
+        activities = [
+            {
+                "kind": "pr_commented",
+                "title": "PR",
+                "repo": "org/repo",
+                "additions": 0,
+                "deletions": 0,
+                "url": "https://ghes/pull/1",
+                "files": [],
+                "comment_bodies": [long_comment],
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Comments: " + "c" * 200 + "..." in result
+        assert "c" * 201 not in result
+
+    def test_empty_body_not_shown(self):
+        activities = [
+            {
+                "kind": "pr_authored",
+                "title": "PR",
+                "repo": "org/repo",
+                "additions": 0,
+                "deletions": 0,
+                "url": "https://ghes/pull/1",
+                "files": [],
+                "body": "",
+                "review_bodies": [],
+                "comment_bodies": [],
+            },
+        ]
+        result = SummarizerService._format_activities(activities)
+        assert "Body:" not in result
+        assert "Reviews:" not in result
+        assert "Comments:" not in result
+
 
 class TestDaily:
     def test_generates_daily_summary(self, summarizer, mock_llm, test_config):

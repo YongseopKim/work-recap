@@ -190,6 +190,7 @@ class NormalizerService:
                         ActivityKind.PR_COMMENTED,
                         earliest.created_at,
                         evidence_urls=[c.url for c in user_comments],
+                        comment_bodies=[c.body for c in user_comments],
                     )
                 )
 
@@ -289,6 +290,7 @@ class NormalizerService:
         ts: str,
         evidence_urls: list[str] | None = None,
         review_bodies: list[str] | None = None,
+        comment_bodies: list[str] | None = None,
     ) -> Activity:
         total_adds = sum(f.additions for f in pr.files)
         total_dels = sum(f.deletions for f in pr.files)
@@ -304,6 +306,7 @@ class NormalizerService:
             summary=self._auto_summary(pr, kind, total_adds, total_dels),
             body=pr.body,
             review_bodies=review_bodies or [],
+            comment_bodies=comment_bodies or [],
             files=file_names,
             additions=total_adds,
             deletions=total_dels,
