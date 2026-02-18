@@ -1,4 +1,4 @@
-"""Logging configuration for git-recap."""
+"""Logging configuration for work-recap."""
 
 import logging
 import sys
@@ -9,7 +9,7 @@ NOISY_LOGGERS = ("httpx", "httpcore", "openai", "anthropic", "urllib3")
 
 
 def setup_logging(level: int = logging.INFO) -> None:
-    """Configure logging for the git-recap package.
+    """Configure logging for the work-recap package.
 
     - Output to stderr (keeps typer.echo stdout clean)
     - Format: HH:MM:SS LEVEL [module.name] message
@@ -26,7 +26,7 @@ def setup_logging(level: int = logging.INFO) -> None:
         logging.Formatter("%(asctime)s %(levelname)-5s [%(name)s] %(message)s", datefmt="%H:%M:%S")
     )
 
-    root = logging.getLogger("git_recap")
+    root = logging.getLogger("workrecap")
     root.setLevel(level)
     root.addHandler(handler)
 
@@ -38,6 +38,6 @@ def reset_logging() -> None:
     """Reset logging state. For testing only."""
     global _configured
     _configured = False
-    root = logging.getLogger("git_recap")
+    root = logging.getLogger("workrecap")
     root.handlers.clear()
     root.setLevel(logging.WARNING)

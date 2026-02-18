@@ -1,8 +1,8 @@
 import pytest
 
-from git_recap.exceptions import (
+from workrecap.exceptions import (
     FetchError,
-    GitRecapError,
+    WorkRecapError,
     NormalizeError,
     StepFailedError,
     SummarizeError,
@@ -10,12 +10,12 @@ from git_recap.exceptions import (
 
 
 class TestExceptionHierarchy:
-    def test_all_inherit_from_git_recap_error(self):
-        """모든 커스텀 예외가 GitRecapError의 서브클래스."""
-        assert issubclass(FetchError, GitRecapError)
-        assert issubclass(NormalizeError, GitRecapError)
-        assert issubclass(SummarizeError, GitRecapError)
-        assert issubclass(StepFailedError, GitRecapError)
+    def test_all_inherit_from_workrecap_error(self):
+        """모든 커스텀 예외가 WorkRecapError의 서브클래스."""
+        assert issubclass(FetchError, WorkRecapError)
+        assert issubclass(NormalizeError, WorkRecapError)
+        assert issubclass(SummarizeError, WorkRecapError)
+        assert issubclass(StepFailedError, WorkRecapError)
 
     def test_step_attribute(self):
         """FetchError, NormalizeError, SummarizeError에 step 속성이 있다."""
@@ -39,11 +39,11 @@ class TestExceptionHierarchy:
         assert str(err) == "Pipeline failed at 'normalize': invalid JSON"
 
     def test_catchable_by_base_class(self):
-        """GitRecapError로 모든 하위 예외를 catch할 수 있다."""
-        with pytest.raises(GitRecapError):
+        """WorkRecapError로 모든 하위 예외를 catch할 수 있다."""
+        with pytest.raises(WorkRecapError):
             raise FetchError("test")
 
     def test_step_failed_catchable_by_base_class(self):
-        """StepFailedError도 GitRecapError로 catch 가능."""
-        with pytest.raises(GitRecapError):
+        """StepFailedError도 WorkRecapError로 catch 가능."""
+        with pytest.raises(WorkRecapError):
             raise StepFailedError("fetch", FetchError("test"))

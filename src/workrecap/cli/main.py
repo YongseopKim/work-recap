@@ -1,4 +1,4 @@
-"""git-recap CLI — Typer 기반."""
+"""work-recap CLI — Typer 기반."""
 
 import calendar
 import json
@@ -7,15 +7,15 @@ from datetime import date
 
 import typer
 
-from git_recap.config import AppConfig
-from git_recap.exceptions import GitRecapError, SummarizeError
-from git_recap.logging_config import setup_logging
-from git_recap.services import date_utils
-from git_recap.services.daily_state import DailyStateStore
-from git_recap.services.fetcher import FetcherService
-from git_recap.services.normalizer import NormalizerService
-from git_recap.services.orchestrator import OrchestratorService
-from git_recap.services.summarizer import SummarizerService
+from workrecap.config import AppConfig
+from workrecap.exceptions import WorkRecapError, SummarizeError
+from workrecap.logging_config import setup_logging
+from workrecap.services import date_utils
+from workrecap.services.daily_state import DailyStateStore
+from workrecap.services.fetcher import FetcherService
+from workrecap.services.normalizer import NormalizerService
+from workrecap.services.orchestrator import OrchestratorService
+from workrecap.services.summarizer import SummarizerService
 
 logger = logging.getLogger(__name__)
 
@@ -41,18 +41,18 @@ def _get_config() -> AppConfig:
 
 
 def _get_ghes_client(config: AppConfig):
-    from git_recap.infra.ghes_client import GHESClient
+    from workrecap.infra.ghes_client import GHESClient
 
     return GHESClient(config.ghes_url, config.ghes_token)
 
 
 def _get_llm_client(config: AppConfig):
-    from git_recap.infra.llm_client import LLMClient
+    from workrecap.infra.llm_client import LLMClient
 
     return LLMClient(config.llm_provider, config.llm_api_key, config.llm_model)
 
 
-def _handle_error(e: GitRecapError) -> None:
+def _handle_error(e: WorkRecapError) -> None:
     typer.echo(f"Error: {e}", err=True)
     raise typer.Exit(code=1)
 
@@ -245,7 +245,7 @@ def fetch(
     pool = None
     try:
         with _get_ghes_client(config) as client:
-            from git_recap.services.fetch_progress import FetchProgressStore
+            from workrecap.services.fetch_progress import FetchProgressStore
 
             ds = DailyStateStore(config.daily_state_path)
             progress_store = FetchProgressStore(config.state_dir / "fetch_progress")
@@ -254,7 +254,7 @@ def fetch(
                 "progress_store": progress_store,
             }
             if workers > 1:
-                from git_recap.infra.client_pool import GHESClientPool
+                from workrecap.infra.client_pool import GHESClientPool
 
                 pool = GHESClientPool(config.ghes_url, config.ghes_token, size=workers)
                 fetch_kwargs["max_workers"] = workers
@@ -289,7 +289,7 @@ def fetch(
                 typer.echo("Fetched 1 day(s)")
                 for type_name, path in sorted(result.items()):
                     typer.echo(f"  {dates[0]} {type_name}: {path}")
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)
     finally:
         if pool is not None:
@@ -372,7 +372,7 @@ def normalize(
             typer.echo(f"  {dates[0]}: {act_path}, {stats_path}")
         if llm:
             _print_token_usage(llm)
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)
 
 
@@ -434,7 +434,7 @@ def summarize_daily(
             path = service.daily(dates[0])
             typer.echo(f"Daily summary → {path}")
         _print_token_usage(llm)
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)
 
 
@@ -454,7 +454,7 @@ def summarize_weekly(
         path = service.weekly(year, week, force=force)
         typer.echo(f"Weekly summary → {path}")
         _print_token_usage(llm)
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)
 
 
@@ -474,7 +474,7 @@ def summarize_monthly(
         path = service.monthly(year, month, force=force)
         typer.echo(f"Monthly summary → {path}")
         _print_token_usage(llm)
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)
 
 
@@ -493,7 +493,7 @@ def summarize_yearly(
         path = service.yearly(year, force=force)
         typer.echo(f"Yearly summary → {path}")
         _print_token_usage(llm)
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)
 
 
@@ -552,7 +552,7 @@ def run(
     pool = None
 
     try:
-        from git_recap.services.fetch_progress import FetchProgressStore
+        from workrecap.services.fetch_progress import FetchProgressStore
 
         ghes = _get_ghes_client(config)
         llm = _get_llm_client(config)
@@ -563,7 +563,7 @@ def run(
             "progress_store": progress_store,
         }
         if max_workers > 1:
-            from git_recap.infra.client_pool import GHESClientPool
+            from workrecap.infra.client_pool import GHESClientPool
 
             pool = GHESClientPool(config.ghes_url, config.ghes_token, size=max_workers)
             fetch_kwargs["max_workers"] = max_workers
@@ -630,7 +630,7 @@ def run(
             ghes.close()
             typer.echo(f"Pipeline complete → {path}")
             _print_token_usage(llm)
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)
     finally:
         if pool is not None:
@@ -655,5 +655,5 @@ def ask(
         answer = service.query(question, months_back=months)
         typer.echo(answer)
         _print_token_usage(llm)
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)

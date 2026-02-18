@@ -10,15 +10,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from git_recap.infra.llm_client import LLMClient
-    from git_recap.services.daily_state import DailyStateStore
+    from workrecap.infra.llm_client import LLMClient
+    from workrecap.services.daily_state import DailyStateStore
 
 from jinja2 import Template
 
-from git_recap.config import AppConfig
-from git_recap.exceptions import NormalizeError
-from git_recap.services.date_utils import date_range
-from git_recap.models import (
+from workrecap.config import AppConfig
+from workrecap.exceptions import NormalizeError
+from workrecap.services.date_utils import date_range
+from workrecap.models import (
     Activity,
     ActivityKind,
     CommitRaw,
@@ -207,7 +207,7 @@ class NormalizerService:
 
     def _update_checkpoint(self, target_date: str) -> None:
         """last_normalize_date 키 업데이트. Thread-safe with date comparison guard."""
-        from git_recap.services.checkpoint import update_checkpoint
+        from workrecap.services.checkpoint import update_checkpoint
 
         update_checkpoint(self._config.checkpoints_path, "last_normalize_date", target_date)
 

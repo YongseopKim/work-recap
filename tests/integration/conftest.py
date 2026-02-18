@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from git_recap.config import AppConfig
-from git_recap.infra.ghes_client import GHESClient
-from git_recap.infra.llm_client import LLMClient
+from workrecap.config import AppConfig
+from workrecap.infra.ghes_client import GHESClient
+from workrecap.infra.llm_client import LLMClient
 
 # ── .env 존재 여부 확인 ──
 

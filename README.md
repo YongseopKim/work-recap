@@ -1,4 +1,4 @@
-# git-recap
+# work-recap
 
 GitHub Enterprise Server(GHES)의 PR, commit, issue, review, comment 활동 데이터를 수집하여
 LLM 기반으로 일/주/월/년 단위 업무 요약을 자동 생성하는 개인 도구.
@@ -51,59 +51,59 @@ MAX_WORKERS=5                 # 병렬 실행 워커 수 (기본: 5)
 
 ```bash
 # 개별 단계 실행 (단일 날짜)
-git-recap fetch 2025-02-16              # GHES에서 PR/Commit/Issue 데이터 수집
-git-recap normalize 2025-02-16          # Activity + Stats로 변환
-git-recap summarize daily 2025-02-16    # Daily summary 생성
-git-recap summarize weekly 2025 7       # Weekly summary 생성
-git-recap summarize monthly 2025 2      # Monthly summary 생성
-git-recap summarize yearly 2025         # Yearly summary 생성
+recap fetch 2025-02-16              # GHES에서 PR/Commit/Issue 데이터 수집
+recap normalize 2025-02-16          # Activity + Stats로 변환
+recap summarize daily 2025-02-16    # Daily summary 생성
+recap summarize weekly 2025 7       # Weekly summary 생성
+recap summarize monthly 2025 2      # Monthly summary 생성
+recap summarize yearly 2025         # Yearly summary 생성
 
 # 날짜 범위 옵션 (fetch, normalize, summarize daily 공통)
-git-recap fetch --since 2025-02-01 --until 2025-02-16   # 기간 범위
-git-recap fetch --weekly 2025-7                          # ISO 주 단위
-git-recap fetch --monthly 2025-2                         # 월 단위
-git-recap fetch --yearly 2025                            # 연 단위
-git-recap normalize --since 2025-02-01 --until 2025-02-16
-git-recap summarize daily --weekly 2025-7
+recap fetch --since 2025-02-01 --until 2025-02-16   # 기간 범위
+recap fetch --weekly 2025-7                          # ISO 주 단위
+recap fetch --monthly 2025-2                         # 월 단위
+recap fetch --yearly 2025                            # 연 단위
+recap normalize --since 2025-02-01 --until 2025-02-16
+recap summarize daily --weekly 2025-7
 
 # fetch 전용 옵션
-git-recap fetch --type prs 2025-02-16   # PR만 수집 (prs, commits, issues)
-git-recap fetch --workers 3             # 병렬 enrichment (기본: 1)
+recap fetch --type prs 2025-02-16   # PR만 수집 (prs, commits, issues)
+recap fetch --workers 3             # 병렬 enrichment (기본: 1)
 
 # normalize 전용 옵션
-git-recap normalize --no-enrich 2025-02-16  # LLM enrichment 생략
-git-recap normalize --workers 3             # 병렬 LLM 호출 (기본: config.max_workers)
+recap normalize --no-enrich 2025-02-16  # LLM enrichment 생략
+recap normalize --workers 3             # 병렬 LLM 호출 (기본: config.max_workers)
 
 # catch-up: checkpoint 이후 ~ 오늘 (fetch, normalize, summarize daily, run 공통)
-git-recap fetch                         # last_fetch_date 이후 자동 수집
-git-recap normalize                     # last_normalize_date 이후 자동 변환
-git-recap summarize daily               # last_summarize_date 이후 자동 요약
-git-recap run                           # last_summarize_date 이후 전체 파이프라인
+recap fetch                         # last_fetch_date 이후 자동 수집
+recap normalize                     # last_normalize_date 이후 자동 변환
+recap summarize daily               # last_summarize_date 이후 자동 요약
+recap run                           # last_summarize_date 이후 전체 파이프라인
 
 # --force/-f: 기존 데이터 무시하고 재처리 (fetch, normalize, summarize daily 공통)
-git-recap fetch --since 2025-02-01 --until 2025-02-16 --force
-git-recap normalize --since 2025-02-01 --until 2025-02-16 --force
-git-recap summarize daily --weekly 2025-7 --force
+recap fetch --since 2025-02-01 --until 2025-02-16 --force
+recap normalize --since 2025-02-01 --until 2025-02-16 --force
+recap summarize daily --weekly 2025-7 --force
 
 # 전체 파이프라인 (fetch → normalize → summarize)
-git-recap run 2025-02-16                # 단일 날짜
-git-recap run --since 2025-02-01 --until 2025-02-16  # 기간 범위
-git-recap run --weekly 2025-7                          # ISO 주 단위 + weekly summary
-git-recap run --monthly 2025-2                         # 월 단위 + weekly→monthly summary
-git-recap run --yearly 2025                            # 연 단위 + weekly→monthly→yearly summary
-git-recap run --type prs --workers 3    # 타입 필터 + 병렬 실행
-git-recap run --no-enrich               # LLM enrichment 생략
-git-recap run                           # catch-up (last_summarize_date 이후 자동)
+recap run 2025-02-16                # 단일 날짜
+recap run --since 2025-02-01 --until 2025-02-16  # 기간 범위
+recap run --weekly 2025-7                          # ISO 주 단위 + weekly summary
+recap run --monthly 2025-2                         # 월 단위 + weekly→monthly summary
+recap run --yearly 2025                            # 연 단위 + weekly→monthly→yearly summary
+recap run --type prs --workers 3    # 타입 필터 + 병렬 실행
+recap run --no-enrich               # LLM enrichment 생략
+recap run                           # catch-up (last_summarize_date 이후 자동)
 
 # 자유 질문
-git-recap ask "이번 달 주요 성과는?"
-git-recap ask "Q1에 가장 임팩트 있던 작업?" --months 6
+recap ask "이번 달 주요 성과는?"
+recap ask "Q1에 가장 임팩트 있던 작업?" --months 6
 ```
 
 ### 웹 UI
 
 ```bash
-uvicorn git_recap.api.app:app --reload
+uvicorn workrecap.api.app:app --reload
 ```
 
 `http://localhost:8000`에서 웹 UI 사용:
@@ -190,11 +190,11 @@ data/
 ## 프로젝트 구조
 
 ```
-git-recap/
-├── src/git_recap/
-│   ├── __main__.py            # python -m git_recap 진입점
+work-recap/
+├── src/workrecap/
+│   ├── __main__.py            # python -m workrecap 진입점
 │   ├── config.py               # AppConfig (pydantic-settings)
-│   ├── exceptions.py           # GitRecapError 계층
+│   ├── exceptions.py           # WorkRecapError 계층
 │   ├── logging_config.py       # 로깅 설정 (stderr, 서드파티 억제)
 │   ├── models.py               # 데이터 모델 + 직렬화
 │   ├── infra/

@@ -2,8 +2,8 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from git_recap.api.deps import get_config
-from git_recap.config import AppConfig
+from workrecap.api.deps import get_config
+from workrecap.config import AppConfig
 
 router = APIRouter()
 

@@ -3,7 +3,7 @@
 import json
 import threading
 
-from git_recap.services.checkpoint import update_checkpoint
+from workrecap.services.checkpoint import update_checkpoint
 
 
 class TestUpdateCheckpoint:

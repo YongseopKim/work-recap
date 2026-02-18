@@ -1,4 +1,4 @@
-# git-recap: Technical Design Document
+# work-recap: Technical Design Document
 
 ## 1. 프로젝트 개요
 
@@ -54,13 +54,13 @@ LLM 기반으로 일/주/월/년 단위 업무 요약을 자동 생성하는 개
 ```mermaid
 graph TB
     User["User (Engineer)"]
-    GitRecap["git-recap"]
+    WorkRecap["work-recap"]
     GHES["GitHub Enterprise Server"]
     LLM["LLM API (OpenAI/Claude)"]
 
-    User -->|"CLI / Web Browser"| GitRecap
-    GitRecap -->|"REST API (Search, PRs)"| GHES
-    GitRecap -->|"Chat Completion API"| LLM
+    User -->|"CLI / Web Browser"| WorkRecap
+    WorkRecap -->|"REST API (Search, PRs)"| GHES
+    WorkRecap -->|"Chat Completion API"| LLM
 ```
 
 ### 3.2 Container (C4 Level 2)
@@ -72,7 +72,7 @@ graph TB
         Browser["Web Browser"]
     end
 
-    subgraph sgGitRecap["git-recap System"]
+    subgraph sgWorkRecap["work-recap System"]
         BE["BE Server (FastAPI)"]
         ServiceLayer["Service Layer (Python)"]
         FileStore["File Storage (data/)"]
@@ -169,7 +169,7 @@ Yearly:  12개 monthly.md               →  LLM  →  yearly.md
 ## 5. 프로젝트 구조
 
 ```
-git-recap/
+work-recap/
 ├── .env                           # GHES_URL, GHES_TOKEN, LLM_API_KEY
 ├── .env.example                   # 환경변수 템플릿
 ├── pyproject.toml
@@ -209,10 +209,10 @@ git-recap/
 │           ├── weekly/W{NN}.md
 │           ├── monthly/{MM}.md
 │           └── yearly.md
-├── src/git_recap/
+├── src/workrecap/
 │   ├── __init__.py
 │   ├── config.py                  # pydantic-settings AppConfig
-│   ├── exceptions.py              # GitRecapError 계층
+│   ├── exceptions.py              # WorkRecapError 계층
 │   ├── models.py                  # 서비스 간 데이터 계약
 │   ├── services/
 │   │   ├── __init__.py
@@ -666,22 +666,22 @@ class AppConfig(BaseSettings):
 ### 6.9 Exceptions
 
 ```python
-class GitRecapError(Exception):
-    """Base exception for all git-recap errors."""
+class WorkRecapError(Exception):
+    """Base exception for all work-recap errors."""
 
-class FetchError(GitRecapError):
+class FetchError(WorkRecapError):
     """GHES API 호출 또는 raw 데이터 저장 실패."""
     step = "fetch"
 
-class NormalizeError(GitRecapError):
+class NormalizeError(WorkRecapError):
     """Raw → Activity 변환 실패."""
     step = "normalize"
 
-class SummarizeError(GitRecapError):
+class SummarizeError(WorkRecapError):
     """LLM 호출 또는 summary 생성 실패."""
     step = "summarize"
 
-class StepFailedError(GitRecapError):
+class StepFailedError(WorkRecapError):
     """파이프라인 특정 단계 실패. Orchestrator가 발생시킴."""
     def __init__(self, step: str, cause: Exception):
         self.step = step
@@ -690,7 +690,7 @@ class StepFailedError(GitRecapError):
 ```
 
 **에러 매핑:**
-- CLI: `GitRecapError` → stderr 출력 + exit code 1
+- CLI: `WorkRecapError` → stderr 출력 + exit code 1
 - API: `FetchError` → HTTP 502, `SummarizeError` → HTTP 503, 나머지 → HTTP 500
 
 ---

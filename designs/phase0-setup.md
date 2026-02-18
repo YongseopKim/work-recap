@@ -22,7 +22,7 @@
 
 ```toml
 [project]
-name = "git-recap"
+name = "work-recap"
 version = "0.1.0"
 description = "GHES activity summarizer with LLM"
 requires-python = ">=3.12"
@@ -48,14 +48,14 @@ dev = [
 ]
 
 [project.scripts]
-git-recap = "git_recap.cli.main:app"
+recap = "workrecap.cli.main:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/git_recap"]
+packages = ["src/workrecap"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -96,12 +96,12 @@ dist/
 ### 디렉토리 생성
 
 ```
-src/git_recap/__init__.py
-src/git_recap/services/__init__.py
-src/git_recap/infra/__init__.py
-src/git_recap/api/__init__.py
-src/git_recap/api/routes/  (빈 패키지)
-src/git_recap/cli/__init__.py
+src/workrecap/__init__.py
+src/workrecap/services/__init__.py
+src/workrecap/infra/__init__.py
+src/workrecap/api/__init__.py
+src/workrecap/api/routes/  (빈 패키지)
+src/workrecap/cli/__init__.py
 tests/__init__.py
 tests/conftest.py
 tests/fixtures/
@@ -115,7 +115,7 @@ prompts/
 ```python
 import pytest
 from pathlib import Path
-from git_recap.config import AppConfig
+from workrecap.config import AppConfig
 
 
 @pytest.fixture
@@ -151,7 +151,7 @@ def test_config(tmp_data_dir: Path, tmp_path: Path) -> AppConfig:
 | # | 작업 | 검증 |
 |---|---|---|
 | 0.1.1 | pyproject.toml 생성 | `.venv/bin/pip install -e ".[dev]"` 성공 |
-| 0.1.2 | src layout + 빈 __init__.py 생성 | `.venv/bin/python -c "import git_recap"` 성공 |
+| 0.1.2 | src layout + 빈 __init__.py 생성 | `.venv/bin/python -c "import workrecap"` 성공 |
 | 0.1.3 | .env.example, .gitignore (.venv/ 포함) 생성 | 파일 존재 확인 |
 | 0.1.4 | tests/conftest.py + fixture 디렉토리 생성 | `.venv/bin/pytest --collect-only` 성공 |
 | 0.1.5 | prompts/ 디렉토리 생성 | 디렉토리 존재 확인 |

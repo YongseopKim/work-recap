@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from git_recap.config import AppConfig
+from workrecap.config import AppConfig
 
 
 @pytest.fixture(autouse=True)

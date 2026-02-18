@@ -5,12 +5,12 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel
 
-from git_recap.api.deps import get_config, get_job_store
-from git_recap.api.job_store import JobStore
-from git_recap.config import AppConfig
-from git_recap.infra.llm_client import LLMClient
-from git_recap.models import JobStatus
-from git_recap.services.summarizer import SummarizerService
+from workrecap.api.deps import get_config, get_job_store
+from workrecap.api.job_store import JobStore
+from workrecap.config import AppConfig
+from workrecap.infra.llm_client import LLMClient
+from workrecap.models import JobStatus
+from workrecap.services.summarizer import SummarizerService
 
 logger = logging.getLogger(__name__)
 

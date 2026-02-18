@@ -9,10 +9,10 @@ from datetime import date, timedelta
 
 import pytest
 
-from git_recap.services.fetcher import FetcherService
-from git_recap.services.normalizer import NormalizerService
-from git_recap.services.orchestrator import OrchestratorService
-from git_recap.services.summarizer import SummarizerService
+from workrecap.services.fetcher import FetcherService
+from workrecap.services.normalizer import NormalizerService
+from workrecap.services.orchestrator import OrchestratorService
+from workrecap.services.summarizer import SummarizerService
 from tests.integration.conftest import HAS_ENV
 
 pytestmark = [

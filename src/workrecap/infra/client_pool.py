@@ -5,7 +5,7 @@ import queue
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from git_recap.infra.ghes_client import GHESClient
+from workrecap.infra.ghes_client import GHESClient
 
 logger = logging.getLogger(__name__)
 

@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from git_recap.exceptions import NormalizeError
-from git_recap.models import (
+from workrecap.exceptions import NormalizeError
+from workrecap.models import (
     Activity,
     ActivityKind,
     Comment,
@@ -17,7 +17,7 @@ from git_recap.models import (
     load_jsonl,
     save_json,
 )
-from git_recap.services.normalizer import NormalizerService
+from workrecap.services.normalizer import NormalizerService
 
 
 # ── 헬퍼 ──
@@ -59,7 +59,7 @@ def _make_pr(
 
 
 def _review(author="reviewer1", submitted_at="2025-02-16T12:00:00Z"):
-    from git_recap.models import Review
+    from workrecap.models import Review
 
     return Review(
         author=author,
@@ -1346,7 +1346,7 @@ class TestLLMEnrichment:
         """LLM 미주입 시 skip 사유 로깅."""
         normalizer = NormalizerService(test_config)
         activities = self._make_activities()
-        with caplog.at_level(logging.INFO, logger="git_recap.services.normalizer"):
+        with caplog.at_level(logging.INFO, logger="workrecap.services.normalizer"):
             normalizer._enrich_activities(activities)
 
         assert any("LLM client not configured" in r.message for r in caplog.records)
@@ -1362,7 +1362,7 @@ class TestLLMEnrichment:
         """빈 activities 시 skip 사유 로깅."""
         mock_llm = MagicMock()
         normalizer = NormalizerService(test_config, llm=mock_llm)
-        with caplog.at_level(logging.INFO, logger="git_recap.services.normalizer"):
+        with caplog.at_level(logging.INFO, logger="workrecap.services.normalizer"):
             normalizer._enrich_activities([])
 
         assert any("no activities" in r.message for r in caplog.records)
@@ -1407,7 +1407,7 @@ class TestActivityNewFields:
 
     def test_activity_from_dict_with_new_fields(self):
         """activity_from_dict가 change_summary/intent를 복원."""
-        from git_recap.models import activity_from_dict
+        from workrecap.models import activity_from_dict
 
         d = {
             "ts": "t",
@@ -1426,7 +1426,7 @@ class TestActivityNewFields:
 
     def test_activity_from_dict_without_new_fields(self):
         """change_summary/intent 없는 dict도 역호환."""
-        from git_recap.models import activity_from_dict
+        from workrecap.models import activity_from_dict
 
         d = {
             "ts": "t",

@@ -7,20 +7,20 @@ from datetime import date
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
 from pydantic import BaseModel
 
-from git_recap.api.deps import get_config, get_job_store
-from git_recap.api.job_store import JobStore
-from git_recap.config import AppConfig
-from git_recap.exceptions import SummarizeError
-from git_recap.infra.client_pool import GHESClientPool
-from git_recap.infra.ghes_client import GHESClient
-from git_recap.infra.llm_client import LLMClient
-from git_recap.models import JobStatus
-from git_recap.services.daily_state import DailyStateStore
-from git_recap.services.fetch_progress import FetchProgressStore
-from git_recap.services.fetcher import FetcherService
-from git_recap.services.normalizer import NormalizerService
-from git_recap.services.orchestrator import OrchestratorService
-from git_recap.services.summarizer import SummarizerService
+from workrecap.api.deps import get_config, get_job_store
+from workrecap.api.job_store import JobStore
+from workrecap.config import AppConfig
+from workrecap.exceptions import SummarizeError
+from workrecap.infra.client_pool import GHESClientPool
+from workrecap.infra.ghes_client import GHESClient
+from workrecap.infra.llm_client import LLMClient
+from workrecap.models import JobStatus
+from workrecap.services.daily_state import DailyStateStore
+from workrecap.services.fetch_progress import FetchProgressStore
+from workrecap.services.fetcher import FetcherService
+from workrecap.services.normalizer import NormalizerService
+from workrecap.services.orchestrator import OrchestratorService
+from workrecap.services.summarizer import SummarizerService
 
 logger = logging.getLogger(__name__)
 

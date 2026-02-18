@@ -2,7 +2,7 @@
 
 ## 요약
 
-git-recap의 서비스 레이어는 **동기(sync) 코드 + `ThreadPoolExecutor` 기반 병렬 처리**로 구현되어 있다.
+work-recap의 서비스 레이어는 **동기(sync) 코드 + `ThreadPoolExecutor` 기반 병렬 처리**로 구현되어 있다.
 `asyncio` 기반 비동기 전환을 검토했으나, 실질적 이득 대비 전환 비용과 복잡도가 높아 현재 구조를 유지한다.
 
 ---
@@ -60,7 +60,7 @@ Infrastructure (httpx.Client sync, OpenAI/Anthropic sync SDK)
 
 ### 1. 실제 병목이 동시성 모델이 아님
 
-git-recap의 실제 병목 지점:
+work-recap의 실제 병목 지점:
 
 | 병목 | 원인 | async로 해결? |
 |------|------|--------------|
@@ -162,7 +162,7 @@ async def test_fetch_single(fetcher, mock_ghes):
 
 ### ThreadPoolExecutor는 I/O-bound 작업에 효과적
 
-Python의 GIL은 CPU-bound 작업에만 영향을 준다. git-recap의 주요 작업(HTTP 요청, LLM 호출, 파일 I/O)은 모두 I/O-bound이므로 threading으로 충분한 병렬성을 얻는다.
+Python의 GIL은 CPU-bound 작업에만 영향을 준다. work-recap의 주요 작업(HTTP 요청, LLM 호출, 파일 I/O)은 모두 I/O-bound이므로 threading으로 충분한 병렬성을 얻는다.
 
 ```
 max_workers=5  → 동시 5개 HTTP/LLM 호출 (현재 기본값)

@@ -1,4 +1,4 @@
-from git_recap.models import (
+from workrecap.models import (
     Activity,
     ActivityKind,
     Comment,

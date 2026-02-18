@@ -7,16 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from git_recap.api.routes import fetch, normalize, pipeline, query, summarize_pipeline, summary
-from git_recap.exceptions import GitRecapError
-from git_recap.logging_config import setup_logging
+from workrecap.api.routes import fetch, normalize, pipeline, query, summarize_pipeline, summary
+from workrecap.exceptions import WorkRecapError
+from workrecap.logging_config import setup_logging
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent.parent / "frontend"
 
 
 def create_app() -> FastAPI:
     setup_logging()
-    app = FastAPI(title="git-recap", version="0.1.0")
+    app = FastAPI(title="work-recap", version="0.1.0")
 
     app.add_middleware(
         CORSMiddleware,
@@ -36,8 +36,8 @@ def create_app() -> FastAPI:
     app.include_router(summary.router, prefix="/api/summary", tags=["summary"])
     app.include_router(query.router, prefix="/api", tags=["query"])
 
-    @app.exception_handler(GitRecapError)
-    async def handle_git_recap_error(request: Request, exc: GitRecapError) -> JSONResponse:
+    @app.exception_handler(WorkRecapError)
+    async def handle_workrecap_error(request: Request, exc: WorkRecapError) -> JSONResponse:
         return JSONResponse(
             status_code=500,
             content={"error": str(exc)},

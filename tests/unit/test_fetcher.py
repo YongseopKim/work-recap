@@ -3,10 +3,10 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from git_recap.exceptions import FetchError
-from git_recap.infra.ghes_client import GHESClient
-from git_recap.models import load_json
-from git_recap.services.fetcher import FetcherService
+from workrecap.exceptions import FetchError
+from workrecap.infra.ghes_client import GHESClient
+from workrecap.models import load_json
+from workrecap.services.fetcher import FetcherService
 
 
 # ── Fixtures ──
@@ -1012,7 +1012,7 @@ class TestFetchRange:
         # commits search 미호출
         mock_client.search_commits.assert_not_called()
 
-    @patch("git_recap.services.fetcher.monthly_chunks")
+    @patch("workrecap.services.fetcher.monthly_chunks")
     def test_monthly_chunking(self, mock_chunks, fetcher, mock_client, test_config):
         """monthly_chunks를 호출하여 월 단위 chunk."""
         mock_chunks.return_value = [("2025-02-01", "2025-02-28")]
@@ -1348,7 +1348,7 @@ class TestFetchRangeParallel:
 class TestFetchRangeResume:
     def test_resume_skips_search_for_cached_chunk(self, test_config, mock_client):
         """When progress_store has cached chunk, search API is not called."""
-        from git_recap.services.fetch_progress import FetchProgressStore
+        from workrecap.services.fetch_progress import FetchProgressStore
 
         progress_dir = test_config.data_dir / "state" / "fetch_progress"
         progress_store = FetchProgressStore(progress_dir)
@@ -1368,7 +1368,7 @@ class TestFetchRangeResume:
 
     def test_resume_calls_search_for_uncached_chunk(self, test_config, mock_client):
         """When progress_store has no cache, search API is called normally."""
-        from git_recap.services.fetch_progress import FetchProgressStore
+        from workrecap.services.fetch_progress import FetchProgressStore
 
         progress_dir = test_config.data_dir / "state" / "fetch_progress"
         progress_store = FetchProgressStore(progress_dir)
@@ -1387,7 +1387,7 @@ class TestFetchRangeResume:
 
     def test_resume_clears_chunk_after_completion(self, test_config, mock_client):
         """Completed chunks are cleared from progress store."""
-        from git_recap.services.fetch_progress import FetchProgressStore
+        from workrecap.services.fetch_progress import FetchProgressStore
 
         progress_dir = test_config.data_dir / "state" / "fetch_progress"
         progress_store = FetchProgressStore(progress_dir)
@@ -1404,8 +1404,8 @@ class TestFetchRangeResume:
 
     def test_resume_interruption_scenario(self, test_config, mock_client):
         """Simulate interruption: cache chunk, process some dates, then resume."""
-        from git_recap.services.fetch_progress import FetchProgressStore
-        from git_recap.services.daily_state import DailyStateStore
+        from workrecap.services.fetch_progress import FetchProgressStore
+        from workrecap.services.daily_state import DailyStateStore
 
         progress_dir = test_config.data_dir / "state" / "fetch_progress"
         progress_store = FetchProgressStore(progress_dir)

@@ -10,7 +10,7 @@ pydantic-settings 기반 `AppConfig` 클래스를 정의한다.
 
 ## 위치
 
-`src/git_recap/config.py`
+`src/workrecap/config.py`
 
 ## 의존성
 

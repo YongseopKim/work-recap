@@ -9,13 +9,13 @@ Provider-agnostic LLM 클라이언트. OpenAI와 Anthropic API를 동일한 인�
 
 ## 위치
 
-`src/git_recap/infra/llm_client.py`
+`src/workrecap/infra/llm_client.py`
 
 ## 의존성
 
 - `openai` (OpenAI SDK)
 - `anthropic` (Anthropic SDK)
-- `git_recap.exceptions.SummarizeError`
+- `workrecap.exceptions.SummarizeError`
 
 ---
 
@@ -24,7 +24,7 @@ Provider-agnostic LLM 클라이언트. OpenAI와 Anthropic API를 동일한 인�
 ```python
 import logging
 
-from git_recap.exceptions import SummarizeError
+from workrecap.exceptions import SummarizeError
 
 logger = logging.getLogger(__name__)
 

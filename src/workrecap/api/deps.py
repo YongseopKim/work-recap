@@ -2,8 +2,8 @@
 
 from functools import lru_cache
 
-from git_recap.api.job_store import JobStore
-from git_recap.config import AppConfig
+from workrecap.api.job_store import JobStore
+from workrecap.config import AppConfig
 
 
 @lru_cache

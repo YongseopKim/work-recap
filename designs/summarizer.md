@@ -10,14 +10,14 @@ daily/weekly/monthly/yearly markdown summary를 생성한다.
 
 ## 위치
 
-`src/git_recap/services/summarizer.py`
+`src/workrecap/services/summarizer.py`
 
 ## 의존성
 
-- `git_recap.config.AppConfig`
-- `git_recap.infra.llm_client.LLMClient`
-- `git_recap.exceptions.SummarizeError`
-- `git_recap.models` — load_json, load_jsonl, activity_from_dict, daily_stats_from_dict
+- `workrecap.config.AppConfig`
+- `workrecap.infra.llm_client.LLMClient`
+- `workrecap.exceptions.SummarizeError`
+- `workrecap.models` — load_json, load_jsonl, activity_from_dict, daily_stats_from_dict
 - `jinja2` (프롬프트 템플릿 렌더링)
 
 ---
@@ -174,10 +174,10 @@ from pathlib import Path
 
 from jinja2 import Template
 
-from git_recap.config import AppConfig
-from git_recap.exceptions import SummarizeError
-from git_recap.infra.llm_client import LLMClient
-from git_recap.models import (
+from workrecap.config import AppConfig
+from workrecap.exceptions import SummarizeError
+from workrecap.infra.llm_client import LLMClient
+from workrecap.models import (
     load_json, load_jsonl, activity_from_dict, daily_stats_from_dict,
 )
 

@@ -6,16 +6,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from git_recap.exceptions import SummarizeError
-from git_recap.infra.llm_client import LLMClient
-from git_recap.models import (
+from workrecap.exceptions import SummarizeError
+from workrecap.infra.llm_client import LLMClient
+from workrecap.models import (
     Activity,
     ActivityKind,
     DailyStats,
     save_json,
     save_jsonl,
 )
-from git_recap.services.summarizer import SummarizerService
+from workrecap.services.summarizer import SummarizerService
 
 DATE = "2025-02-16"
 
@@ -568,7 +568,7 @@ class TestDailyEmptyActivities:
 
         summarizer.daily(DATE)
 
-        from git_recap.models import load_json as _load_json
+        from workrecap.models import load_json as _load_json
 
         cp = _load_json(test_config.checkpoints_path)
         assert cp["last_summarize_date"] == DATE
@@ -579,7 +579,7 @@ class TestDailyEmptyActivities:
         save_jsonl([], norm_dir / "activities.jsonl")
         save_json(DailyStats(date=DATE), norm_dir / "stats.json")
 
-        with caplog.at_level(logging.INFO, logger="git_recap.services.summarizer"):
+        with caplog.at_level(logging.INFO, logger="workrecap.services.summarizer"):
             summarizer.daily(DATE)
 
         assert any("skipping LLM" in r.message for r in caplog.records)
@@ -781,7 +781,7 @@ class TestSummarizeCheckpoint:
         _save_normalized(test_config)
         summarizer.daily(DATE)
 
-        from git_recap.models import load_json
+        from workrecap.models import load_json
 
         cp = load_json(test_config.checkpoints_path)
         assert cp["last_summarize_date"] == DATE
@@ -794,7 +794,7 @@ class TestSummarizeCheckpoint:
         summarizer.daily(DATE)
         summarizer.daily(date2)
 
-        from git_recap.models import load_json
+        from workrecap.models import load_json
 
         cp = load_json(test_config.checkpoints_path)
         assert cp["last_summarize_date"] == date2
@@ -811,7 +811,7 @@ class TestSummarizeCheckpoint:
         _save_normalized(test_config)
         summarizer.daily(DATE)
 
-        from git_recap.models import load_json
+        from workrecap.models import load_json
 
         cp = load_json(cp_path)
         assert cp["last_fetch_date"] == "2025-02-16"
@@ -870,7 +870,7 @@ class TestDailyRange:
             _save_normalized(test_config, d)
         summarizer.daily_range("2025-02-14", "2025-02-16")
 
-        from git_recap.models import load_json
+        from workrecap.models import load_json
 
         cp = load_json(test_config.checkpoints_path)
         assert cp["last_summarize_date"] == "2025-02-16"
@@ -1201,7 +1201,7 @@ class TestParallelDailyRange:
         summarizer = SummarizerService(test_config, mock_llm)
         summarizer.daily_range("2025-02-14", "2025-02-16", max_workers=3)
 
-        from git_recap.models import load_json
+        from workrecap.models import load_json
 
         cp = load_json(test_config.checkpoints_path)
         assert cp["last_summarize_date"] == "2025-02-16"

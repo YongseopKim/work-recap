@@ -2,8 +2,8 @@ import httpx
 import pytest
 import respx
 
-from git_recap.exceptions import FetchError
-from git_recap.infra.ghes_client import GHESClient
+from workrecap.exceptions import FetchError
+from workrecap.infra.ghes_client import GHESClient
 
 BASE_URL = "https://github.example.com"
 API_BASE = f"{BASE_URL}/api/v3"
@@ -66,7 +66,7 @@ class TestSearchIssues:
 class TestRetry:
     @respx.mock
     def test_retries_on_429(self, client, monkeypatch):
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", lambda _: None)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
         route = respx.get(f"{API_BASE}/search/issues").mock(
             side_effect=[
                 httpx.Response(429, headers={"Retry-After": "0"}),
@@ -79,7 +79,7 @@ class TestRetry:
 
     @respx.mock
     def test_retries_on_500(self, client, monkeypatch):
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", lambda _: None)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
         route = respx.get(f"{API_BASE}/search/issues").mock(
             side_effect=[
                 httpx.Response(500),
@@ -92,7 +92,7 @@ class TestRetry:
 
     @respx.mock
     def test_raises_fetch_error_after_max_retries_429(self, client, monkeypatch):
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", lambda _: None)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
         respx.get(f"{API_BASE}/search/issues").mock(
             return_value=httpx.Response(429, headers={"Retry-After": "0"})
         )
@@ -101,7 +101,7 @@ class TestRetry:
 
     @respx.mock
     def test_raises_fetch_error_after_max_retries_500(self, client, monkeypatch):
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", lambda _: None)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
         respx.get(f"{API_BASE}/search/issues").mock(return_value=httpx.Response(500))
         with pytest.raises(FetchError, match="Server error"):
             client.search_issues("test")
@@ -126,7 +126,7 @@ class TestRetry:
 
     @respx.mock
     def test_retries_on_network_error(self, client, monkeypatch):
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", lambda _: None)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
         route = respx.get(f"{API_BASE}/search/issues").mock(
             side_effect=[
                 httpx.ConnectError("Connection refused"),
@@ -372,7 +372,7 @@ class TestRateLimitRetry403:
     @respx.mock
     def test_retries_on_403_rate_limit(self, client, monkeypatch):
         """403 with 'rate limit' in body → retry → success."""
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", lambda _: None)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
         route = respx.get(f"{API_BASE}/search/issues").mock(
             side_effect=[
                 httpx.Response(
@@ -391,7 +391,7 @@ class TestRateLimitRetry403:
         """Respects Retry-After header on 403 rate limit."""
         sleep_values = []
         monkeypatch.setattr(
-            "git_recap.infra.ghes_client.time.sleep",
+            "workrecap.infra.ghes_client.time.sleep",
             lambda v: sleep_values.append(v),
         )
         respx.get(f"{API_BASE}/search/issues").mock(
@@ -412,7 +412,7 @@ class TestRateLimitRetry403:
         """Defaults to 60s when no Retry-After header on 403 rate limit."""
         sleep_values = []
         monkeypatch.setattr(
-            "git_recap.infra.ghes_client.time.sleep",
+            "workrecap.infra.ghes_client.time.sleep",
             lambda v: sleep_values.append(v),
         )
         respx.get(f"{API_BASE}/search/issues").mock(
@@ -427,7 +427,7 @@ class TestRateLimitRetry403:
     @respx.mock
     def test_403_rate_limit_exhausts_retries(self, client, monkeypatch):
         """All attempts return 403 rate limit → raises FetchError."""
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", lambda _: None)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
         respx.get(f"{API_BASE}/search/issues").mock(
             return_value=httpx.Response(403, json={"message": "API rate limit exceeded"})
         )
@@ -449,7 +449,7 @@ class TestRateLimitRetry403:
     @respx.mock
     def test_403_rate_limit_with_plain_text_body(self, client, monkeypatch):
         """Non-JSON body with 'rate limit' text still detected."""
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", lambda _: None)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
         route = respx.get(f"{API_BASE}/search/issues").mock(
             side_effect=[
                 httpx.Response(403, text="rate limit exceeded"),
@@ -466,7 +466,7 @@ class TestRetryAfterHeader:
     def test_uses_retry_after_header(self, client, monkeypatch):
         sleep_values = []
         monkeypatch.setattr(
-            "git_recap.infra.ghes_client.time.sleep",
+            "workrecap.infra.ghes_client.time.sleep",
             lambda v: sleep_values.append(v),
         )
         respx.get(f"{API_BASE}/search/issues").mock(
@@ -482,7 +482,7 @@ class TestRetryAfterHeader:
     def test_default_retry_after_when_missing(self, client, monkeypatch):
         sleep_values = []
         monkeypatch.setattr(
-            "git_recap.infra.ghes_client.time.sleep",
+            "workrecap.infra.ghes_client.time.sleep",
             lambda v: sleep_values.append(v),
         )
         respx.get(f"{API_BASE}/search/issues").mock(
@@ -509,8 +509,8 @@ class TestSearchThrottle:
             sleep_values.append(v)
             clock[0] += v
 
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.monotonic", fake_monotonic)
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", fake_sleep)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.monotonic", fake_monotonic)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", fake_sleep)
 
         c = GHESClient(BASE_URL, "test-token", search_interval=2.0)
         respx.get(f"{API_BASE}/search/issues").mock(
@@ -528,9 +528,9 @@ class TestSearchThrottle:
     def test_no_throttle_on_first_search_call(self, monkeypatch):
         """1st call doesn't sleep for throttle."""
         sleep_values = []
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.monotonic", lambda: 100.0)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.monotonic", lambda: 100.0)
         monkeypatch.setattr(
-            "git_recap.infra.ghes_client.time.sleep",
+            "workrecap.infra.ghes_client.time.sleep",
             lambda v: sleep_values.append(v),
         )
 
@@ -557,8 +557,8 @@ class TestSearchThrottle:
             sleep_values.append(v)
             clock[0] += v
 
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.monotonic", fake_monotonic)
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", fake_sleep)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.monotonic", fake_monotonic)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", fake_sleep)
 
         c = GHESClient(BASE_URL, "test-token", search_interval=2.0)
         respx.get(f"{API_BASE}/search/commits").mock(
@@ -575,9 +575,9 @@ class TestSearchThrottle:
     def test_no_throttle_on_rest_api_calls(self, monkeypatch):
         """get_pr is NOT throttled."""
         sleep_values = []
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.monotonic", lambda: 0.0)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.monotonic", lambda: 0.0)
         monkeypatch.setattr(
-            "git_recap.infra.ghes_client.time.sleep",
+            "workrecap.infra.ghes_client.time.sleep",
             lambda v: sleep_values.append(v),
         )
 
@@ -605,8 +605,8 @@ class TestSearchThrottle:
             sleep_values.append(v)
             clock[0] += v
 
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.monotonic", fake_monotonic)
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", fake_sleep)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.monotonic", fake_monotonic)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", fake_sleep)
 
         c = GHESClient(BASE_URL, "test-token", search_interval=2.0)
         respx.get(f"{API_BASE}/search/issues").mock(
@@ -626,9 +626,9 @@ class TestSearchThrottle:
     def test_throttle_zero_interval(self, monkeypatch):
         """search_interval=0 disables throttle."""
         sleep_values = []
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.monotonic", lambda: 0.0)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.monotonic", lambda: 0.0)
         monkeypatch.setattr(
-            "git_recap.infra.ghes_client.time.sleep",
+            "workrecap.infra.ghes_client.time.sleep",
             lambda v: sleep_values.append(v),
         )
 
@@ -656,8 +656,8 @@ class TestSearchThrottle:
             sleep_values.append(v)
             clock[0] += v
 
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.monotonic", fake_monotonic)
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", fake_sleep)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.monotonic", fake_monotonic)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", fake_sleep)
 
         c = GHESClient(BASE_URL, "test-token", search_interval=2.0)
         respx.get(f"{API_BASE}/search/issues").mock(
@@ -676,7 +676,7 @@ class TestAdaptiveRateLimit:
     @respx.mock
     def test_tracks_rate_limit_headers(self, monkeypatch):
         """Rate limit remaining is tracked from response headers."""
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", lambda _: None)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
         c = GHESClient(BASE_URL, "test-token", search_interval=0)
         respx.get(f"{API_BASE}/repos/org/repo/pulls/1").mock(
             return_value=httpx.Response(
@@ -698,7 +698,7 @@ class TestAdaptiveRateLimit:
         """Logs warning when remaining < 100."""
         import logging
 
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", lambda _: None)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
         c = GHESClient(BASE_URL, "test-token", search_interval=0)
         respx.get(f"{API_BASE}/repos/org/repo/pulls/1").mock(
             return_value=httpx.Response(
@@ -710,7 +710,7 @@ class TestAdaptiveRateLimit:
                 },
             )
         )
-        with caplog.at_level(logging.WARNING, logger="git_recap.infra.ghes_client"):
+        with caplog.at_level(logging.WARNING, logger="workrecap.infra.ghes_client"):
             c.get_pr("org", "repo", 1)
         assert any("rate limit" in r.message.lower() for r in caplog.records)
         c.close()
@@ -726,9 +726,9 @@ class TestAdaptiveRateLimit:
         def fake_time():
             return 1700000000 - 5  # 5 seconds before reset
 
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", fake_sleep)
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.time", fake_time)
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.monotonic", lambda: 1000.0)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", fake_sleep)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.time", fake_time)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.monotonic", lambda: 1000.0)
 
         c = GHESClient(BASE_URL, "test-token", search_interval=0)
         respx.get(f"{API_BASE}/repos/org/repo/pulls/1").mock(
@@ -752,10 +752,10 @@ class TestAdaptiveRateLimit:
         """No wait when remaining > 100."""
         sleep_values = []
         monkeypatch.setattr(
-            "git_recap.infra.ghes_client.time.sleep",
+            "workrecap.infra.ghes_client.time.sleep",
             lambda v: sleep_values.append(v),
         )
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.monotonic", lambda: 1000.0)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.monotonic", lambda: 1000.0)
 
         c = GHESClient(BASE_URL, "test-token", search_interval=0)
         respx.get(f"{API_BASE}/repos/org/repo/pulls/1").mock(
@@ -791,8 +791,8 @@ class TestThreadSafeThrottle:
             with clock_lock:
                 clock[0] += v
 
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.monotonic", fake_monotonic)
-        monkeypatch.setattr("git_recap.infra.ghes_client.time.sleep", fake_sleep)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.monotonic", fake_monotonic)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", fake_sleep)
 
         c = GHESClient(BASE_URL, "test-token", search_interval=2.0)
 

@@ -9,35 +9,35 @@ Typer 기반 CLI로 각 서비스를 개별 또는 파이프라인으로 실행�
 
 ## 위치
 
-`src/git_recap/cli/main.py`
+`src/workrecap/cli/main.py`
 
 ## 의존성
 
 - `typer`
-- `git_recap.config.AppConfig`
-- `git_recap.infra.ghes_client.GHESClient`
-- `git_recap.infra.llm_client.LLMClient`
-- `git_recap.services.fetcher.FetcherService`
-- `git_recap.services.normalizer.NormalizerService`
-- `git_recap.services.summarizer.SummarizerService`
-- `git_recap.services.orchestrator.OrchestratorService`
-- `git_recap.services.date_utils`
-- `git_recap.exceptions.GitRecapError`
+- `workrecap.config.AppConfig`
+- `workrecap.infra.ghes_client.GHESClient`
+- `workrecap.infra.llm_client.LLMClient`
+- `workrecap.services.fetcher.FetcherService`
+- `workrecap.services.normalizer.NormalizerService`
+- `workrecap.services.summarizer.SummarizerService`
+- `workrecap.services.orchestrator.OrchestratorService`
+- `workrecap.services.date_utils`
+- `workrecap.exceptions.WorkRecapError`
 
 ---
 
 ## 커맨드 구조
 
 ```
-git-recap fetch [DATE] [--type TYPE] [--force] [--since/--until | --weekly | --monthly | --yearly]
-git-recap normalize [DATE] [--since/--until | --weekly | --monthly | --yearly]
-git-recap summarize daily [DATE] [--since/--until | --weekly | --monthly | --yearly]
-git-recap summarize weekly YEAR WEEK       # Weekly summary 생성
-git-recap summarize monthly YEAR MONTH     # Monthly summary 생성
-git-recap summarize yearly YEAR            # Yearly summary 생성
-git-recap run [DATE]                       # 전체 파이프라인 (단일 날짜)
-git-recap run --since SINCE --until UNTIL  # 기간 범위 backfill
-git-recap ask QUESTION [--months N]        # 자유 질문
+recap fetch [DATE] [--type TYPE] [--force] [--since/--until | --weekly | --monthly | --yearly]
+recap normalize [DATE] [--since/--until | --weekly | --monthly | --yearly]
+recap summarize daily [DATE] [--since/--until | --weekly | --monthly | --yearly]
+recap summarize weekly YEAR WEEK       # Weekly summary 생성
+recap summarize monthly YEAR MONTH     # Monthly summary 생성
+recap summarize yearly YEAR            # Yearly summary 생성
+recap run [DATE]                       # 전체 파이프라인 (단일 날짜)
+recap run --since SINCE --until UNTIL  # 기간 범위 backfill
+recap ask QUESTION [--months N]        # 자유 질문
 ```
 
 DATE 기본값: 오늘 날짜 (fetch는 catch-up 모드 지원)
@@ -69,7 +69,7 @@ fetch 전용: `--type TYPE` (prs, commits, issues), `--force` / `-f` (기존 데
 ## 상세 구현
 
 ```python
-"""git-recap CLI — Typer 기반."""
+"""work-recap CLI — Typer 기반."""
 
 import json
 from datetime import date
@@ -77,13 +77,13 @@ from pathlib import Path
 
 import typer
 
-from git_recap.config import AppConfig
-from git_recap.exceptions import GitRecapError
-from git_recap.services import date_utils
-from git_recap.services.fetcher import FetcherService
-from git_recap.services.normalizer import NormalizerService
-from git_recap.services.orchestrator import OrchestratorService
-from git_recap.services.summarizer import SummarizerService
+from workrecap.config import AppConfig
+from workrecap.exceptions import WorkRecapError
+from workrecap.services import date_utils
+from workrecap.services.fetcher import FetcherService
+from workrecap.services.normalizer import NormalizerService
+from workrecap.services.orchestrator import OrchestratorService
+from workrecap.services.summarizer import SummarizerService
 
 app = typer.Typer(help="GHES activity summarizer with LLM")
 summarize_app = typer.Typer(help="Generate summaries")
@@ -97,16 +97,16 @@ def _get_config() -> AppConfig:
 
 
 def _get_ghes_client(config: AppConfig):
-    from git_recap.infra.ghes_client import GHESClient
+    from workrecap.infra.ghes_client import GHESClient
     return GHESClient(config.ghes_url, config.ghes_token)
 
 
 def _get_llm_client(config: AppConfig):
-    from git_recap.infra.llm_client import LLMClient
+    from workrecap.infra.llm_client import LLMClient
     return LLMClient(config.llm_provider, config.llm_api_key, config.llm_model)
 
 
-def _handle_error(e: GitRecapError) -> None:
+def _handle_error(e: WorkRecapError) -> None:
     """에러 메시지를 stderr에 출력하고 exit(1)."""
     typer.echo(f"Error: {e}", err=True)
     raise typer.Exit(code=1)
@@ -254,7 +254,7 @@ def fetch(
                 typer.echo("Fetched 1 day(s)")
                 for type_name, path in sorted(result.items()):
                     typer.echo(f"  {dates[0]} {type_name}: {path}")
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)
 
 
@@ -286,7 +286,7 @@ def normalize(
         typer.echo(f"Normalized {len(dates)} day(s)")
         for d, act_path, stats_path in results:
             typer.echo(f"  {d}: {act_path}, {stats_path}")
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)
 
 
@@ -324,7 +324,7 @@ def summarize_daily(
                 typer.echo(f"  {d}: {path}")
         else:
             typer.echo(f"Daily summary → {results[0][1]}")
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)
 
 
@@ -341,7 +341,7 @@ def summarize_weekly(
         service = SummarizerService(config, llm)
         path = service.weekly(year, week)
         typer.echo(f"Weekly summary → {path}")
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)
 
 
@@ -358,7 +358,7 @@ def summarize_monthly(
         service = SummarizerService(config, llm)
         path = service.monthly(year, month)
         typer.echo(f"Monthly summary → {path}")
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)
 
 
@@ -374,7 +374,7 @@ def summarize_yearly(
         service = SummarizerService(config, llm)
         path = service.yearly(year)
         typer.echo(f"Yearly summary → {path}")
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)
 
 
@@ -415,7 +415,7 @@ def run(
             path = orchestrator.run_daily(target_date)
             ghes.close()
             typer.echo(f"Pipeline complete → {path}")
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)
 
 
@@ -434,7 +434,7 @@ def ask(
         service = SummarizerService(config, llm)
         answer = service.query(question, months_back=months)
         typer.echo(answer)
-    except GitRecapError as e:
+    except WorkRecapError as e:
         _handle_error(e)
 ```
 
@@ -473,7 +473,7 @@ GHESClient, LLMClient만 `_get_*_client()` 헬퍼 내에서 로컬 import — �
 
 class TestFetch:
     def test_fetch_with_date(self):
-        """git-recap fetch 2025-02-16 → FetcherService.fetch 호출."""
+        """recap fetch 2025-02-16 → FetcherService.fetch 호출."""
     def test_fetch_default_today(self):
         """날짜 미지정 + checkpoint 없음 → 오늘 날짜 사용."""
     def test_fetch_error(self):
@@ -531,7 +531,7 @@ class TestFetchOutput:
 
 class TestNormalize:
     def test_normalize_with_date(self):
-        """git-recap normalize 2025-02-16 → 성공 메시지."""
+        """recap normalize 2025-02-16 → 성공 메시지."""
     def test_normalize_error(self):
         """NormalizeError → exit code 1."""
 
@@ -563,21 +563,21 @@ class TestSummarizeDailyDateRange:
 
 class TestSummarize:
     def test_summarize_daily(self):
-        """git-recap summarize daily 2025-02-16 → 단일 날짜 출력."""
+        """recap summarize daily 2025-02-16 → 단일 날짜 출력."""
     def test_summarize_weekly(self):
-        """git-recap summarize weekly 2025 7."""
+        """recap summarize weekly 2025 7."""
     def test_summarize_monthly(self):
-        """git-recap summarize monthly 2025 2."""
+        """recap summarize monthly 2025 2."""
     def test_summarize_yearly(self):
-        """git-recap summarize yearly 2025."""
+        """recap summarize yearly 2025."""
     def test_summarize_error(self):
         """SummarizeError → exit code 1."""
 
 class TestRun:
     def test_run_single_date(self):
-        """git-recap run 2025-02-16 → 파이프라인 완료 메시지."""
+        """recap run 2025-02-16 → 파이프라인 완료 메시지."""
     def test_run_range(self):
-        """git-recap run --since X --until Y → 범위 결과."""
+        """recap run --since X --until Y → 범위 결과."""
     def test_run_range_partial_failure(self):
         """일부 날짜 실패 → exit code 1 + 결과 표시."""
     def test_run_error(self):
@@ -585,7 +585,7 @@ class TestRun:
 
 class TestAsk:
     def test_ask_question(self):
-        """git-recap ask "질문" → LLM 응답 출력."""
+        """recap ask "질문" → LLM 응답 출력."""
     def test_ask_error(self):
         """context 없으면 exit code 1."""
     def test_ask_with_months_option(self):

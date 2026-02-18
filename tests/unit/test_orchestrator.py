@@ -3,16 +3,16 @@ from unittest.mock import Mock, call
 
 import pytest
 
-from git_recap.exceptions import (
+from workrecap.exceptions import (
     FetchError,
     NormalizeError,
     StepFailedError,
     SummarizeError,
 )
-from git_recap.services.fetcher import FetcherService
-from git_recap.services.normalizer import NormalizerService
-from git_recap.services.orchestrator import OrchestratorService
-from git_recap.services.summarizer import SummarizerService
+from workrecap.services.fetcher import FetcherService
+from workrecap.services.normalizer import NormalizerService
+from workrecap.services.orchestrator import OrchestratorService
+from workrecap.services.summarizer import SummarizerService
 
 
 @pytest.fixture

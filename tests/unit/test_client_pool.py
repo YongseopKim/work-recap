@@ -4,7 +4,7 @@ import threading
 
 import pytest
 
-from git_recap.infra.client_pool import GHESClientPool
+from workrecap.infra.client_pool import GHESClientPool
 
 
 @pytest.fixture

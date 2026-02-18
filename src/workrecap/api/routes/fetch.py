@@ -5,15 +5,15 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Body, Depends
 from pydantic import BaseModel
 
-from git_recap.api.deps import get_config, get_job_store
-from git_recap.api.job_store import JobStore
-from git_recap.config import AppConfig
-from git_recap.infra.client_pool import GHESClientPool
-from git_recap.infra.ghes_client import GHESClient
-from git_recap.models import JobStatus
-from git_recap.services.daily_state import DailyStateStore
-from git_recap.services.fetch_progress import FetchProgressStore
-from git_recap.services.fetcher import FetcherService
+from workrecap.api.deps import get_config, get_job_store
+from workrecap.api.job_store import JobStore
+from workrecap.config import AppConfig
+from workrecap.infra.client_pool import GHESClientPool
+from workrecap.infra.ghes_client import GHESClient
+from workrecap.models import JobStatus
+from workrecap.services.daily_state import DailyStateStore
+from workrecap.services.fetch_progress import FetchProgressStore
+from workrecap.services.fetcher import FetcherService
 
 logger = logging.getLogger(__name__)
 

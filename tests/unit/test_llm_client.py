@@ -4,9 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from git_recap.exceptions import SummarizeError
-from git_recap.infra.llm_client import LLMClient
-from git_recap.models import TokenUsage
+from workrecap.exceptions import SummarizeError
+from workrecap.infra.llm_client import LLMClient
+from workrecap.models import TokenUsage
 
 
 def _openai_response(text="LLM response text", prompt=100, completion=50, total=150):
@@ -28,13 +28,13 @@ def _anthropic_response(text="Anthropic response", input_t=80, output_t=40):
 
 
 class TestLLMClientInit:
-    @patch("git_recap.infra.llm_client.OpenAI")
+    @patch("workrecap.infra.llm_client.OpenAI")
     def test_openai_provider(self, mock_openai_cls):
         client = LLMClient("openai", "test-key", "gpt-4o-mini")
         assert client._provider == "openai"
         mock_openai_cls.assert_called_once_with(api_key="test-key", timeout=120.0, max_retries=3)
 
-    @patch("git_recap.infra.llm_client.anthropic")
+    @patch("workrecap.infra.llm_client.anthropic")
     def test_anthropic_provider(self, mock_anthropic_mod):
         client = LLMClient("anthropic", "test-key", "claude-sonnet-4-5-20250929")
         assert client._provider == "anthropic"
@@ -46,14 +46,14 @@ class TestLLMClientInit:
         with pytest.raises(SummarizeError, match="Unsupported LLM provider"):
             LLMClient("gemini", "key", "model")
 
-    @patch("git_recap.infra.llm_client.OpenAI")
+    @patch("workrecap.infra.llm_client.OpenAI")
     def test_initial_usage_is_zero(self, mock_openai_cls):
         client = LLMClient("openai", "key", "gpt-4o-mini")
         assert client.usage == TokenUsage()
 
 
 class TestChat:
-    @patch("git_recap.infra.llm_client.OpenAI")
+    @patch("workrecap.infra.llm_client.OpenAI")
     def test_openai_chat(self, mock_openai_cls):
         mock_instance = MagicMock()
         mock_instance.chat.completions.create.return_value = _openai_response()
@@ -71,7 +71,7 @@ class TestChat:
             ],
         )
 
-    @patch("git_recap.infra.llm_client.anthropic")
+    @patch("workrecap.infra.llm_client.anthropic")
     def test_anthropic_chat(self, mock_anthropic_mod):
         mock_instance = MagicMock()
         mock_instance.messages.create.return_value = _anthropic_response()
@@ -88,7 +88,7 @@ class TestChat:
             messages=[{"role": "user", "content": "user"}],
         )
 
-    @patch("git_recap.infra.llm_client.OpenAI")
+    @patch("workrecap.infra.llm_client.OpenAI")
     def test_api_error_wrapped(self, mock_openai_cls):
         mock_instance = MagicMock()
         mock_instance.chat.completions.create.side_effect = RuntimeError("API timeout")
@@ -101,7 +101,7 @@ class TestChat:
 
 
 class TestTokenUsageTracking:
-    @patch("git_recap.infra.llm_client.OpenAI")
+    @patch("workrecap.infra.llm_client.OpenAI")
     def test_openai_single_call_usage(self, mock_openai_cls):
         """단일 OpenAI 호출 후 usage 누적."""
         mock_instance = MagicMock()
@@ -118,7 +118,7 @@ class TestTokenUsageTracking:
         assert client.usage.total_tokens == 300
         assert client.usage.call_count == 1
 
-    @patch("git_recap.infra.llm_client.anthropic")
+    @patch("workrecap.infra.llm_client.anthropic")
     def test_anthropic_single_call_usage(self, mock_anthropic_mod):
         """단일 Anthropic 호출 후 usage 누적."""
         mock_instance = MagicMock()
@@ -133,7 +133,7 @@ class TestTokenUsageTracking:
         assert client.usage.total_tokens == 225
         assert client.usage.call_count == 1
 
-    @patch("git_recap.infra.llm_client.OpenAI")
+    @patch("workrecap.infra.llm_client.OpenAI")
     def test_usage_accumulates_across_calls(self, mock_openai_cls):
         """여러 호출 시 usage 누적."""
         mock_instance = MagicMock()
@@ -154,7 +154,7 @@ class TestTokenUsageTracking:
         assert client.usage.total_tokens == 850
         assert client.usage.call_count == 3
 
-    @patch("git_recap.infra.llm_client.OpenAI")
+    @patch("workrecap.infra.llm_client.OpenAI")
     def test_failed_call_does_not_accumulate(self, mock_openai_cls):
         """실패한 호출은 usage에 포함되지 않음."""
         mock_instance = MagicMock()
@@ -175,13 +175,13 @@ class TestTokenUsageTracking:
 
 
 class TestTimeoutAndRetry:
-    @patch("git_recap.infra.llm_client.OpenAI")
+    @patch("workrecap.infra.llm_client.OpenAI")
     def test_openai_custom_timeout_and_retries(self, mock_openai_cls):
         """커스텀 timeout/max_retries가 OpenAI에 전달."""
         LLMClient("openai", "key", "gpt-4o-mini", timeout=60.0, max_retries=5)
         mock_openai_cls.assert_called_once_with(api_key="key", timeout=60.0, max_retries=5)
 
-    @patch("git_recap.infra.llm_client.anthropic")
+    @patch("workrecap.infra.llm_client.anthropic")
     def test_anthropic_custom_timeout_and_retries(self, mock_anthropic_mod):
         """커스텀 timeout/max_retries가 Anthropic에 전달."""
         LLMClient("anthropic", "key", "claude-sonnet-4-5-20250929", timeout=30.0, max_retries=1)
@@ -189,7 +189,7 @@ class TestTimeoutAndRetry:
             api_key="key", timeout=30.0, max_retries=1
         )
 
-    @patch("git_recap.infra.llm_client.OpenAI")
+    @patch("workrecap.infra.llm_client.OpenAI")
     def test_default_timeout_and_retries(self, mock_openai_cls):
         """기본값 timeout=120, max_retries=3."""
         LLMClient("openai", "key", "gpt-4o-mini")
@@ -197,7 +197,7 @@ class TestTimeoutAndRetry:
 
 
 class TestThreadSafety:
-    @patch("git_recap.infra.llm_client.OpenAI")
+    @patch("workrecap.infra.llm_client.OpenAI")
     def test_concurrent_chat_usage_accumulation(self, mock_openai_cls):
         """10 threads calling chat() concurrently should accumulate usage correctly."""
         mock_instance = MagicMock()

@@ -5,10 +5,10 @@ from unittest.mock import ANY, MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from git_recap.cli.main import app
-from git_recap.exceptions import FetchError, NormalizeError, SummarizeError, StepFailedError
-from git_recap.logging_config import reset_logging
-from git_recap.models import TokenUsage
+from workrecap.cli.main import app
+from workrecap.exceptions import FetchError, NormalizeError, SummarizeError, StepFailedError
+from workrecap.logging_config import reset_logging
+from workrecap.models import TokenUsage
 
 runner = CliRunner()
 
@@ -17,7 +17,7 @@ runner = CliRunner()
 
 
 def _mock_config():
-    from git_recap.config import AppConfig
+    from workrecap.config import AppConfig
 
     return AppConfig(
         ghes_url="https://github.example.com",
@@ -51,7 +51,7 @@ def _reset_logging_state():
 @pytest.fixture(autouse=True)
 def patch_config(monkeypatch):
     """모든 CLI 테스트에서 _get_config를 mock."""
-    monkeypatch.setattr("git_recap.cli.main._get_config", _mock_config)
+    monkeypatch.setattr("workrecap.cli.main._get_config", _mock_config)
 
 
 @pytest.fixture(autouse=True)
@@ -60,7 +60,7 @@ def patch_ghes(monkeypatch):
     mock_client = MagicMock()
     mock_client.__enter__ = MagicMock(return_value=mock_client)
     mock_client.__exit__ = MagicMock(return_value=False)
-    monkeypatch.setattr("git_recap.cli.main._get_ghes_client", lambda c: mock_client)
+    monkeypatch.setattr("workrecap.cli.main._get_ghes_client", lambda c: mock_client)
     return mock_client
 
 
@@ -69,7 +69,7 @@ def patch_llm(monkeypatch):
     """LLMClient mock."""
     mock_llm = MagicMock()
     mock_llm.usage = TokenUsage()
-    monkeypatch.setattr("git_recap.cli.main._get_llm_client", lambda c: mock_llm)
+    monkeypatch.setattr("workrecap.cli.main._get_llm_client", lambda c: mock_llm)
     return mock_llm
 
 
@@ -77,7 +77,7 @@ def patch_llm(monkeypatch):
 
 
 class TestFetch:
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_fetch_with_date(self, mock_cls):
         mock_cls.return_value.fetch.return_value = _fetch_result()
         result = runner.invoke(app, ["fetch", "2025-02-16"])
@@ -85,7 +85,7 @@ class TestFetch:
         assert "Fetched" in result.output
         mock_cls.return_value.fetch.assert_called_once_with("2025-02-16", types=None)
 
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_fetch_default_today(self, mock_cls):
         mock_cls.return_value.fetch.return_value = _fetch_result()
         result = runner.invoke(app, ["fetch"])
@@ -93,7 +93,7 @@ class TestFetch:
         call_args = mock_cls.return_value.fetch.call_args
         assert len(call_args[0][0]) == 10  # YYYY-MM-DD
 
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_fetch_error(self, mock_cls):
         mock_cls.return_value.fetch.side_effect = FetchError("GHES down")
         result = runner.invoke(app, ["fetch", "2025-02-16"])
@@ -105,21 +105,21 @@ class TestFetch:
 
 
 class TestFetchTypeFilter:
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_type_prs(self, mock_cls):
         mock_cls.return_value.fetch.return_value = {"prs": Path("/data/prs.json")}
         result = runner.invoke(app, ["fetch", "--type", "prs", "2025-02-16"])
         assert result.exit_code == 0
         mock_cls.return_value.fetch.assert_called_once_with("2025-02-16", types={"prs"})
 
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_type_commits(self, mock_cls):
         mock_cls.return_value.fetch.return_value = {"commits": Path("/data/commits.json")}
         result = runner.invoke(app, ["fetch", "--type", "commits", "2025-02-16"])
         assert result.exit_code == 0
         mock_cls.return_value.fetch.assert_called_once_with("2025-02-16", types={"commits"})
 
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_type_issues(self, mock_cls):
         mock_cls.return_value.fetch.return_value = {"issues": Path("/data/issues.json")}
         result = runner.invoke(app, ["fetch", "--type", "issues", "2025-02-16"])
@@ -136,7 +136,7 @@ class TestFetchTypeFilter:
 
 
 class TestFetchDateRange:
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_since_until(self, mock_cls):
         mock_cls.return_value.fetch_range.return_value = [
             {"date": "2025-02-14", "status": "success"},
@@ -179,7 +179,7 @@ class TestFetchDateRange:
 
 
 class TestFetchWeekly:
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_weekly_option(self, mock_cls):
         mock_cls.return_value.fetch_range.return_value = [
             {"date": f"2026-02-{9 + i:02d}", "status": "success"} for i in range(7)
@@ -194,7 +194,7 @@ class TestFetchWeekly:
 
 
 class TestFetchMonthly:
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_monthly_option(self, mock_cls):
         mock_cls.return_value.fetch_range.return_value = [
             {"date": f"2026-02-{i + 1:02d}", "status": "success"} for i in range(28)
@@ -209,7 +209,7 @@ class TestFetchMonthly:
 
 
 class TestFetchYearly:
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_yearly_option(self, mock_cls):
         mock_cls.return_value.fetch_range.return_value = [
             {"date": f"2026-01-{i + 1:02d}", "status": "success"} for i in range(365)
@@ -224,7 +224,7 @@ class TestFetchYearly:
 
 
 class TestFetchCatchUp:
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_no_args_no_checkpoint(self, mock_cls):
         """인자 없고 checkpoint 없으면 오늘만 fetch."""
         mock_cls.return_value.fetch.return_value = _fetch_result()
@@ -232,9 +232,9 @@ class TestFetchCatchUp:
         assert result.exit_code == 0
         mock_cls.return_value.fetch.assert_called_once()
 
-    @patch("git_recap.cli.main.date_utils")
-    @patch("git_recap.cli.main._read_last_fetch_date")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.date_utils")
+    @patch("workrecap.cli.main._read_last_fetch_date")
+    @patch("workrecap.cli.main.FetcherService")
     def test_no_args_with_checkpoint(self, mock_cls, mock_read, mock_du):
         """인자 없고 checkpoint 있으면 catch-up → fetch_range 호출."""
         mock_read.return_value = "2026-02-14"
@@ -255,9 +255,9 @@ class TestFetchCatchUp:
             progress=ANY,
         )
 
-    @patch("git_recap.cli.main.date_utils")
-    @patch("git_recap.cli.main._read_last_fetch_date")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.date_utils")
+    @patch("workrecap.cli.main._read_last_fetch_date")
+    @patch("workrecap.cli.main.FetcherService")
     def test_type_with_catchup(self, mock_cls, mock_read, mock_du):
         """--type + catch-up 결합 → fetch_range에 types 전달."""
         mock_read.return_value = "2026-02-15"
@@ -314,7 +314,7 @@ class TestFetchMutualExclusion:
 
 
 class TestFetchOutput:
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_output_shows_all_types(self, mock_cls):
         mock_cls.return_value.fetch.return_value = _fetch_result()
         result = runner.invoke(app, ["fetch", "2025-02-16"])
@@ -323,7 +323,7 @@ class TestFetchOutput:
         assert "commits" in result.output
         assert "issues" in result.output
 
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_output_shows_date_count(self, mock_cls):
         mock_cls.return_value.fetch_range.return_value = [
             {"date": "2025-02-14", "status": "success"},
@@ -343,7 +343,7 @@ class TestFetchOutput:
         assert result.exit_code == 0
         assert "3 day(s)" in result.output
 
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_output_shows_skipped_count(self, mock_cls):
         mock_cls.return_value.fetch_range.return_value = [
             {"date": "2025-02-14", "status": "success"},
@@ -364,7 +364,7 @@ class TestFetchOutput:
         assert "2 succeeded" in result.output
         assert "1 skipped" in result.output
 
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_output_failed_exits_1(self, mock_cls):
         mock_cls.return_value.fetch_range.return_value = [
             {"date": "2025-02-14", "status": "success"},
@@ -388,7 +388,7 @@ class TestFetchOutput:
 
 
 class TestFetchForce:
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_force_flag_passed_to_fetch_range(self, mock_cls):
         mock_cls.return_value.fetch_range.return_value = [
             {"date": "2025-02-14", "status": "success"},
@@ -414,7 +414,7 @@ class TestFetchForce:
             progress=ANY,
         )
 
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_force_short_flag(self, mock_cls):
         mock_cls.return_value.fetch_range.return_value = [
             {"date": "2025-02-14", "status": "success"},
@@ -437,7 +437,7 @@ class TestFetchForce:
 
 
 class TestNormalize:
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_normalize_with_date(self, mock_cls):
         mock_cls.return_value.normalize.return_value = (
             Path("/data/activities.jsonl"),
@@ -448,7 +448,7 @@ class TestNormalize:
         assert "Normalized" in result.output
         mock_cls.return_value.normalize.assert_called_once_with("2025-02-16")
 
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_normalize_error(self, mock_cls):
         mock_cls.return_value.normalize.side_effect = NormalizeError("no raw file")
         result = runner.invoke(app, ["normalize", "2025-02-16"])
@@ -459,7 +459,7 @@ class TestNormalize:
 
 
 class TestNormalizeDateRange:
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_normalize_since_until(self, mock_cls):
         mock_cls.return_value.normalize_range.return_value = [
             {"date": "2025-02-14", "status": "success"},
@@ -480,7 +480,7 @@ class TestNormalizeDateRange:
         )
         assert "3 day(s)" in result.output
 
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_normalize_weekly(self, mock_cls):
         mock_cls.return_value.normalize_range.return_value = [
             {"date": f"2026-02-{9 + i:02d}", "status": "success"} for i in range(7)
@@ -489,7 +489,7 @@ class TestNormalizeDateRange:
         assert result.exit_code == 0
         mock_cls.return_value.normalize_range.assert_called_once()
 
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_normalize_monthly(self, mock_cls):
         mock_cls.return_value.normalize_range.return_value = [
             {"date": f"2026-02-{i + 1:02d}", "status": "success"} for i in range(28)
@@ -498,7 +498,7 @@ class TestNormalizeDateRange:
         assert result.exit_code == 0
         mock_cls.return_value.normalize_range.assert_called_once()
 
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_normalize_yearly(self, mock_cls):
         mock_cls.return_value.normalize_range.return_value = [
             {"date": f"2026-01-{i + 1:02d}", "status": "success"} for i in range(365)
@@ -524,7 +524,7 @@ class TestNormalizeDateRange:
         )
         assert result.exit_code == 1
 
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_normalize_output_shows_date_count(self, mock_cls):
         mock_cls.return_value.normalize_range.return_value = [
             {"date": "2025-02-14", "status": "success"},
@@ -546,7 +546,7 @@ class TestNormalizeDateRange:
 
 
 class TestSummarizeDailyDateRange:
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_summarize_daily_since_until(self, mock_cls):
         mock_cls.return_value.daily_range.return_value = [
             {"date": "2025-02-14", "status": "success"},
@@ -567,7 +567,7 @@ class TestSummarizeDailyDateRange:
         )
         assert "3 day(s)" in result.output
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_summarize_daily_weekly(self, mock_cls):
         mock_cls.return_value.daily_range.return_value = [
             {"date": f"2026-02-{9 + i:02d}", "status": "success"} for i in range(7)
@@ -576,7 +576,7 @@ class TestSummarizeDailyDateRange:
         assert result.exit_code == 0
         mock_cls.return_value.daily_range.assert_called_once()
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_summarize_daily_monthly(self, mock_cls):
         mock_cls.return_value.daily_range.return_value = [
             {"date": f"2026-02-{i + 1:02d}", "status": "success"} for i in range(28)
@@ -600,14 +600,14 @@ class TestSummarizeDailyDateRange:
 
 
 class TestSummarize:
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_summarize_daily(self, mock_cls):
         mock_cls.return_value.daily.return_value = Path("/data/daily.md")
         result = runner.invoke(app, ["summarize", "daily", "2025-02-16"])
         assert result.exit_code == 0
         assert "Daily summary" in result.output
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_summarize_weekly(self, mock_cls):
         mock_cls.return_value.weekly.return_value = Path("/data/weekly.md")
         result = runner.invoke(app, ["summarize", "weekly", "2025", "7"])
@@ -615,7 +615,7 @@ class TestSummarize:
         assert "Weekly summary" in result.output
         mock_cls.return_value.weekly.assert_called_once_with(2025, 7, force=False)
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_summarize_monthly(self, mock_cls):
         mock_cls.return_value.monthly.return_value = Path("/data/monthly.md")
         result = runner.invoke(app, ["summarize", "monthly", "2025", "2"])
@@ -623,7 +623,7 @@ class TestSummarize:
         assert "Monthly summary" in result.output
         mock_cls.return_value.monthly.assert_called_once_with(2025, 2, force=False)
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_summarize_yearly(self, mock_cls):
         mock_cls.return_value.yearly.return_value = Path("/data/yearly.md")
         result = runner.invoke(app, ["summarize", "yearly", "2025"])
@@ -631,7 +631,7 @@ class TestSummarize:
         assert "Yearly summary" in result.output
         mock_cls.return_value.yearly.assert_called_once_with(2025, force=False)
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_summarize_error(self, mock_cls):
         mock_cls.return_value.daily.side_effect = SummarizeError("LLM error")
         result = runner.invoke(app, ["summarize", "daily", "2025-02-16"])
@@ -639,10 +639,10 @@ class TestSummarize:
 
 
 class TestRun:
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_single_date(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
         result = runner.invoke(app, ["run", "2025-02-16"])
@@ -650,10 +650,10 @@ class TestRun:
         assert "Pipeline complete" in result.output
         mock_orch.return_value.run_daily.assert_called_once_with("2025-02-16", types=None)
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_range(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         mock_orch.return_value.run_range.return_value = [
             {"date": "2025-02-15", "status": "success", "path": "/p1"},
@@ -672,10 +672,10 @@ class TestRun:
         assert result.exit_code == 0
         assert "2 succeeded" in result.output
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_range_partial_failure(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         mock_orch.return_value.run_range.return_value = [
             {"date": "2025-02-15", "status": "success", "path": "/p1"},
@@ -695,10 +695,10 @@ class TestRun:
         assert "1 succeeded" in result.output
         assert "1 failed" in result.output
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_error(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         mock_orch.return_value.run_daily.side_effect = StepFailedError(
             "fetch", FetchError("timeout")
@@ -707,10 +707,10 @@ class TestRun:
         assert result.exit_code == 1
         assert "Error" in result.output
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_no_args_default_today(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         """인자 없고 checkpoint 없으면 오늘 날짜로 run_daily 호출."""
         mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
@@ -719,12 +719,12 @@ class TestRun:
         assert "Pipeline complete" in result.output
         mock_orch.return_value.run_daily.assert_called_once()
 
-    @patch("git_recap.cli.main.date_utils")
-    @patch("git_recap.cli.main._read_last_summarize_date")
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.date_utils")
+    @patch("workrecap.cli.main._read_last_summarize_date")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_no_args_with_checkpoint(
         self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_read, mock_du
     ):
@@ -749,12 +749,12 @@ class TestRun:
             max_workers=5,
         )
 
-    @patch("git_recap.cli.main.date_utils")
-    @patch("git_recap.cli.main._read_last_summarize_date")
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.date_utils")
+    @patch("workrecap.cli.main._read_last_summarize_date")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_already_up_to_date(
         self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_read, mock_du
     ):
@@ -766,10 +766,10 @@ class TestRun:
         assert result.exit_code == 0
         assert "Already up to date." in result.output
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_weekly(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         mock_orch.return_value.run_range.return_value = [
             {"date": f"2026-02-0{i}", "status": "success", "path": f"/p{i}"} for i in range(2, 9)
@@ -778,10 +778,10 @@ class TestRun:
         assert result.exit_code == 0
         assert "7 succeeded" in result.output
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_monthly(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         mock_orch.return_value.run_range.return_value = [
             {"date": "2026-01-01", "status": "success", "path": "/p1"},
@@ -790,10 +790,10 @@ class TestRun:
         assert result.exit_code == 0
         assert "succeeded" in result.output
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_yearly(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         mock_orch.return_value.run_range.return_value = [
             {"date": "2025-01-01", "status": "success", "path": "/p1"},
@@ -804,21 +804,21 @@ class TestRun:
 
 
 class TestAsk:
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_ask_question(self, mock_cls):
         mock_cls.return_value.query.return_value = "이번 달 주요 성과는..."
         result = runner.invoke(app, ["ask", "이번 달 주요 성과?"])
         assert result.exit_code == 0
         assert "이번 달 주요 성과는" in result.output
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_ask_error(self, mock_cls):
         mock_cls.return_value.query.side_effect = SummarizeError("No context")
         result = runner.invoke(app, ["ask", "질문?"])
         assert result.exit_code == 1
         assert "Error" in result.output
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_ask_with_months_option(self, mock_cls):
         mock_cls.return_value.query.return_value = "답변"
         result = runner.invoke(app, ["ask", "질문?", "--months", "6"])
@@ -830,10 +830,10 @@ class TestAsk:
 
 
 class TestRunForce:
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_force_single_date(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         """run --force 단일 날짜 → run_daily 호출 (force는 run_daily에 직접 전달 안 함)."""
         mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
@@ -841,10 +841,10 @@ class TestRunForce:
         assert result.exit_code == 0
         assert "Pipeline complete" in result.output
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_force_with_range(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         """run --force --since/--until → run_range에 force=True 전달."""
         mock_orch.return_value.run_range.return_value = [
@@ -873,10 +873,10 @@ class TestRunForce:
             max_workers=5,
         )
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_force_short_flag_with_range(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         """run -f --since/--until → run_range에 force=True 전달."""
         mock_orch.return_value.run_range.return_value = [
@@ -903,10 +903,10 @@ class TestRunForce:
             max_workers=5,
         )
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_range_with_skipped(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         """skipped 날짜는 — 마크로 표시."""
         mock_orch.return_value.run_range.return_value = [
@@ -930,7 +930,7 @@ class TestRunForce:
 class TestReadCheckpointHelpers:
     def test_read_last_normalize_date_no_file(self):
         """파일 없으면 None."""
-        from git_recap.cli.main import _read_last_normalize_date
+        from workrecap.cli.main import _read_last_normalize_date
 
         config = _mock_config()
         assert _read_last_normalize_date(config) is None
@@ -938,7 +938,7 @@ class TestReadCheckpointHelpers:
     def test_read_last_normalize_date_with_key(self, tmp_path):
         """last_normalize_date 키가 있으면 반환."""
         import json
-        from git_recap.cli.main import _read_last_normalize_date
+        from workrecap.cli.main import _read_last_normalize_date
 
         config = _mock_config()
         config.data_dir = tmp_path / "data"
@@ -950,7 +950,7 @@ class TestReadCheckpointHelpers:
     def test_read_last_normalize_date_missing_key(self, tmp_path):
         """키 없으면 None."""
         import json
-        from git_recap.cli.main import _read_last_normalize_date
+        from workrecap.cli.main import _read_last_normalize_date
 
         config = _mock_config()
         config.data_dir = tmp_path / "data"
@@ -961,7 +961,7 @@ class TestReadCheckpointHelpers:
 
     def test_read_last_summarize_date_no_file(self):
         """파일 없으면 None."""
-        from git_recap.cli.main import _read_last_summarize_date
+        from workrecap.cli.main import _read_last_summarize_date
 
         config = _mock_config()
         assert _read_last_summarize_date(config) is None
@@ -969,7 +969,7 @@ class TestReadCheckpointHelpers:
     def test_read_last_summarize_date_with_key(self, tmp_path):
         """last_summarize_date 키가 있으면 반환."""
         import json
-        from git_recap.cli.main import _read_last_summarize_date
+        from workrecap.cli.main import _read_last_summarize_date
 
         config = _mock_config()
         config.data_dir = tmp_path / "data"
@@ -981,7 +981,7 @@ class TestReadCheckpointHelpers:
     def test_read_last_summarize_date_missing_key(self, tmp_path):
         """키 없으면 None."""
         import json
-        from git_recap.cli.main import _read_last_summarize_date
+        from workrecap.cli.main import _read_last_summarize_date
 
         config = _mock_config()
         config.data_dir = tmp_path / "data"
@@ -995,7 +995,7 @@ class TestReadCheckpointHelpers:
 
 
 class TestNormalizeCatchUp:
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_no_args_no_checkpoint(self, mock_cls):
         """인자 없고 checkpoint 없으면 오늘만 normalize."""
         mock_cls.return_value.normalize.return_value = (
@@ -1006,9 +1006,9 @@ class TestNormalizeCatchUp:
         assert result.exit_code == 0
         mock_cls.return_value.normalize.assert_called_once()
 
-    @patch("git_recap.cli.main.date_utils")
-    @patch("git_recap.cli.main._read_last_normalize_date")
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.date_utils")
+    @patch("workrecap.cli.main._read_last_normalize_date")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_no_args_with_checkpoint(self, mock_cls, mock_read, mock_du):
         """인자 없고 checkpoint 있으면 catch-up → normalize_range 호출."""
         mock_read.return_value = "2026-02-14"
@@ -1029,9 +1029,9 @@ class TestNormalizeCatchUp:
             max_workers=5,
         )
 
-    @patch("git_recap.cli.main.date_utils")
-    @patch("git_recap.cli.main._read_last_normalize_date")
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.date_utils")
+    @patch("workrecap.cli.main._read_last_normalize_date")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_already_up_to_date(self, mock_cls, mock_read, mock_du):
         """날짜 목록 비어있으면 'Already up to date.'."""
         mock_read.return_value = "2026-02-17"
@@ -1046,7 +1046,7 @@ class TestNormalizeCatchUp:
 
 
 class TestNormalizeForce:
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_force_flag(self, mock_cls):
         """--force → force=True 전달."""
         mock_cls.return_value.normalize_range.return_value = [
@@ -1066,7 +1066,7 @@ class TestNormalizeForce:
             max_workers=5,
         )
 
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_force_short_flag(self, mock_cls):
         """-f 단축 플래그."""
         mock_cls.return_value.normalize_range.return_value = [
@@ -1083,7 +1083,7 @@ class TestNormalizeForce:
 
 
 class TestNormalizeRangeOutput:
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_succeeded_skipped_failed_counts(self, mock_cls):
         """succeeded/skipped/failed 카운트 출력."""
         mock_cls.return_value.normalize_range.return_value = [
@@ -1099,7 +1099,7 @@ class TestNormalizeRangeOutput:
         assert "1 skipped" in result.output
         assert "1 failed" in result.output
 
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_failed_exits_1(self, mock_cls):
         """failed 시 exit code 1."""
         mock_cls.return_value.normalize_range.return_value = [
@@ -1117,7 +1117,7 @@ class TestNormalizeRangeOutput:
 
 
 class TestSummarizeDailyCatchUp:
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_no_args_no_checkpoint(self, mock_cls):
         """인자 없고 checkpoint 없으면 오늘만 summarize."""
         mock_cls.return_value.daily.return_value = Path("/data/daily.md")
@@ -1125,9 +1125,9 @@ class TestSummarizeDailyCatchUp:
         assert result.exit_code == 0
         mock_cls.return_value.daily.assert_called_once()
 
-    @patch("git_recap.cli.main.date_utils")
-    @patch("git_recap.cli.main._read_last_summarize_date")
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.date_utils")
+    @patch("workrecap.cli.main._read_last_summarize_date")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_no_args_with_checkpoint(self, mock_cls, mock_read, mock_du):
         """인자 없고 checkpoint 있으면 catch-up → daily_range 호출."""
         mock_read.return_value = "2026-02-14"
@@ -1148,9 +1148,9 @@ class TestSummarizeDailyCatchUp:
             max_workers=5,
         )
 
-    @patch("git_recap.cli.main.date_utils")
-    @patch("git_recap.cli.main._read_last_summarize_date")
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.date_utils")
+    @patch("workrecap.cli.main._read_last_summarize_date")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_already_up_to_date(self, mock_cls, mock_read, mock_du):
         """날짜 목록 비어있으면 'Already up to date.'."""
         mock_read.return_value = "2026-02-17"
@@ -1165,7 +1165,7 @@ class TestSummarizeDailyCatchUp:
 
 
 class TestSummarizeDailyForce:
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_force_flag(self, mock_cls):
         """--force 전달."""
         mock_cls.return_value.daily_range.return_value = [
@@ -1190,7 +1190,7 @@ class TestSummarizeDailyForce:
 
 
 class TestSummarizeDailyRangeOutput:
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_succeeded_skipped_failed_counts(self, mock_cls):
         """카운트 출력."""
         mock_cls.return_value.daily_range.return_value = [
@@ -1206,7 +1206,7 @@ class TestSummarizeDailyRangeOutput:
         assert "1 skipped" in result.output
         assert "1 failed" in result.output
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_failed_exits_1(self, mock_cls):
         """failed 시 exit code 1."""
         mock_cls.return_value.daily_range.return_value = [
@@ -1224,7 +1224,7 @@ class TestSummarizeDailyRangeOutput:
 
 
 class TestSummarizeWeeklyForce:
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_force_flag(self, mock_cls):
         """--force → force=True 전달."""
         mock_cls.return_value.weekly.return_value = Path("/data/weekly.md")
@@ -1232,7 +1232,7 @@ class TestSummarizeWeeklyForce:
         assert result.exit_code == 0
         mock_cls.return_value.weekly.assert_called_once_with(2025, 7, force=True)
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_force_short_flag(self, mock_cls):
         """-f 단축 플래그."""
         mock_cls.return_value.weekly.return_value = Path("/data/weekly.md")
@@ -1242,7 +1242,7 @@ class TestSummarizeWeeklyForce:
 
 
 class TestSummarizeMonthlyForce:
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_force_flag(self, mock_cls):
         """--force → force=True 전달."""
         mock_cls.return_value.monthly.return_value = Path("/data/monthly.md")
@@ -1250,7 +1250,7 @@ class TestSummarizeMonthlyForce:
         assert result.exit_code == 0
         mock_cls.return_value.monthly.assert_called_once_with(2025, 2, force=True)
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_force_short_flag(self, mock_cls):
         """-f 단축 플래그."""
         mock_cls.return_value.monthly.return_value = Path("/data/monthly.md")
@@ -1260,7 +1260,7 @@ class TestSummarizeMonthlyForce:
 
 
 class TestSummarizeYearlyForce:
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_force_flag(self, mock_cls):
         """--force → force=True 전달."""
         mock_cls.return_value.yearly.return_value = Path("/data/yearly.md")
@@ -1268,7 +1268,7 @@ class TestSummarizeYearlyForce:
         assert result.exit_code == 0
         mock_cls.return_value.yearly.assert_called_once_with(2025, force=True)
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_force_short_flag(self, mock_cls):
         """-f 단축 플래그."""
         mock_cls.return_value.yearly.return_value = Path("/data/yearly.md")
@@ -1281,10 +1281,10 @@ class TestSummarizeYearlyForce:
 
 
 class TestRunTypeFilter:
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_type_prs_single_date(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         """run --type prs → run_daily에 types={\"prs\"} 전달."""
         mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
@@ -1292,10 +1292,10 @@ class TestRunTypeFilter:
         assert result.exit_code == 0
         mock_orch.return_value.run_daily.assert_called_once_with("2025-02-16", types={"prs"})
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_type_with_range(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         """run --type commits --since/--until → run_range에 types 전달."""
         mock_orch.return_value.run_range.return_value = [
@@ -1322,10 +1322,10 @@ class TestRunTypeFilter:
         assert result.exit_code == 1
         assert "Invalid type" in result.output
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_type_with_force(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         """--type + --force 결합."""
         mock_orch.return_value.run_range.return_value = [
@@ -1359,20 +1359,20 @@ class TestRunTypeFilter:
 
 
 class TestVerboseFlag:
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_verbose_sets_debug_level(self, mock_cls):
-        """--verbose sets git_recap logger to DEBUG."""
+        """--verbose sets workrecap logger to DEBUG."""
         mock_cls.return_value.fetch.return_value = _fetch_result()
         runner.invoke(app, ["-v", "fetch", "2025-02-16"])
-        root = logging.getLogger("git_recap")
+        root = logging.getLogger("workrecap")
         assert root.level == logging.DEBUG
 
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_default_sets_info_level(self, mock_cls):
-        """Without --verbose, git_recap logger is INFO."""
+        """Without --verbose, workrecap logger is INFO."""
         mock_cls.return_value.fetch.return_value = _fetch_result()
         runner.invoke(app, ["fetch", "2025-02-16"])
-        root = logging.getLogger("git_recap")
+        root = logging.getLogger("workrecap")
         assert root.level == logging.INFO
 
 
@@ -1380,7 +1380,7 @@ class TestVerboseFlag:
 
 
 class TestTokenUsageDisplay:
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_summarize_daily_shows_usage(self, mock_cls, patch_llm):
         """summarize daily 단일 호출 후 토큰 사용량 출력."""
         mock_cls.return_value.daily.return_value = Path("/data/daily.md")
@@ -1395,7 +1395,7 @@ class TestTokenUsageDisplay:
         assert "1,801 total" in result.output
         assert "1 calls" in result.output
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_summarize_daily_range_shows_usage(self, mock_cls, patch_llm):
         """summarize daily range 후 토큰 사용량 출력."""
         mock_cls.return_value.daily_range.return_value = [
@@ -1413,10 +1413,10 @@ class TestTokenUsageDisplay:
         assert "Token usage:" in result.output
         assert "2 calls" in result.output
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_single_shows_usage(self, mock_fetch, mock_norm, mock_summ, mock_orch, patch_llm):
         """run 단일 날짜 후 토큰 사용량 출력."""
         mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
@@ -1428,10 +1428,10 @@ class TestTokenUsageDisplay:
         assert "Token usage:" in result.output
         assert "500 prompt" in result.output
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_range_shows_usage(self, mock_fetch, mock_norm, mock_summ, mock_orch, patch_llm):
         """run range 후 토큰 사용량 출력."""
         mock_orch.return_value.run_range.return_value = [
@@ -1449,7 +1449,7 @@ class TestTokenUsageDisplay:
         assert "Token usage:" in result.output
         assert "5,500 total" in result.output
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_ask_shows_usage(self, mock_cls, patch_llm):
         """ask 후 토큰 사용량 출력."""
         mock_cls.return_value.query.return_value = "답변입니다"
@@ -1461,7 +1461,7 @@ class TestTokenUsageDisplay:
         assert "Token usage:" in result.output
         assert "4,000 total" in result.output
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_no_usage_when_zero_calls(self, mock_cls, patch_llm):
         """LLM 호출이 0이면 토큰 사용량 미출력."""
         mock_cls.return_value.daily.return_value = Path("/data/daily.md")
@@ -1470,7 +1470,7 @@ class TestTokenUsageDisplay:
         assert result.exit_code == 0
         assert "Token usage:" not in result.output
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_summarize_weekly_shows_usage(self, mock_cls, patch_llm):
         """summarize weekly 후 토큰 사용량 출력."""
         mock_cls.return_value.weekly.return_value = Path("/data/weekly.md")
@@ -1481,7 +1481,7 @@ class TestTokenUsageDisplay:
         assert result.exit_code == 0
         assert "Token usage:" in result.output
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_summarize_monthly_shows_usage(self, mock_cls, patch_llm):
         """summarize monthly 후 토큰 사용량 출력."""
         mock_cls.return_value.monthly.return_value = Path("/data/monthly.md")
@@ -1492,7 +1492,7 @@ class TestTokenUsageDisplay:
         assert result.exit_code == 0
         assert "Token usage:" in result.output
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_summarize_yearly_shows_usage(self, mock_cls, patch_llm):
         """summarize yearly 후 토큰 사용량 출력."""
         mock_cls.return_value.yearly.return_value = Path("/data/yearly.md")
@@ -1508,7 +1508,7 @@ class TestTokenUsageDisplay:
 
 
 class TestEnrichDefault:
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_normalize_enrich_default_true(self, mock_cls):
         """normalize 기본값이 --enrich (True)."""
         mock_cls.return_value.normalize.return_value = (
@@ -1521,7 +1521,7 @@ class TestEnrichDefault:
         _, kwargs = mock_cls.call_args
         assert kwargs.get("llm") is not None
 
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_normalize_no_enrich(self, mock_cls):
         """--no-enrich → LLM 미전달."""
         mock_cls.return_value.normalize.return_value = (
@@ -1535,10 +1535,10 @@ class TestEnrichDefault:
 
 
 class TestRunEnrich:
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_default_enrich_true(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         """run 기본값은 --enrich (True) → normalizer에 LLM 전달."""
         mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
@@ -1547,10 +1547,10 @@ class TestRunEnrich:
         _, kwargs = mock_norm.call_args
         assert kwargs.get("llm") is not None
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_no_enrich(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         """run --no-enrich → normalizer에 LLM 미전달."""
         mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
@@ -1564,7 +1564,7 @@ class TestRunEnrich:
 
 
 class TestWorkersOption:
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_fetch_workers_default(self, mock_cls):
         """Default workers=1 → no pool."""
         mock_cls.return_value.fetch.return_value = {"prs": Path("/tmp/prs.json")}
@@ -1574,8 +1574,8 @@ class TestWorkersOption:
         call_kwargs = mock_cls.call_args
         assert call_kwargs.kwargs.get("max_workers", 1) == 1
 
-    @patch("git_recap.infra.client_pool.GHESClientPool")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.infra.client_pool.GHESClientPool")
+    @patch("workrecap.cli.main.FetcherService")
     def test_fetch_workers_creates_pool(self, mock_fetcher_cls, mock_pool_cls):
         """--workers 3 creates pool and passes it to FetcherService."""
         mock_fetcher_cls.return_value.fetch_range.return_value = [
@@ -1590,7 +1590,7 @@ class TestWorkersOption:
         assert call_kwargs.kwargs.get("max_workers") == 3
         assert call_kwargs.kwargs.get("client_pool") is not None
 
-    @patch("git_recap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.NormalizerService")
     def test_normalize_workers(self, mock_cls):
         """normalize --workers 5 → normalize_range(max_workers=5)."""
         mock_cls.return_value.normalize_range.return_value = [
@@ -1603,7 +1603,7 @@ class TestWorkersOption:
         _, kwargs = mock_cls.return_value.normalize_range.call_args
         assert kwargs.get("max_workers") == 5
 
-    @patch("git_recap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.SummarizerService")
     def test_summarize_daily_workers(self, mock_cls):
         """summarize daily --workers 3 → daily_range(max_workers=3)."""
         mock_cls.return_value.daily_range.return_value = [
@@ -1626,10 +1626,10 @@ class TestWorkersOption:
         _, kwargs = mock_cls.return_value.daily_range.call_args
         assert kwargs.get("max_workers") == 3
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_workers(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         """run --workers 5 → run_range(max_workers=5)."""
         mock_orch.return_value.run_range.return_value = [
@@ -1651,10 +1651,10 @@ class TestWorkersOption:
         _, kwargs = mock_orch.return_value.run_range.call_args
         assert kwargs.get("max_workers") == 5
 
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_workers_default_from_config(self, mock_fetch, mock_norm, mock_summ, mock_orch):
         """run --workers 미지정 → config.max_workers 사용."""
         mock_orch.return_value.run_range.return_value = [
@@ -1676,7 +1676,7 @@ class TestWorkersOption:
 class TestWeeksInMonth:
     def test_feb_2026(self):
         """2026년 2월: ISO weeks 5-9."""
-        from git_recap.cli.main import _weeks_in_month
+        from workrecap.cli.main import _weeks_in_month
 
         weeks = _weeks_in_month(2026, 2)
         # Feb 2026: Sun Feb 1 (W05) → Sat Feb 28 (W09)
@@ -1691,7 +1691,7 @@ class TestWeeksInMonth:
 
     def test_jan_2026(self):
         """2026년 1월: starts on Thu, ISO weeks 1-5."""
-        from git_recap.cli.main import _weeks_in_month
+        from workrecap.cli.main import _weeks_in_month
 
         weeks = _weeks_in_month(2026, 1)
         # Jan 1 2026 = Thursday = W01
@@ -1702,7 +1702,7 @@ class TestWeeksInMonth:
 
     def test_dec_iso_year_boundary(self):
         """12월 말 ISO 주가 다음 해로 넘어가는 경우."""
-        from git_recap.cli.main import _weeks_in_month
+        from workrecap.cli.main import _weeks_in_month
 
         # Dec 2025: Dec 29-31 are in ISO week 1 of 2026
         weeks = _weeks_in_month(2025, 12)
@@ -1711,7 +1711,7 @@ class TestWeeksInMonth:
 
     def test_returns_unique_tuples(self):
         """중복 없이 유니크한 (year, week) 튜플만 반환."""
-        from git_recap.cli.main import _weeks_in_month
+        from workrecap.cli.main import _weeks_in_month
 
         weeks = _weeks_in_month(2026, 3)
         assert len(weeks) == len(set(weeks))
@@ -1721,11 +1721,11 @@ class TestWeeksInMonth:
 
 
 class TestRunHierarchicalSummarize:
-    @patch("git_recap.cli.main._weeks_in_month")
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main._weeks_in_month")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_weekly_calls_summarize_weekly(
         self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
     ):
@@ -1739,11 +1739,11 @@ class TestRunHierarchicalSummarize:
         mock_summ.return_value.weekly.assert_called_once_with(2026, 7, force=False)
         assert "Weekly summary" in result.output
 
-    @patch("git_recap.cli.main._weeks_in_month")
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main._weeks_in_month")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_weekly_force_passes_force(
         self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
     ):
@@ -1756,11 +1756,11 @@ class TestRunHierarchicalSummarize:
         assert result.exit_code == 0
         mock_summ.return_value.weekly.assert_called_once_with(2026, 7, force=True)
 
-    @patch("git_recap.cli.main._weeks_in_month")
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main._weeks_in_month")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_monthly_cascades_weekly_then_monthly(
         self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
     ):
@@ -1777,11 +1777,11 @@ class TestRunHierarchicalSummarize:
         mock_summ.return_value.monthly.assert_called_once_with(2026, 1, force=False)
         assert "Monthly summary" in result.output
 
-    @patch("git_recap.cli.main._weeks_in_month")
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main._weeks_in_month")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_monthly_weekly_error_handled(
         self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
     ):
@@ -1796,11 +1796,11 @@ class TestRunHierarchicalSummarize:
         assert result.exit_code == 0
         assert "Monthly summary" in result.output
 
-    @patch("git_recap.cli.main._weeks_in_month")
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main._weeks_in_month")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_yearly_cascades_full_hierarchy(
         self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
     ):
@@ -1823,11 +1823,11 @@ class TestRunHierarchicalSummarize:
         mock_summ.return_value.yearly.assert_called_once_with(2025, force=False)
         assert "Yearly summary" in result.output
 
-    @patch("git_recap.cli.main._weeks_in_month")
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main._weeks_in_month")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_yearly_handles_errors_gracefully(
         self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
     ):
@@ -1843,11 +1843,11 @@ class TestRunHierarchicalSummarize:
         assert result.exit_code == 0
         assert "Yearly summary" in result.output
 
-    @patch("git_recap.cli.main._weeks_in_month")
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main._weeks_in_month")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_weekly_skips_summarize_on_failure(
         self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
     ):
@@ -1859,11 +1859,11 @@ class TestRunHierarchicalSummarize:
         assert result.exit_code == 1
         mock_summ.return_value.weekly.assert_not_called()
 
-    @patch("git_recap.cli.main._weeks_in_month")
-    @patch("git_recap.cli.main.OrchestratorService")
-    @patch("git_recap.cli.main.SummarizerService")
-    @patch("git_recap.cli.main.NormalizerService")
-    @patch("git_recap.cli.main.FetcherService")
+    @patch("workrecap.cli.main._weeks_in_month")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
     def test_run_since_until_no_hierarchical(
         self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_wim
     ):

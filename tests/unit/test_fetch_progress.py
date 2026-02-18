@@ -2,7 +2,7 @@
 
 import pytest
 
-from git_recap.services.fetch_progress import FetchProgressStore
+from workrecap.services.fetch_progress import FetchProgressStore
 
 
 @pytest.fixture

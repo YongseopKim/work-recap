@@ -6,7 +6,7 @@ import time
 
 import httpx
 
-from git_recap.exceptions import FetchError
+from workrecap.exceptions import FetchError
 
 logger = logging.getLogger(__name__)
 

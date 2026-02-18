@@ -10,13 +10,13 @@ auto_summary 생성, 수치 계산이 모두 이루어진다.
 
 ## 위치
 
-`src/git_recap/services/normalizer.py`
+`src/workrecap/services/normalizer.py`
 
 ## 의존성
 
-- `git_recap.config.AppConfig`
-- `git_recap.exceptions.NormalizeError`
-- `git_recap.models` — PRRaw, CommitRaw, IssueRaw, Activity, ActivityKind, DailyStats,
+- `workrecap.config.AppConfig`
+- `workrecap.exceptions.NormalizeError`
+- `workrecap.models` — PRRaw, CommitRaw, IssueRaw, Activity, ActivityKind, DailyStats,
   pr_raw_from_dict, commit_raw_from_dict, issue_raw_from_dict, load_json, save_json, save_jsonl
 
 ---
@@ -29,9 +29,9 @@ auto_summary 생성, 수치 계산이 모두 이루어진다.
 import logging
 from pathlib import Path
 
-from git_recap.config import AppConfig
-from git_recap.exceptions import NormalizeError
-from git_recap.models import (
+from workrecap.config import AppConfig
+from workrecap.exceptions import NormalizeError
+from workrecap.models import (
     Activity, ActivityKind, CommitRaw, DailyStats, IssueRaw, PRRaw,
     commit_raw_from_dict, issue_raw_from_dict, load_json, pr_raw_from_dict,
     save_json, save_jsonl,

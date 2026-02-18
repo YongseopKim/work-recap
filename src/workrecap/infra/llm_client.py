@@ -7,8 +7,8 @@ import time
 import anthropic
 from openai import OpenAI
 
-from git_recap.exceptions import SummarizeError
-from git_recap.models import TokenUsage
+from workrecap.exceptions import SummarizeError
+from workrecap.models import TokenUsage
 
 logger = logging.getLogger(__name__)
 

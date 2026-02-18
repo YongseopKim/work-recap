@@ -6,12 +6,12 @@ from unittest.mock import patch
 import pytest
 from starlette.testclient import TestClient
 
-from git_recap.api.app import create_app
-from git_recap.api.deps import get_config, get_job_store
-from git_recap.api.job_store import JobStore
-from git_recap.config import AppConfig
-from git_recap.exceptions import FetchError, StepFailedError, SummarizeError
-from git_recap.models import JobStatus
+from workrecap.api.app import create_app
+from workrecap.api.deps import get_config, get_job_store
+from workrecap.api.job_store import JobStore
+from workrecap.config import AppConfig
+from workrecap.exceptions import FetchError, StepFailedError, SummarizeError
+from workrecap.models import JobStatus
 
 
 # ── Fixtures ──
@@ -45,35 +45,35 @@ def client(test_config, store):
 # ── Helper: standard pipeline mocks decorator ──
 
 PIPELINE_MOCKS = [
-    "git_recap.api.routes.pipeline.OrchestratorService",
-    "git_recap.api.routes.pipeline.SummarizerService",
-    "git_recap.api.routes.pipeline.NormalizerService",
-    "git_recap.api.routes.pipeline.FetcherService",
-    "git_recap.api.routes.pipeline.FetchProgressStore",
-    "git_recap.api.routes.pipeline.DailyStateStore",
-    "git_recap.api.routes.pipeline.LLMClient",
-    "git_recap.api.routes.pipeline.GHESClient",
-    "git_recap.api.routes.pipeline.GHESClientPool",
+    "workrecap.api.routes.pipeline.OrchestratorService",
+    "workrecap.api.routes.pipeline.SummarizerService",
+    "workrecap.api.routes.pipeline.NormalizerService",
+    "workrecap.api.routes.pipeline.FetcherService",
+    "workrecap.api.routes.pipeline.FetchProgressStore",
+    "workrecap.api.routes.pipeline.DailyStateStore",
+    "workrecap.api.routes.pipeline.LLMClient",
+    "workrecap.api.routes.pipeline.GHESClient",
+    "workrecap.api.routes.pipeline.GHESClientPool",
 ]
 
 FETCH_MOCKS = [
-    "git_recap.api.routes.fetch.FetcherService",
-    "git_recap.api.routes.fetch.FetchProgressStore",
-    "git_recap.api.routes.fetch.DailyStateStore",
-    "git_recap.api.routes.fetch.GHESClient",
-    "git_recap.api.routes.fetch.GHESClientPool",
+    "workrecap.api.routes.fetch.FetcherService",
+    "workrecap.api.routes.fetch.FetchProgressStore",
+    "workrecap.api.routes.fetch.DailyStateStore",
+    "workrecap.api.routes.fetch.GHESClient",
+    "workrecap.api.routes.fetch.GHESClientPool",
 ]
 
 NORMALIZE_MOCKS = [
-    "git_recap.api.routes.normalize.NormalizerService",
-    "git_recap.api.routes.normalize.DailyStateStore",
-    "git_recap.api.routes.normalize.LLMClient",
+    "workrecap.api.routes.normalize.NormalizerService",
+    "workrecap.api.routes.normalize.DailyStateStore",
+    "workrecap.api.routes.normalize.LLMClient",
 ]
 
 SUMMARIZE_MOCKS = [
-    "git_recap.api.routes.summarize_pipeline.SummarizerService",
-    "git_recap.api.routes.summarize_pipeline.DailyStateStore",
-    "git_recap.api.routes.summarize_pipeline.LLMClient",
+    "workrecap.api.routes.summarize_pipeline.SummarizerService",
+    "workrecap.api.routes.summarize_pipeline.DailyStateStore",
+    "workrecap.api.routes.summarize_pipeline.LLMClient",
 ]
 
 
@@ -135,7 +135,7 @@ class TestApp:
         assert "access-control-allow-origin" in resp.headers
 
     def test_exception_handler(self, client):
-        """GitRecapError 발생 시 500 + JSON 에러."""
+        """WorkRecapError 발생 시 500 + JSON 에러."""
         # summary 라우트에서 config path가 잘못되면 에러 아닌 404가 발생하므로
         # 직접 exception을 트리거하는 것은 어려움 → job not found로 404 확인
         resp = client.get("/api/pipeline/jobs/nonexistent")
@@ -147,14 +147,14 @@ class TestApp:
 
 
 class TestPipelineRun:
-    @patch("git_recap.api.routes.pipeline.OrchestratorService")
-    @patch("git_recap.api.routes.pipeline.SummarizerService")
-    @patch("git_recap.api.routes.pipeline.NormalizerService")
-    @patch("git_recap.api.routes.pipeline.FetcherService")
-    @patch("git_recap.api.routes.pipeline.FetchProgressStore")
-    @patch("git_recap.api.routes.pipeline.DailyStateStore")
-    @patch("git_recap.api.routes.pipeline.LLMClient")
-    @patch("git_recap.api.routes.pipeline.GHESClient")
+    @patch("workrecap.api.routes.pipeline.OrchestratorService")
+    @patch("workrecap.api.routes.pipeline.SummarizerService")
+    @patch("workrecap.api.routes.pipeline.NormalizerService")
+    @patch("workrecap.api.routes.pipeline.FetcherService")
+    @patch("workrecap.api.routes.pipeline.FetchProgressStore")
+    @patch("workrecap.api.routes.pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_single_date(
         self,
         mock_ghes,
@@ -175,14 +175,14 @@ class TestPipelineRun:
         assert "job_id" in data
         assert data["status"] == "accepted"
 
-    @patch("git_recap.api.routes.pipeline.OrchestratorService")
-    @patch("git_recap.api.routes.pipeline.SummarizerService")
-    @patch("git_recap.api.routes.pipeline.NormalizerService")
-    @patch("git_recap.api.routes.pipeline.FetcherService")
-    @patch("git_recap.api.routes.pipeline.FetchProgressStore")
-    @patch("git_recap.api.routes.pipeline.DailyStateStore")
-    @patch("git_recap.api.routes.pipeline.LLMClient")
-    @patch("git_recap.api.routes.pipeline.GHESClient")
+    @patch("workrecap.api.routes.pipeline.OrchestratorService")
+    @patch("workrecap.api.routes.pipeline.SummarizerService")
+    @patch("workrecap.api.routes.pipeline.NormalizerService")
+    @patch("workrecap.api.routes.pipeline.FetcherService")
+    @patch("workrecap.api.routes.pipeline.FetchProgressStore")
+    @patch("workrecap.api.routes.pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_single_with_body(
         self,
         mock_ghes,
@@ -214,14 +214,14 @@ class TestPipelineRun:
         norm_call_kwargs = mock_norm.call_args
         assert norm_call_kwargs.kwargs.get("llm") is None
 
-    @patch("git_recap.api.routes.pipeline.OrchestratorService")
-    @patch("git_recap.api.routes.pipeline.SummarizerService")
-    @patch("git_recap.api.routes.pipeline.NormalizerService")
-    @patch("git_recap.api.routes.pipeline.FetcherService")
-    @patch("git_recap.api.routes.pipeline.FetchProgressStore")
-    @patch("git_recap.api.routes.pipeline.DailyStateStore")
-    @patch("git_recap.api.routes.pipeline.LLMClient")
-    @patch("git_recap.api.routes.pipeline.GHESClient")
+    @patch("workrecap.api.routes.pipeline.OrchestratorService")
+    @patch("workrecap.api.routes.pipeline.SummarizerService")
+    @patch("workrecap.api.routes.pipeline.NormalizerService")
+    @patch("workrecap.api.routes.pipeline.FetcherService")
+    @patch("workrecap.api.routes.pipeline.FetchProgressStore")
+    @patch("workrecap.api.routes.pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_completes_job(
         self,
         mock_ghes,
@@ -242,14 +242,14 @@ class TestPipelineRun:
         status_resp = client.get(f"/api/pipeline/jobs/{job_id}")
         assert status_resp.json()["status"] == "completed"
 
-    @patch("git_recap.api.routes.pipeline.OrchestratorService")
-    @patch("git_recap.api.routes.pipeline.SummarizerService")
-    @patch("git_recap.api.routes.pipeline.NormalizerService")
-    @patch("git_recap.api.routes.pipeline.FetcherService")
-    @patch("git_recap.api.routes.pipeline.FetchProgressStore")
-    @patch("git_recap.api.routes.pipeline.DailyStateStore")
-    @patch("git_recap.api.routes.pipeline.LLMClient")
-    @patch("git_recap.api.routes.pipeline.GHESClient")
+    @patch("workrecap.api.routes.pipeline.OrchestratorService")
+    @patch("workrecap.api.routes.pipeline.SummarizerService")
+    @patch("workrecap.api.routes.pipeline.NormalizerService")
+    @patch("workrecap.api.routes.pipeline.FetcherService")
+    @patch("workrecap.api.routes.pipeline.FetchProgressStore")
+    @patch("workrecap.api.routes.pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_failure_marks_job_failed(
         self,
         mock_ghes,
@@ -273,14 +273,14 @@ class TestPipelineRun:
         assert status_resp.json()["status"] == "failed"
         assert "fetch" in status_resp.json()["error"]
 
-    @patch("git_recap.api.routes.pipeline.OrchestratorService")
-    @patch("git_recap.api.routes.pipeline.SummarizerService")
-    @patch("git_recap.api.routes.pipeline.NormalizerService")
-    @patch("git_recap.api.routes.pipeline.FetcherService")
-    @patch("git_recap.api.routes.pipeline.FetchProgressStore")
-    @patch("git_recap.api.routes.pipeline.DailyStateStore")
-    @patch("git_recap.api.routes.pipeline.LLMClient")
-    @patch("git_recap.api.routes.pipeline.GHESClient")
+    @patch("workrecap.api.routes.pipeline.OrchestratorService")
+    @patch("workrecap.api.routes.pipeline.SummarizerService")
+    @patch("workrecap.api.routes.pipeline.NormalizerService")
+    @patch("workrecap.api.routes.pipeline.FetcherService")
+    @patch("workrecap.api.routes.pipeline.FetchProgressStore")
+    @patch("workrecap.api.routes.pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_single_injects_progress_store(
         self,
         mock_ghes,
@@ -301,14 +301,14 @@ class TestPipelineRun:
         fetch_kwargs = mock_fetch.call_args
         assert "progress_store" in fetch_kwargs.kwargs
 
-    @patch("git_recap.api.routes.pipeline.OrchestratorService")
-    @patch("git_recap.api.routes.pipeline.SummarizerService")
-    @patch("git_recap.api.routes.pipeline.NormalizerService")
-    @patch("git_recap.api.routes.pipeline.FetcherService")
-    @patch("git_recap.api.routes.pipeline.FetchProgressStore")
-    @patch("git_recap.api.routes.pipeline.DailyStateStore")
-    @patch("git_recap.api.routes.pipeline.LLMClient")
-    @patch("git_recap.api.routes.pipeline.GHESClient")
+    @patch("workrecap.api.routes.pipeline.OrchestratorService")
+    @patch("workrecap.api.routes.pipeline.SummarizerService")
+    @patch("workrecap.api.routes.pipeline.NormalizerService")
+    @patch("workrecap.api.routes.pipeline.FetcherService")
+    @patch("workrecap.api.routes.pipeline.FetchProgressStore")
+    @patch("workrecap.api.routes.pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_single_closes_ghes(
         self,
         mock_ghes,
@@ -331,14 +331,14 @@ class TestPipelineRun:
 
 
 class TestPipelineRunRange:
-    @patch("git_recap.api.routes.pipeline.OrchestratorService")
-    @patch("git_recap.api.routes.pipeline.SummarizerService")
-    @patch("git_recap.api.routes.pipeline.NormalizerService")
-    @patch("git_recap.api.routes.pipeline.FetcherService")
-    @patch("git_recap.api.routes.pipeline.FetchProgressStore")
-    @patch("git_recap.api.routes.pipeline.DailyStateStore")
-    @patch("git_recap.api.routes.pipeline.LLMClient")
-    @patch("git_recap.api.routes.pipeline.GHESClient")
+    @patch("workrecap.api.routes.pipeline.OrchestratorService")
+    @patch("workrecap.api.routes.pipeline.SummarizerService")
+    @patch("workrecap.api.routes.pipeline.NormalizerService")
+    @patch("workrecap.api.routes.pipeline.FetcherService")
+    @patch("workrecap.api.routes.pipeline.FetchProgressStore")
+    @patch("workrecap.api.routes.pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_range(
         self,
         mock_ghes,
@@ -366,14 +366,14 @@ class TestPipelineRunRange:
         status_resp = client.get(f"/api/pipeline/jobs/{job_id}")
         assert status_resp.json()["status"] == "completed"
 
-    @patch("git_recap.api.routes.pipeline.OrchestratorService")
-    @patch("git_recap.api.routes.pipeline.SummarizerService")
-    @patch("git_recap.api.routes.pipeline.NormalizerService")
-    @patch("git_recap.api.routes.pipeline.FetcherService")
-    @patch("git_recap.api.routes.pipeline.FetchProgressStore")
-    @patch("git_recap.api.routes.pipeline.DailyStateStore")
-    @patch("git_recap.api.routes.pipeline.LLMClient")
-    @patch("git_recap.api.routes.pipeline.GHESClient")
+    @patch("workrecap.api.routes.pipeline.OrchestratorService")
+    @patch("workrecap.api.routes.pipeline.SummarizerService")
+    @patch("workrecap.api.routes.pipeline.NormalizerService")
+    @patch("workrecap.api.routes.pipeline.FetcherService")
+    @patch("workrecap.api.routes.pipeline.FetchProgressStore")
+    @patch("workrecap.api.routes.pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_range_partial_failure(
         self,
         mock_ghes,
@@ -401,14 +401,14 @@ class TestPipelineRunRange:
         assert status_resp.json()["status"] == "failed"
         assert "1/2" in status_resp.json()["error"]
 
-    @patch("git_recap.api.routes.pipeline.OrchestratorService")
-    @patch("git_recap.api.routes.pipeline.SummarizerService")
-    @patch("git_recap.api.routes.pipeline.NormalizerService")
-    @patch("git_recap.api.routes.pipeline.FetcherService")
-    @patch("git_recap.api.routes.pipeline.FetchProgressStore")
-    @patch("git_recap.api.routes.pipeline.DailyStateStore")
-    @patch("git_recap.api.routes.pipeline.LLMClient")
-    @patch("git_recap.api.routes.pipeline.GHESClient")
+    @patch("workrecap.api.routes.pipeline.OrchestratorService")
+    @patch("workrecap.api.routes.pipeline.SummarizerService")
+    @patch("workrecap.api.routes.pipeline.NormalizerService")
+    @patch("workrecap.api.routes.pipeline.FetcherService")
+    @patch("workrecap.api.routes.pipeline.FetchProgressStore")
+    @patch("workrecap.api.routes.pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_range_with_params(
         self,
         mock_ghes,
@@ -452,15 +452,15 @@ class TestPipelineRunRange:
         norm_kwargs = mock_norm.call_args
         assert norm_kwargs.kwargs.get("llm") is None
 
-    @patch("git_recap.api.routes.pipeline.GHESClientPool")
-    @patch("git_recap.api.routes.pipeline.OrchestratorService")
-    @patch("git_recap.api.routes.pipeline.SummarizerService")
-    @patch("git_recap.api.routes.pipeline.NormalizerService")
-    @patch("git_recap.api.routes.pipeline.FetcherService")
-    @patch("git_recap.api.routes.pipeline.FetchProgressStore")
-    @patch("git_recap.api.routes.pipeline.DailyStateStore")
-    @patch("git_recap.api.routes.pipeline.LLMClient")
-    @patch("git_recap.api.routes.pipeline.GHESClient")
+    @patch("workrecap.api.routes.pipeline.GHESClientPool")
+    @patch("workrecap.api.routes.pipeline.OrchestratorService")
+    @patch("workrecap.api.routes.pipeline.SummarizerService")
+    @patch("workrecap.api.routes.pipeline.NormalizerService")
+    @patch("workrecap.api.routes.pipeline.FetcherService")
+    @patch("workrecap.api.routes.pipeline.FetchProgressStore")
+    @patch("workrecap.api.routes.pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_range_pool_cleanup(
         self,
         mock_ghes,
@@ -486,15 +486,15 @@ class TestPipelineRunRange:
         mock_pool.assert_called_once()
         mock_pool.return_value.close.assert_called_once()
 
-    @patch("git_recap.api.routes.pipeline._run_hierarchical")
-    @patch("git_recap.api.routes.pipeline.OrchestratorService")
-    @patch("git_recap.api.routes.pipeline.SummarizerService")
-    @patch("git_recap.api.routes.pipeline.NormalizerService")
-    @patch("git_recap.api.routes.pipeline.FetcherService")
-    @patch("git_recap.api.routes.pipeline.FetchProgressStore")
-    @patch("git_recap.api.routes.pipeline.DailyStateStore")
-    @patch("git_recap.api.routes.pipeline.LLMClient")
-    @patch("git_recap.api.routes.pipeline.GHESClient")
+    @patch("workrecap.api.routes.pipeline._run_hierarchical")
+    @patch("workrecap.api.routes.pipeline.OrchestratorService")
+    @patch("workrecap.api.routes.pipeline.SummarizerService")
+    @patch("workrecap.api.routes.pipeline.NormalizerService")
+    @patch("workrecap.api.routes.pipeline.FetcherService")
+    @patch("workrecap.api.routes.pipeline.FetchProgressStore")
+    @patch("workrecap.api.routes.pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_range_hierarchical_weekly(
         self,
         mock_ghes,
@@ -529,15 +529,15 @@ class TestPipelineRunRange:
         assert "hierarchical" in status_resp.json()["result"]
         mock_hier.assert_called_once()
 
-    @patch("git_recap.api.routes.pipeline._run_hierarchical")
-    @patch("git_recap.api.routes.pipeline.OrchestratorService")
-    @patch("git_recap.api.routes.pipeline.SummarizerService")
-    @patch("git_recap.api.routes.pipeline.NormalizerService")
-    @patch("git_recap.api.routes.pipeline.FetcherService")
-    @patch("git_recap.api.routes.pipeline.FetchProgressStore")
-    @patch("git_recap.api.routes.pipeline.DailyStateStore")
-    @patch("git_recap.api.routes.pipeline.LLMClient")
-    @patch("git_recap.api.routes.pipeline.GHESClient")
+    @patch("workrecap.api.routes.pipeline._run_hierarchical")
+    @patch("workrecap.api.routes.pipeline.OrchestratorService")
+    @patch("workrecap.api.routes.pipeline.SummarizerService")
+    @patch("workrecap.api.routes.pipeline.NormalizerService")
+    @patch("workrecap.api.routes.pipeline.FetcherService")
+    @patch("workrecap.api.routes.pipeline.FetchProgressStore")
+    @patch("workrecap.api.routes.pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_range_hierarchical_skipped_on_failure(
         self,
         mock_ghes,
@@ -573,19 +573,19 @@ class TestPipelineRunRange:
 class TestHierarchicalHelper:
     def test_weeks_in_month(self):
         """_weeks_in_month returns correct ISO weeks for a month."""
-        from git_recap.api.routes.pipeline import _weeks_in_month
+        from workrecap.api.routes.pipeline import _weeks_in_month
 
         weeks = _weeks_in_month(2025, 2)
         # Feb 2025: starts on Saturday Feb 1 (W5), ends on Friday Feb 28 (W9)
         assert len(weeks) >= 4
         assert all(isinstance(w, tuple) and len(w) == 2 for w in weeks)
 
-    @patch("git_recap.api.routes.pipeline.SummarizeError", SummarizeError)
+    @patch("workrecap.api.routes.pipeline.SummarizeError", SummarizeError)
     def test_run_hierarchical_weekly(self):
         """_run_hierarchical with summarize_weekly calls weekly."""
         from unittest.mock import MagicMock
 
-        from git_recap.api.routes.pipeline import _run_hierarchical
+        from workrecap.api.routes.pipeline import _run_hierarchical
 
         summarizer = MagicMock()
         summarizer.weekly.return_value = Path("/path/weekly.md")
@@ -597,7 +597,7 @@ class TestHierarchicalHelper:
         """_run_hierarchical with summarize_monthly calls weekly+monthly."""
         from unittest.mock import MagicMock
 
-        from git_recap.api.routes.pipeline import _run_hierarchical
+        from workrecap.api.routes.pipeline import _run_hierarchical
 
         summarizer = MagicMock()
         summarizer.weekly.return_value = Path("/w.md")
@@ -612,7 +612,7 @@ class TestHierarchicalHelper:
         """_run_hierarchical with summarize_yearly calls weekly+monthly+yearly."""
         from unittest.mock import MagicMock
 
-        from git_recap.api.routes.pipeline import _run_hierarchical
+        from workrecap.api.routes.pipeline import _run_hierarchical
 
         summarizer = MagicMock()
         summarizer.weekly.return_value = Path("/w.md")
@@ -628,7 +628,7 @@ class TestHierarchicalHelper:
         """_run_hierarchical returns None when no summarize option."""
         from unittest.mock import MagicMock
 
-        from git_recap.api.routes.pipeline import _run_hierarchical
+        from workrecap.api.routes.pipeline import _run_hierarchical
 
         summarizer = MagicMock()
         result = _run_hierarchical(summarizer, False, None, None, None)
@@ -657,10 +657,10 @@ class TestJobStatus:
 
 
 class TestFetchEndpoints:
-    @patch("git_recap.api.routes.fetch.FetcherService")
-    @patch("git_recap.api.routes.fetch.FetchProgressStore")
-    @patch("git_recap.api.routes.fetch.DailyStateStore")
-    @patch("git_recap.api.routes.fetch.GHESClient")
+    @patch("workrecap.api.routes.fetch.FetcherService")
+    @patch("workrecap.api.routes.fetch.FetchProgressStore")
+    @patch("workrecap.api.routes.fetch.DailyStateStore")
+    @patch("workrecap.api.routes.fetch.GHESClient")
     def test_fetch_single(
         self,
         mock_ghes,
@@ -678,10 +678,10 @@ class TestFetchEndpoints:
         status_resp = client.get(f"/api/pipeline/jobs/{job_id}")
         assert status_resp.json()["status"] == "completed"
 
-    @patch("git_recap.api.routes.fetch.FetcherService")
-    @patch("git_recap.api.routes.fetch.FetchProgressStore")
-    @patch("git_recap.api.routes.fetch.DailyStateStore")
-    @patch("git_recap.api.routes.fetch.GHESClient")
+    @patch("workrecap.api.routes.fetch.FetcherService")
+    @patch("workrecap.api.routes.fetch.FetchProgressStore")
+    @patch("workrecap.api.routes.fetch.DailyStateStore")
+    @patch("workrecap.api.routes.fetch.GHESClient")
     def test_fetch_single_with_types(
         self,
         mock_ghes,
@@ -698,10 +698,10 @@ class TestFetchEndpoints:
         )
         mock_fetcher.return_value.fetch.assert_called_once_with("2025-02-16", types={"prs"})
 
-    @patch("git_recap.api.routes.fetch.FetcherService")
-    @patch("git_recap.api.routes.fetch.FetchProgressStore")
-    @patch("git_recap.api.routes.fetch.DailyStateStore")
-    @patch("git_recap.api.routes.fetch.GHESClient")
+    @patch("workrecap.api.routes.fetch.FetcherService")
+    @patch("workrecap.api.routes.fetch.FetchProgressStore")
+    @patch("workrecap.api.routes.fetch.DailyStateStore")
+    @patch("workrecap.api.routes.fetch.GHESClient")
     def test_fetch_single_no_body(
         self,
         mock_ghes,
@@ -716,10 +716,10 @@ class TestFetchEndpoints:
         assert resp.status_code == 202
         mock_fetcher.return_value.fetch.assert_called_once_with("2025-02-16", types=None)
 
-    @patch("git_recap.api.routes.fetch.FetcherService")
-    @patch("git_recap.api.routes.fetch.FetchProgressStore")
-    @patch("git_recap.api.routes.fetch.DailyStateStore")
-    @patch("git_recap.api.routes.fetch.GHESClient")
+    @patch("workrecap.api.routes.fetch.FetcherService")
+    @patch("workrecap.api.routes.fetch.FetchProgressStore")
+    @patch("workrecap.api.routes.fetch.DailyStateStore")
+    @patch("workrecap.api.routes.fetch.GHESClient")
     def test_fetch_single_closes_ghes(
         self,
         mock_ghes,
@@ -733,10 +733,10 @@ class TestFetchEndpoints:
         client.post("/api/pipeline/fetch/2025-02-16")
         mock_ghes.return_value.close.assert_called_once()
 
-    @patch("git_recap.api.routes.fetch.FetcherService")
-    @patch("git_recap.api.routes.fetch.FetchProgressStore")
-    @patch("git_recap.api.routes.fetch.DailyStateStore")
-    @patch("git_recap.api.routes.fetch.GHESClient")
+    @patch("workrecap.api.routes.fetch.FetcherService")
+    @patch("workrecap.api.routes.fetch.FetchProgressStore")
+    @patch("workrecap.api.routes.fetch.DailyStateStore")
+    @patch("workrecap.api.routes.fetch.GHESClient")
     def test_fetch_range(
         self,
         mock_ghes,
@@ -761,10 +761,10 @@ class TestFetchEndpoints:
         assert status_resp.json()["status"] == "completed"
         assert "2/2 succeeded" in status_resp.json()["result"]
 
-    @patch("git_recap.api.routes.fetch.FetcherService")
-    @patch("git_recap.api.routes.fetch.FetchProgressStore")
-    @patch("git_recap.api.routes.fetch.DailyStateStore")
-    @patch("git_recap.api.routes.fetch.GHESClient")
+    @patch("workrecap.api.routes.fetch.FetcherService")
+    @patch("workrecap.api.routes.fetch.FetchProgressStore")
+    @patch("workrecap.api.routes.fetch.DailyStateStore")
+    @patch("workrecap.api.routes.fetch.GHESClient")
     def test_fetch_range_with_force_and_types(
         self,
         mock_ghes,
@@ -790,11 +790,11 @@ class TestFetchEndpoints:
         assert call_kwargs.kwargs["force"] is True
         assert call_kwargs.kwargs["types"] == {"commits"}
 
-    @patch("git_recap.api.routes.fetch.GHESClientPool")
-    @patch("git_recap.api.routes.fetch.FetcherService")
-    @patch("git_recap.api.routes.fetch.FetchProgressStore")
-    @patch("git_recap.api.routes.fetch.DailyStateStore")
-    @patch("git_recap.api.routes.fetch.GHESClient")
+    @patch("workrecap.api.routes.fetch.GHESClientPool")
+    @patch("workrecap.api.routes.fetch.FetcherService")
+    @patch("workrecap.api.routes.fetch.FetchProgressStore")
+    @patch("workrecap.api.routes.fetch.DailyStateStore")
+    @patch("workrecap.api.routes.fetch.GHESClient")
     def test_fetch_range_with_workers(
         self,
         mock_ghes,
@@ -815,10 +815,10 @@ class TestFetchEndpoints:
         mock_pool.assert_called_once()
         mock_pool.return_value.close.assert_called_once()
 
-    @patch("git_recap.api.routes.fetch.FetcherService")
-    @patch("git_recap.api.routes.fetch.FetchProgressStore")
-    @patch("git_recap.api.routes.fetch.DailyStateStore")
-    @patch("git_recap.api.routes.fetch.GHESClient")
+    @patch("workrecap.api.routes.fetch.FetcherService")
+    @patch("workrecap.api.routes.fetch.FetchProgressStore")
+    @patch("workrecap.api.routes.fetch.DailyStateStore")
+    @patch("workrecap.api.routes.fetch.GHESClient")
     def test_fetch_range_partial_failure(
         self,
         mock_ghes,
@@ -846,9 +846,9 @@ class TestFetchEndpoints:
 
 
 class TestNormalizeEndpoints:
-    @patch("git_recap.api.routes.normalize.NormalizerService")
-    @patch("git_recap.api.routes.normalize.DailyStateStore")
-    @patch("git_recap.api.routes.normalize.LLMClient")
+    @patch("workrecap.api.routes.normalize.NormalizerService")
+    @patch("workrecap.api.routes.normalize.DailyStateStore")
+    @patch("workrecap.api.routes.normalize.LLMClient")
     def test_normalize_single(
         self,
         mock_llm,
@@ -868,9 +868,9 @@ class TestNormalizeEndpoints:
         status_resp = client.get(f"/api/pipeline/jobs/{job_id}")
         assert status_resp.json()["status"] == "completed"
 
-    @patch("git_recap.api.routes.normalize.NormalizerService")
-    @patch("git_recap.api.routes.normalize.DailyStateStore")
-    @patch("git_recap.api.routes.normalize.LLMClient")
+    @patch("workrecap.api.routes.normalize.NormalizerService")
+    @patch("workrecap.api.routes.normalize.DailyStateStore")
+    @patch("workrecap.api.routes.normalize.LLMClient")
     def test_normalize_single_enrich_false(
         self,
         mock_llm,
@@ -893,9 +893,9 @@ class TestNormalizeEndpoints:
         norm_kwargs = mock_norm.call_args
         assert norm_kwargs.kwargs.get("llm") is None
 
-    @patch("git_recap.api.routes.normalize.NormalizerService")
-    @patch("git_recap.api.routes.normalize.DailyStateStore")
-    @patch("git_recap.api.routes.normalize.LLMClient")
+    @patch("workrecap.api.routes.normalize.NormalizerService")
+    @patch("workrecap.api.routes.normalize.DailyStateStore")
+    @patch("workrecap.api.routes.normalize.LLMClient")
     def test_normalize_single_enrich_true(
         self,
         mock_llm,
@@ -915,9 +915,9 @@ class TestNormalizeEndpoints:
         norm_kwargs = mock_norm.call_args
         assert norm_kwargs.kwargs.get("llm") is not None
 
-    @patch("git_recap.api.routes.normalize.NormalizerService")
-    @patch("git_recap.api.routes.normalize.DailyStateStore")
-    @patch("git_recap.api.routes.normalize.LLMClient")
+    @patch("workrecap.api.routes.normalize.NormalizerService")
+    @patch("workrecap.api.routes.normalize.DailyStateStore")
+    @patch("workrecap.api.routes.normalize.LLMClient")
     def test_normalize_range(
         self,
         mock_llm,
@@ -941,9 +941,9 @@ class TestNormalizeEndpoints:
         assert status_resp.json()["status"] == "completed"
         assert "2/2 succeeded" in status_resp.json()["result"]
 
-    @patch("git_recap.api.routes.normalize.NormalizerService")
-    @patch("git_recap.api.routes.normalize.DailyStateStore")
-    @patch("git_recap.api.routes.normalize.LLMClient")
+    @patch("workrecap.api.routes.normalize.NormalizerService")
+    @patch("workrecap.api.routes.normalize.DailyStateStore")
+    @patch("workrecap.api.routes.normalize.LLMClient")
     def test_normalize_range_with_params(
         self,
         mock_llm,
@@ -976,9 +976,9 @@ class TestNormalizeEndpoints:
 
 
 class TestSummarizeEndpoints:
-    @patch("git_recap.api.routes.summarize_pipeline.SummarizerService")
-    @patch("git_recap.api.routes.summarize_pipeline.DailyStateStore")
-    @patch("git_recap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
+    @patch("workrecap.api.routes.summarize_pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
     def test_summarize_daily_single(
         self,
         mock_llm,
@@ -996,9 +996,9 @@ class TestSummarizeEndpoints:
         assert status_resp.json()["status"] == "completed"
         assert "summary.md" in status_resp.json()["result"]
 
-    @patch("git_recap.api.routes.summarize_pipeline.SummarizerService")
-    @patch("git_recap.api.routes.summarize_pipeline.DailyStateStore")
-    @patch("git_recap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
+    @patch("workrecap.api.routes.summarize_pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
     def test_summarize_daily_range(
         self,
         mock_llm,
@@ -1022,8 +1022,8 @@ class TestSummarizeEndpoints:
         assert status_resp.json()["status"] == "completed"
         assert "2/2 succeeded" in status_resp.json()["result"]
 
-    @patch("git_recap.api.routes.summarize_pipeline.SummarizerService")
-    @patch("git_recap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
+    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
     def test_summarize_weekly(
         self,
         mock_llm,
@@ -1043,8 +1043,8 @@ class TestSummarizeEndpoints:
         assert status_resp.json()["status"] == "completed"
         assert "W07.md" in status_resp.json()["result"]
 
-    @patch("git_recap.api.routes.summarize_pipeline.SummarizerService")
-    @patch("git_recap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
+    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
     def test_summarize_weekly_with_force(
         self,
         mock_llm,
@@ -1059,8 +1059,8 @@ class TestSummarizeEndpoints:
         )
         mock_summ.return_value.weekly.assert_called_once_with(2025, 7, force=True)
 
-    @patch("git_recap.api.routes.summarize_pipeline.SummarizerService")
-    @patch("git_recap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
+    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
     def test_summarize_monthly(
         self,
         mock_llm,
@@ -1079,8 +1079,8 @@ class TestSummarizeEndpoints:
         status_resp = client.get(f"/api/pipeline/jobs/{job_id}")
         assert status_resp.json()["status"] == "completed"
 
-    @patch("git_recap.api.routes.summarize_pipeline.SummarizerService")
-    @patch("git_recap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
+    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
     def test_summarize_yearly(
         self,
         mock_llm,
@@ -1099,8 +1099,8 @@ class TestSummarizeEndpoints:
         status_resp = client.get(f"/api/pipeline/jobs/{job_id}")
         assert status_resp.json()["status"] == "completed"
 
-    @patch("git_recap.api.routes.summarize_pipeline.SummarizerService")
-    @patch("git_recap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
+    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
     def test_summarize_yearly_failure(
         self,
         mock_llm,
@@ -1119,9 +1119,9 @@ class TestSummarizeEndpoints:
         assert status_resp.json()["status"] == "failed"
         assert "No monthly summaries" in status_resp.json()["error"]
 
-    @patch("git_recap.api.routes.summarize_pipeline.SummarizerService")
-    @patch("git_recap.api.routes.summarize_pipeline.DailyStateStore")
-    @patch("git_recap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
+    @patch("workrecap.api.routes.summarize_pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
     def test_summarize_daily_range_with_params(
         self,
         mock_llm,
@@ -1201,8 +1201,8 @@ class TestSummary:
 
 
 class TestQuery:
-    @patch("git_recap.api.routes.query.SummarizerService")
-    @patch("git_recap.api.routes.query.LLMClient")
+    @patch("workrecap.api.routes.query.SummarizerService")
+    @patch("workrecap.api.routes.query.LLMClient")
     def test_query(self, mock_llm, mock_summ, client):
         """POST /api/query → 202 + job_id."""
         mock_summ.return_value.query.return_value = "답변입니다."
@@ -1210,8 +1210,8 @@ class TestQuery:
         assert resp.status_code == 202
         assert "job_id" in resp.json()
 
-    @patch("git_recap.api.routes.query.SummarizerService")
-    @patch("git_recap.api.routes.query.LLMClient")
+    @patch("workrecap.api.routes.query.SummarizerService")
+    @patch("workrecap.api.routes.query.LLMClient")
     def test_query_completes(self, mock_llm, mock_summ, client):
         """POST → job에 LLM 응답 저장."""
         mock_summ.return_value.query.return_value = "답변입니다."
@@ -1222,8 +1222,8 @@ class TestQuery:
         assert status_resp.json()["status"] == "completed"
         assert status_resp.json()["result"] == "답변입니다."
 
-    @patch("git_recap.api.routes.query.SummarizerService")
-    @patch("git_recap.api.routes.query.LLMClient")
+    @patch("workrecap.api.routes.query.SummarizerService")
+    @patch("workrecap.api.routes.query.LLMClient")
     def test_query_failure(self, mock_llm, mock_summ, client):
         """SummarizeError → job status = failed."""
         mock_summ.return_value.query.side_effect = SummarizeError("No context")
@@ -1244,7 +1244,7 @@ class TestStaticFiles:
         resp = client.get("/")
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
-        assert "git-recap" in resp.text
+        assert "work-recap" in resp.text
 
     def test_serves_css(self, client):
         """GET /style.css → CSS 파일 반환."""

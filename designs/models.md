@@ -9,7 +9,7 @@
 
 ## 위치
 
-`src/git_recap/models.py`
+`src/workrecap/models.py`
 
 ## 의존성
 

@@ -10,14 +10,14 @@ Fetcher → Normalizer → Summarizer 파이프라인을 단일 호출로 실행
 
 ## 위치
 
-`src/git_recap/services/orchestrator.py`
+`src/workrecap/services/orchestrator.py`
 
 ## 의존성
 
-- `git_recap.services.fetcher.FetcherService`
-- `git_recap.services.normalizer.NormalizerService`
-- `git_recap.services.summarizer.SummarizerService`
-- `git_recap.exceptions.StepFailedError, FetchError, NormalizeError, SummarizeError`
+- `workrecap.services.fetcher.FetcherService`
+- `workrecap.services.normalizer.NormalizerService`
+- `workrecap.services.summarizer.SummarizerService`
+- `workrecap.exceptions.StepFailedError, FetchError, NormalizeError, SummarizeError`
 
 ---
 
@@ -28,12 +28,12 @@ import logging
 from datetime import date, timedelta
 from pathlib import Path
 
-from git_recap.exceptions import (
+from workrecap.exceptions import (
     FetchError, NormalizeError, SummarizeError, StepFailedError,
 )
-from git_recap.services.fetcher import FetcherService
-from git_recap.services.normalizer import NormalizerService
-from git_recap.services.summarizer import SummarizerService
+from workrecap.services.fetcher import FetcherService
+from workrecap.services.normalizer import NormalizerService
+from workrecap.services.summarizer import SummarizerService
 
 logger = logging.getLogger(__name__)
 

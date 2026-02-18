@@ -9,15 +9,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from git_recap.infra.client_pool import GHESClientPool
-    from git_recap.services.daily_state import DailyStateStore
-    from git_recap.services.fetch_progress import FetchProgressStore
+    from workrecap.infra.client_pool import GHESClientPool
+    from workrecap.services.daily_state import DailyStateStore
+    from workrecap.services.fetch_progress import FetchProgressStore
 
-from git_recap.config import AppConfig
-from git_recap.exceptions import FetchError
-from git_recap.infra.ghes_client import GHESClient
-from git_recap.services.date_utils import date_range, monthly_chunks
-from git_recap.models import (
+from workrecap.config import AppConfig
+from workrecap.exceptions import FetchError
+from workrecap.infra.ghes_client import GHESClient
+from workrecap.services.date_utils import date_range, monthly_chunks
+from workrecap.models import (
     Comment,
     CommitRaw,
     FileChange,
@@ -812,7 +812,7 @@ class FetcherService:
         return output_path
 
     def _update_checkpoint(self, target_date: str) -> None:
-        from git_recap.services.checkpoint import update_checkpoint
+        from workrecap.services.checkpoint import update_checkpoint
 
         update_checkpoint(self._config.checkpoints_path, "last_fetch_date", target_date)
 

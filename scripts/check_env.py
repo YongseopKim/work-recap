@@ -8,7 +8,7 @@ def check_config():
     """1단계: .env 로드 및 필수값 검증."""
     print("[1/3] Loading config from .env ...")
     try:
-        from git_recap.config import AppConfig
+        from workrecap.config import AppConfig
 
         config = AppConfig()
         print(f"  GHES_URL      = {config.ghes_url}")
@@ -27,7 +27,7 @@ def check_ghes(config):
     """2단계: GHES API 연결 확인."""
     print("\n[2/3] Testing GHES connection ...")
     try:
-        from git_recap.infra.ghes_client import GHESClient
+        from workrecap.infra.ghes_client import GHESClient
 
         with GHESClient(config.ghes_url, config.ghes_token) as client:
             resp = client._client.get("/user")
@@ -45,7 +45,7 @@ def check_llm(config):
     """3단계: LLM API 연결 확인."""
     print("\n[3/3] Testing LLM connection ...")
     try:
-        from git_recap.infra.llm_client import LLMClient
+        from workrecap.infra.llm_client import LLMClient
 
         llm = LLMClient(config.llm_provider, config.llm_api_key, config.llm_model)
         reply = llm.chat("You are a test assistant.", "Reply with just: OK")

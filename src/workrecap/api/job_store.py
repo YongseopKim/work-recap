@@ -3,8 +3,8 @@
 import uuid
 from datetime import datetime, timezone
 
-from git_recap.config import AppConfig
-from git_recap.models import Job, JobStatus, load_json, save_json
+from workrecap.config import AppConfig
+from workrecap.models import Job, JobStatus, load_json, save_json
 
 
 class JobStore:

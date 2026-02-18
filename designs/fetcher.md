@@ -9,14 +9,14 @@ GHES Search API를 통해 특정 사용자의 특정 날짜 PR, Commit, Issue �
 
 ## 위치
 
-`src/git_recap/services/fetcher.py`
+`src/workrecap/services/fetcher.py`
 
 ## 의존성
 
-- `git_recap.config.AppConfig`
-- `git_recap.infra.ghes_client.GHESClient`
-- `git_recap.models.PRRaw, CommitRaw, IssueRaw, FileChange, Comment, Review, save_json, load_json`
-- `git_recap.exceptions.FetchError`
+- `workrecap.config.AppConfig`
+- `workrecap.infra.ghes_client.GHESClient`
+- `workrecap.models.PRRaw, CommitRaw, IssueRaw, FileChange, Comment, Review, save_json, load_json`
+- `workrecap.exceptions.FetchError`
 
 ---
 
@@ -29,10 +29,10 @@ import logging
 import re
 from pathlib import Path
 
-from git_recap.config import AppConfig
-from git_recap.exceptions import FetchError
-from git_recap.infra.ghes_client import GHESClient
-from git_recap.models import (
+from workrecap.config import AppConfig
+from workrecap.exceptions import FetchError
+from workrecap.infra.ghes_client import GHESClient
+from workrecap.models import (
     Comment, CommitRaw, FileChange, IssueRaw, PRRaw, Review, save_json, load_json,
 )
 

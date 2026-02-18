@@ -2,7 +2,7 @@
 
 ## 목적
 
-git-recap 전역 예외 계층을 정의한다.
+work-recap 전역 예외 계층을 정의한다.
 각 서비스는 자신만의 예외 타입을 사용하고, Orchestrator는 이를 `StepFailedError`로 감싸서
 CLI/API 레이어에서 일관된 에러 처리가 가능하게 한다.
 
@@ -10,7 +10,7 @@ CLI/API 레이어에서 일관된 에러 처리가 가능하게 한다.
 
 ## 위치
 
-`src/git_recap/exceptions.py`
+`src/workrecap/exceptions.py`
 
 ## 의존성
 
@@ -21,10 +21,10 @@ CLI/API 레이어에서 일관된 에러 처리가 가능하게 한다.
 ## 상세 구현
 
 ```python
-"""git-recap 예외 계층.
+"""work-recap 예외 계층.
 
 계층 구조:
-    GitRecapError
+    WorkRecapError
     ├── FetchError          (Fetcher: GHES API 실패)
     ├── NormalizeError      (Normalizer: 변환 실패)
     ├── SummarizeError      (Summarizer: LLM 호출 실패)
@@ -32,26 +32,26 @@ CLI/API 레이어에서 일관된 에러 처리가 가능하게 한다.
 """
 
 
-class GitRecapError(Exception):
-    """git-recap의 모든 예외의 기반 클래스."""
+class WorkRecapError(Exception):
+    """work-recap의 모든 예외의 기반 클래스."""
 
 
-class FetchError(GitRecapError):
+class FetchError(WorkRecapError):
     """GHES API 호출 또는 raw 데이터 저장 실패."""
     step = "fetch"
 
 
-class NormalizeError(GitRecapError):
+class NormalizeError(WorkRecapError):
     """Raw 데이터 → Activity 변환 실패."""
     step = "normalize"
 
 
-class SummarizeError(GitRecapError):
+class SummarizeError(WorkRecapError):
     """LLM 호출 또는 summary 생성 실패."""
     step = "summarize"
 
 
-class StepFailedError(GitRecapError):
+class StepFailedError(WorkRecapError):
     """파이프라인 특정 단계 실패. Orchestrator가 발생시킨다.
 
     Attributes:
@@ -74,7 +74,7 @@ class StepFailedError(GitRecapError):
 | NormalizeError | stderr + exit(1) | 500 Internal Server Error |
 | SummarizeError | stderr + exit(1) | 503 Service Unavailable |
 | StepFailedError | stderr + exit(1) | cause에 따라 위 규칙 적용 |
-| GitRecapError (기타) | stderr + exit(1) | 500 Internal Server Error |
+| WorkRecapError (기타) | stderr + exit(1) | 500 Internal Server Error |
 
 ---
 
@@ -86,12 +86,12 @@ class StepFailedError(GitRecapError):
 """tests/unit/test_exceptions.py"""
 
 class TestExceptionHierarchy:
-    def test_all_inherit_from_git_recap_error(self):
-        """모든 커스텀 예외가 GitRecapError의 서브클래스."""
-        assert issubclass(FetchError, GitRecapError)
-        assert issubclass(NormalizeError, GitRecapError)
-        assert issubclass(SummarizeError, GitRecapError)
-        assert issubclass(StepFailedError, GitRecapError)
+    def test_all_inherit_from_workrecap_error(self):
+        """모든 커스텀 예외가 WorkRecapError의 서브클래스."""
+        assert issubclass(FetchError, WorkRecapError)
+        assert issubclass(NormalizeError, WorkRecapError)
+        assert issubclass(SummarizeError, WorkRecapError)
+        assert issubclass(StepFailedError, WorkRecapError)
 
     def test_step_attribute(self):
         """FetchError, NormalizeError, SummarizeError에 step 속성이 있다."""
@@ -115,10 +115,10 @@ class TestExceptionHierarchy:
         assert str(err) == "Pipeline failed at 'normalize': invalid JSON"
 
     def test_catchable_by_base_class(self):
-        """GitRecapError로 모든 하위 예외를 catch할 수 있다."""
-        with pytest.raises(GitRecapError):
+        """WorkRecapError로 모든 하위 예외를 catch할 수 있다."""
+        with pytest.raises(WorkRecapError):
             raise FetchError("test")
-        with pytest.raises(GitRecapError):
+        with pytest.raises(WorkRecapError):
             raise StepFailedError("fetch", FetchError("test"))
 ```
 
@@ -128,6 +128,6 @@ class TestExceptionHierarchy:
 
 | # | 작업 | 테스트 |
 |---|---|---|
-| 0.3.1 | GitRecapError + 3개 서비스 예외 클래스 구현 | test_all_inherit, test_step_attribute |
+| 0.3.1 | WorkRecapError + 3개 서비스 예외 클래스 구현 | test_all_inherit, test_step_attribute |
 | 0.3.2 | StepFailedError 구현 (step, cause 보존) | test_step_failed_error_wraps_cause, test_message_format |
 | 0.3.3 | catch 동작 검증 | test_catchable_by_base_class |

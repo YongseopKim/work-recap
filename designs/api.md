@@ -11,7 +11,7 @@ Summary 조회는 sync로 이미 생성된 .md 파일을 반환한다.
 ## 위치
 
 ```
-src/git_recap/api/
+src/workrecap/api/
 ├── __init__.py
 ├── app.py              # FastAPI app factory + exception handler + CORS
 ├── deps.py             # Depends() — config, 서비스 팩토리
@@ -26,11 +26,11 @@ src/git_recap/api/
 ## 의존성
 
 - `fastapi`, `uvicorn`
-- `git_recap.config.AppConfig`
-- `git_recap.models.Job`, `JobStatus`, `save_json`, `load_json`
-- `git_recap.services.*` (Fetcher, Normalizer, Summarizer, Orchestrator)
-- `git_recap.infra.*` (GHESClient, LLMClient)
-- `git_recap.exceptions.GitRecapError`
+- `workrecap.config.AppConfig`
+- `workrecap.models.Job`, `JobStatus`, `save_json`, `load_json`
+- `workrecap.services.*` (Fetcher, Normalizer, Summarizer, Orchestrator)
+- `workrecap.infra.*` (GHESClient, LLMClient)
+- `workrecap.exceptions.WorkRecapError`
 
 ---
 
@@ -70,12 +70,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from git_recap.exceptions import GitRecapError
-from git_recap.api.routes import pipeline, summary, query
+from workrecap.exceptions import WorkRecapError
+from workrecap.api.routes import pipeline, summary, query
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="git-recap", version="0.1.0")
+    app = FastAPI(title="work-recap", version="0.1.0")
 
     # CORS (FE 개발용)
     app.add_middleware(
@@ -91,8 +91,8 @@ def create_app() -> FastAPI:
     app.include_router(query.router, prefix="/api", tags=["query"])
 
     # 예외 핸들러
-    @app.exception_handler(GitRecapError)
-    async def handle_git_recap_error(request: Request, exc: GitRecapError) -> JSONResponse:
+    @app.exception_handler(WorkRecapError)
+    async def handle_workrecap_error(request: Request, exc: WorkRecapError) -> JSONResponse:
         return JSONResponse(
             status_code=500,
             content={"error": str(exc)},
@@ -106,9 +106,9 @@ app = create_app()
 
 **설계 결정:**
 - `create_app()` 팩토리 패턴 사용 → 테스트에서 app을 독립적으로 생성 가능
-- 모듈 레벨 `app = create_app()` → `uvicorn git_recap.api.app:app`으로 실행 가능
+- 모듈 레벨 `app = create_app()` → `uvicorn workrecap.api.app:app`으로 실행 가능
 - CORS `allow_origins=["*"]` → 개발 편의. 프로덕션 시 제한 가능
-- GitRecapError 핸들러는 sync 엔드포인트에서 직접 에러가 발생할 때만 동작
+- WorkRecapError 핸들러는 sync 엔드포인트에서 직접 에러가 발생할 때만 동작
   (async job 에러는 job status의 error 필드에 기록됨)
 
 ---
@@ -118,8 +118,8 @@ app = create_app()
 ```python
 from functools import lru_cache
 
-from git_recap.config import AppConfig
-from git_recap.api.job_store import JobStore
+from workrecap.config import AppConfig
+from workrecap.api.job_store import JobStore
 
 
 @lru_cache
@@ -145,8 +145,8 @@ def get_job_store() -> JobStore:
 import uuid
 from datetime import datetime, timezone
 
-from git_recap.config import AppConfig
-from git_recap.models import Job, JobStatus, save_json, load_json
+from workrecap.config import AppConfig
+from workrecap.models import Job, JobStatus, save_json, load_json
 
 
 class JobStore:
@@ -215,16 +215,16 @@ ACCEPTED → RUNNING → COMPLETED
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
-from git_recap.api.deps import get_config, get_job_store
-from git_recap.api.job_store import JobStore
-from git_recap.exceptions import GitRecapError
-from git_recap.infra.ghes_client import GHESClient
-from git_recap.infra.llm_client import LLMClient
-from git_recap.models import JobStatus
-from git_recap.services.fetcher import FetcherService
-from git_recap.services.normalizer import NormalizerService
-from git_recap.services.orchestrator import OrchestratorService
-from git_recap.services.summarizer import SummarizerService
+from workrecap.api.deps import get_config, get_job_store
+from workrecap.api.job_store import JobStore
+from workrecap.exceptions import WorkRecapError
+from workrecap.infra.ghes_client import GHESClient
+from workrecap.infra.llm_client import LLMClient
+from workrecap.models import JobStatus
+from workrecap.services.fetcher import FetcherService
+from workrecap.services.normalizer import NormalizerService
+from workrecap.services.orchestrator import OrchestratorService
+from workrecap.services.summarizer import SummarizerService
 
 router = APIRouter()
 
@@ -332,8 +332,8 @@ def get_job_status(
 ```python
 from fastapi import APIRouter, Depends, HTTPException
 
-from git_recap.api.deps import get_config
-from git_recap.config import AppConfig
+from workrecap.api.deps import get_config
+from workrecap.config import AppConfig
 
 router = APIRouter()
 
@@ -378,11 +378,11 @@ def get_yearly_summary(year: int):
 from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel
 
-from git_recap.api.deps import get_config, get_job_store
-from git_recap.api.job_store import JobStore
-from git_recap.infra.llm_client import LLMClient
-from git_recap.models import JobStatus
-from git_recap.services.summarizer import SummarizerService
+from workrecap.api.deps import get_config, get_job_store
+from workrecap.api.job_store import JobStore
+from workrecap.infra.llm_client import LLMClient
+from workrecap.models import JobStatus
+from workrecap.services.summarizer import SummarizerService
 
 router = APIRouter()
 
@@ -426,7 +426,7 @@ def ask_query(
 | 상황 | 처리 |
 |------|------|
 | Sync 엔드포인트 (summary GET) 파일 없음 | HTTP 404 |
-| Sync 엔드포인트 예상치 못한 에러 | GitRecapError → HTTP 500 (exception handler) |
+| Sync 엔드포인트 예상치 못한 에러 | WorkRecapError → HTTP 500 (exception handler) |
 | Async job 실행 중 에러 | Job status = FAILED, error 필드에 메시지 |
 | Job ID 없음 | HTTP 404 |
 | 잘못된 요청 body | FastAPI 자동 422 (Pydantic validation) |
@@ -499,7 +499,7 @@ class TestApp:
         """OPTIONS 요청 시 CORS 헤더 포함."""
 
     def test_exception_handler(self, client):
-        """GitRecapError 발생 시 500 + JSON 에러."""
+        """WorkRecapError 발생 시 500 + JSON 에러."""
 
 class TestJobStore:
     def test_create_job(self, store):

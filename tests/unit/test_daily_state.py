@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from git_recap.services.daily_state import DailyStateStore
+from workrecap.services.daily_state import DailyStateStore
 
 
 @pytest.fixture

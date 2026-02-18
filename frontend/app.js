@@ -1,4 +1,4 @@
-// git-recap frontend
+// work-recap frontend
 
 // ── API Helper ──
 

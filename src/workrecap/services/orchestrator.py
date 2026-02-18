@@ -5,16 +5,16 @@ from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
-from git_recap.config import AppConfig
-from git_recap.exceptions import (
+from workrecap.config import AppConfig
+from workrecap.exceptions import (
     FetchError,
     NormalizeError,
     StepFailedError,
     SummarizeError,
 )
-from git_recap.services.fetcher import FetcherService
-from git_recap.services.normalizer import NormalizerService
-from git_recap.services.summarizer import SummarizerService
+from workrecap.services.fetcher import FetcherService
+from workrecap.services.normalizer import NormalizerService
+from workrecap.services.summarizer import SummarizerService
 
 logger = logging.getLogger(__name__)
 

@@ -4,7 +4,7 @@ from datetime import date
 from unittest.mock import patch
 
 
-from git_recap.services.date_utils import (
+from workrecap.services.date_utils import (
     catchup_range,
     date_range,
     monthly_chunks,
@@ -83,7 +83,7 @@ class TestYearlyRange:
 
 
 class TestCatchupRange:
-    @patch("git_recap.services.date_utils.date")
+    @patch("workrecap.services.date_utils.date")
     def test_last_fetch_yesterday(self, mock_date):
         mock_date.today.return_value = date(2026, 2, 17)
         mock_date.fromisoformat = date.fromisoformat
@@ -91,7 +91,7 @@ class TestCatchupRange:
         assert since == "2026-02-17"
         assert until == "2026-02-17"
 
-    @patch("git_recap.services.date_utils.date")
+    @patch("workrecap.services.date_utils.date")
     def test_last_fetch_three_days_ago(self, mock_date):
         mock_date.today.return_value = date(2026, 2, 17)
         mock_date.fromisoformat = date.fromisoformat
@@ -99,7 +99,7 @@ class TestCatchupRange:
         assert since == "2026-02-15"
         assert until == "2026-02-17"
 
-    @patch("git_recap.services.date_utils.date")
+    @patch("workrecap.services.date_utils.date")
     def test_last_fetch_is_today_returns_empty(self, mock_date):
         mock_date.today.return_value = date(2026, 2, 17)
         mock_date.fromisoformat = date.fromisoformat

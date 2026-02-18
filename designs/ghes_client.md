@@ -10,14 +10,14 @@ FetcherService가 비즈니스 로직에만 집중할 수 있게 한다.
 
 ## 위치
 
-`src/git_recap/infra/ghes_client.py`
+`src/workrecap/infra/ghes_client.py`
 
 ## 의존성
 
 - `httpx` (HTTP client)
 - `time` (backoff sleep)
 - `logging`
-- `git_recap.exceptions.FetchError`
+- `workrecap.exceptions.FetchError`
 
 ---
 
@@ -29,7 +29,7 @@ import time
 
 import httpx
 
-from git_recap.exceptions import FetchError
+from workrecap.exceptions import FetchError
 
 logger = logging.getLogger(__name__)
 
