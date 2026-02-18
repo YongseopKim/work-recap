@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from workrecap.api.deps import get_config, get_job_store
 from workrecap.api.job_store import JobStore
 from workrecap.config import AppConfig
-from workrecap.infra.llm_client import LLMClient
+from workrecap.api.deps import get_llm_router
 from workrecap.models import JobStatus
 from workrecap.services.summarizer import SummarizerService
 
@@ -34,7 +34,7 @@ def _run_query_task(
     store.update(job_id, JobStatus.RUNNING)
 
     try:
-        llm = LLMClient(config.llm_provider, config.llm_api_key, config.llm_model)
+        llm = get_llm_router(config)
         service = SummarizerService(config, llm)
         answer = service.query(question, months_back=months)
         store.update(job_id, JobStatus.COMPLETED, result=answer)

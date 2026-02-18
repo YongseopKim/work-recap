@@ -51,7 +51,7 @@ PIPELINE_MOCKS = [
     "workrecap.api.routes.pipeline.FetcherService",
     "workrecap.api.routes.pipeline.FetchProgressStore",
     "workrecap.api.routes.pipeline.DailyStateStore",
-    "workrecap.api.routes.pipeline.LLMClient",
+    "workrecap.api.routes.pipeline.get_llm_router",
     "workrecap.api.routes.pipeline.GHESClient",
     "workrecap.api.routes.pipeline.GHESClientPool",
 ]
@@ -67,13 +67,13 @@ FETCH_MOCKS = [
 NORMALIZE_MOCKS = [
     "workrecap.api.routes.normalize.NormalizerService",
     "workrecap.api.routes.normalize.DailyStateStore",
-    "workrecap.api.routes.normalize.LLMClient",
+    "workrecap.api.routes.normalize.get_llm_router",
 ]
 
 SUMMARIZE_MOCKS = [
     "workrecap.api.routes.summarize_pipeline.SummarizerService",
     "workrecap.api.routes.summarize_pipeline.DailyStateStore",
-    "workrecap.api.routes.summarize_pipeline.LLMClient",
+    "workrecap.api.routes.summarize_pipeline.get_llm_router",
 ]
 
 
@@ -153,7 +153,7 @@ class TestPipelineRun:
     @patch("workrecap.api.routes.pipeline.FetcherService")
     @patch("workrecap.api.routes.pipeline.FetchProgressStore")
     @patch("workrecap.api.routes.pipeline.DailyStateStore")
-    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.get_llm_router")
     @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_single_date(
         self,
@@ -181,7 +181,7 @@ class TestPipelineRun:
     @patch("workrecap.api.routes.pipeline.FetcherService")
     @patch("workrecap.api.routes.pipeline.FetchProgressStore")
     @patch("workrecap.api.routes.pipeline.DailyStateStore")
-    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.get_llm_router")
     @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_single_with_body(
         self,
@@ -220,7 +220,7 @@ class TestPipelineRun:
     @patch("workrecap.api.routes.pipeline.FetcherService")
     @patch("workrecap.api.routes.pipeline.FetchProgressStore")
     @patch("workrecap.api.routes.pipeline.DailyStateStore")
-    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.get_llm_router")
     @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_completes_job(
         self,
@@ -248,7 +248,7 @@ class TestPipelineRun:
     @patch("workrecap.api.routes.pipeline.FetcherService")
     @patch("workrecap.api.routes.pipeline.FetchProgressStore")
     @patch("workrecap.api.routes.pipeline.DailyStateStore")
-    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.get_llm_router")
     @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_failure_marks_job_failed(
         self,
@@ -279,7 +279,7 @@ class TestPipelineRun:
     @patch("workrecap.api.routes.pipeline.FetcherService")
     @patch("workrecap.api.routes.pipeline.FetchProgressStore")
     @patch("workrecap.api.routes.pipeline.DailyStateStore")
-    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.get_llm_router")
     @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_single_injects_progress_store(
         self,
@@ -307,7 +307,7 @@ class TestPipelineRun:
     @patch("workrecap.api.routes.pipeline.FetcherService")
     @patch("workrecap.api.routes.pipeline.FetchProgressStore")
     @patch("workrecap.api.routes.pipeline.DailyStateStore")
-    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.get_llm_router")
     @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_single_closes_ghes(
         self,
@@ -337,7 +337,7 @@ class TestPipelineRunRange:
     @patch("workrecap.api.routes.pipeline.FetcherService")
     @patch("workrecap.api.routes.pipeline.FetchProgressStore")
     @patch("workrecap.api.routes.pipeline.DailyStateStore")
-    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.get_llm_router")
     @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_range(
         self,
@@ -372,7 +372,7 @@ class TestPipelineRunRange:
     @patch("workrecap.api.routes.pipeline.FetcherService")
     @patch("workrecap.api.routes.pipeline.FetchProgressStore")
     @patch("workrecap.api.routes.pipeline.DailyStateStore")
-    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.get_llm_router")
     @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_range_partial_failure(
         self,
@@ -407,7 +407,7 @@ class TestPipelineRunRange:
     @patch("workrecap.api.routes.pipeline.FetcherService")
     @patch("workrecap.api.routes.pipeline.FetchProgressStore")
     @patch("workrecap.api.routes.pipeline.DailyStateStore")
-    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.get_llm_router")
     @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_range_with_params(
         self,
@@ -459,7 +459,7 @@ class TestPipelineRunRange:
     @patch("workrecap.api.routes.pipeline.FetcherService")
     @patch("workrecap.api.routes.pipeline.FetchProgressStore")
     @patch("workrecap.api.routes.pipeline.DailyStateStore")
-    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.get_llm_router")
     @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_range_pool_cleanup(
         self,
@@ -493,7 +493,7 @@ class TestPipelineRunRange:
     @patch("workrecap.api.routes.pipeline.FetcherService")
     @patch("workrecap.api.routes.pipeline.FetchProgressStore")
     @patch("workrecap.api.routes.pipeline.DailyStateStore")
-    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.get_llm_router")
     @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_range_hierarchical_weekly(
         self,
@@ -536,7 +536,7 @@ class TestPipelineRunRange:
     @patch("workrecap.api.routes.pipeline.FetcherService")
     @patch("workrecap.api.routes.pipeline.FetchProgressStore")
     @patch("workrecap.api.routes.pipeline.DailyStateStore")
-    @patch("workrecap.api.routes.pipeline.LLMClient")
+    @patch("workrecap.api.routes.pipeline.get_llm_router")
     @patch("workrecap.api.routes.pipeline.GHESClient")
     def test_run_range_hierarchical_skipped_on_failure(
         self,
@@ -848,7 +848,7 @@ class TestFetchEndpoints:
 class TestNormalizeEndpoints:
     @patch("workrecap.api.routes.normalize.NormalizerService")
     @patch("workrecap.api.routes.normalize.DailyStateStore")
-    @patch("workrecap.api.routes.normalize.LLMClient")
+    @patch("workrecap.api.routes.normalize.get_llm_router")
     def test_normalize_single(
         self,
         mock_llm,
@@ -870,7 +870,7 @@ class TestNormalizeEndpoints:
 
     @patch("workrecap.api.routes.normalize.NormalizerService")
     @patch("workrecap.api.routes.normalize.DailyStateStore")
-    @patch("workrecap.api.routes.normalize.LLMClient")
+    @patch("workrecap.api.routes.normalize.get_llm_router")
     def test_normalize_single_enrich_false(
         self,
         mock_llm,
@@ -878,7 +878,7 @@ class TestNormalizeEndpoints:
         mock_norm,
         client,
     ):
-        """enrich=False → LLMClient not created."""
+        """enrich=False → get_llm_router not called."""
         mock_norm.return_value.normalize.return_value = (
             Path("/data/activities.jsonl"),
             Path("/data/stats.json"),
@@ -887,7 +887,7 @@ class TestNormalizeEndpoints:
             "/api/pipeline/normalize/2025-02-16",
             json={"enrich": False},
         )
-        # LLMClient should NOT be called
+        # get_llm_router should NOT be called
         mock_llm.assert_not_called()
         # NormalizerService should get llm=None
         norm_kwargs = mock_norm.call_args
@@ -895,7 +895,7 @@ class TestNormalizeEndpoints:
 
     @patch("workrecap.api.routes.normalize.NormalizerService")
     @patch("workrecap.api.routes.normalize.DailyStateStore")
-    @patch("workrecap.api.routes.normalize.LLMClient")
+    @patch("workrecap.api.routes.normalize.get_llm_router")
     def test_normalize_single_enrich_true(
         self,
         mock_llm,
@@ -903,13 +903,13 @@ class TestNormalizeEndpoints:
         mock_norm,
         client,
     ):
-        """enrich=True (default) → LLMClient created and passed."""
+        """enrich=True (default) → get_llm_router called and passed."""
         mock_norm.return_value.normalize.return_value = (
             Path("/data/activities.jsonl"),
             Path("/data/stats.json"),
         )
         client.post("/api/pipeline/normalize/2025-02-16")
-        # LLMClient called once
+        # get_llm_router called once
         mock_llm.assert_called_once()
         # NormalizerService should get llm=mock
         norm_kwargs = mock_norm.call_args
@@ -917,7 +917,7 @@ class TestNormalizeEndpoints:
 
     @patch("workrecap.api.routes.normalize.NormalizerService")
     @patch("workrecap.api.routes.normalize.DailyStateStore")
-    @patch("workrecap.api.routes.normalize.LLMClient")
+    @patch("workrecap.api.routes.normalize.get_llm_router")
     def test_normalize_range(
         self,
         mock_llm,
@@ -943,7 +943,7 @@ class TestNormalizeEndpoints:
 
     @patch("workrecap.api.routes.normalize.NormalizerService")
     @patch("workrecap.api.routes.normalize.DailyStateStore")
-    @patch("workrecap.api.routes.normalize.LLMClient")
+    @patch("workrecap.api.routes.normalize.get_llm_router")
     def test_normalize_range_with_params(
         self,
         mock_llm,
@@ -978,7 +978,7 @@ class TestNormalizeEndpoints:
 class TestSummarizeEndpoints:
     @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
     @patch("workrecap.api.routes.summarize_pipeline.DailyStateStore")
-    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.get_llm_router")
     def test_summarize_daily_single(
         self,
         mock_llm,
@@ -998,7 +998,7 @@ class TestSummarizeEndpoints:
 
     @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
     @patch("workrecap.api.routes.summarize_pipeline.DailyStateStore")
-    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.get_llm_router")
     def test_summarize_daily_range(
         self,
         mock_llm,
@@ -1023,7 +1023,7 @@ class TestSummarizeEndpoints:
         assert "2/2 succeeded" in status_resp.json()["result"]
 
     @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
-    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.get_llm_router")
     def test_summarize_weekly(
         self,
         mock_llm,
@@ -1044,7 +1044,7 @@ class TestSummarizeEndpoints:
         assert "W07.md" in status_resp.json()["result"]
 
     @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
-    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.get_llm_router")
     def test_summarize_weekly_with_force(
         self,
         mock_llm,
@@ -1060,7 +1060,7 @@ class TestSummarizeEndpoints:
         mock_summ.return_value.weekly.assert_called_once_with(2025, 7, force=True)
 
     @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
-    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.get_llm_router")
     def test_summarize_monthly(
         self,
         mock_llm,
@@ -1080,7 +1080,7 @@ class TestSummarizeEndpoints:
         assert status_resp.json()["status"] == "completed"
 
     @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
-    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.get_llm_router")
     def test_summarize_yearly(
         self,
         mock_llm,
@@ -1100,7 +1100,7 @@ class TestSummarizeEndpoints:
         assert status_resp.json()["status"] == "completed"
 
     @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
-    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.get_llm_router")
     def test_summarize_yearly_failure(
         self,
         mock_llm,
@@ -1121,7 +1121,7 @@ class TestSummarizeEndpoints:
 
     @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
     @patch("workrecap.api.routes.summarize_pipeline.DailyStateStore")
-    @patch("workrecap.api.routes.summarize_pipeline.LLMClient")
+    @patch("workrecap.api.routes.summarize_pipeline.get_llm_router")
     def test_summarize_daily_range_with_params(
         self,
         mock_llm,
@@ -1202,7 +1202,7 @@ class TestSummary:
 
 class TestQuery:
     @patch("workrecap.api.routes.query.SummarizerService")
-    @patch("workrecap.api.routes.query.LLMClient")
+    @patch("workrecap.api.routes.query.get_llm_router")
     def test_query(self, mock_llm, mock_summ, client):
         """POST /api/query → 202 + job_id."""
         mock_summ.return_value.query.return_value = "답변입니다."
@@ -1211,7 +1211,7 @@ class TestQuery:
         assert "job_id" in resp.json()
 
     @patch("workrecap.api.routes.query.SummarizerService")
-    @patch("workrecap.api.routes.query.LLMClient")
+    @patch("workrecap.api.routes.query.get_llm_router")
     def test_query_completes(self, mock_llm, mock_summ, client):
         """POST → job에 LLM 응답 저장."""
         mock_summ.return_value.query.return_value = "답변입니다."
@@ -1223,7 +1223,7 @@ class TestQuery:
         assert status_resp.json()["result"] == "답변입니다."
 
     @patch("workrecap.api.routes.query.SummarizerService")
-    @patch("workrecap.api.routes.query.LLMClient")
+    @patch("workrecap.api.routes.query.get_llm_router")
     def test_query_failure(self, mock_llm, mock_summ, client):
         """SummarizeError → job status = failed."""
         mock_summ.return_value.query.side_effect = SummarizeError("No context")

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from workrecap.infra.llm_client import LLMClient
+    from workrecap.infra.llm_router import LLMRouter
     from workrecap.services.daily_state import DailyStateStore
 
 from jinja2 import Template
@@ -41,7 +41,7 @@ class NormalizerService:
         self,
         config: AppConfig,
         daily_state: DailyStateStore | None = None,
-        llm: LLMClient | None = None,
+        llm: LLMRouter | None = None,
     ) -> None:
         self._config = config
         self._username = config.username
@@ -251,7 +251,7 @@ class NormalizerService:
                 )
 
             prompt = template.render(activities=act_dicts)
-            response = self._llm.chat("You are a code change classifier.", prompt)
+            response = self._llm.chat("You are a code change classifier.", prompt, task="enrich")
 
             # Parse JSON response
             text = response.strip()

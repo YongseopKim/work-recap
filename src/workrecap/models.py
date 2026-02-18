@@ -204,6 +204,19 @@ class TokenUsage:
         )
 
 
+@dataclass
+class ModelUsage:
+    """Per-model LLM usage tracking with cost estimation."""
+
+    provider: str
+    model: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    call_count: int = 0
+    estimated_cost_usd: float = 0.0
+
+
 # ── 직렬화 유틸리티 ──
 
 

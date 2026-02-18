@@ -26,6 +26,8 @@ ENV/
 # Project Specific
 data/
 .env
+.provider/
+.log/
 .pytest_cache/
 .coverage
 htmlcov/

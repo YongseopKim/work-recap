@@ -66,10 +66,11 @@ def patch_ghes(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def patch_llm(monkeypatch):
-    """LLMClient mock."""
+    """LLMRouter mock."""
     mock_llm = MagicMock()
     mock_llm.usage = TokenUsage()
-    monkeypatch.setattr("workrecap.cli.main._get_llm_client", lambda c: mock_llm)
+    mock_llm.usage_tracker = None  # fallback to .usage path in _print_usage_report
+    monkeypatch.setattr("workrecap.cli.main._get_llm_router", lambda c: mock_llm)
     return mock_llm
 
 
@@ -1876,3 +1877,31 @@ class TestRunHierarchicalSummarize:
         mock_summ.return_value.weekly.assert_not_called()
         mock_summ.return_value.monthly.assert_not_called()
         mock_summ.return_value.yearly.assert_not_called()
+
+
+# ── Models 커맨드 테스트 ──
+
+
+class TestModelsCommand:
+    @patch("workrecap.cli.main.discover_models")
+    def test_models_shows_results(self, mock_discover, patch_llm):
+        """models 커맨드가 provider별 모델 목록을 출력."""
+        from workrecap.infra.providers.base import ModelInfo
+
+        mock_discover.return_value = [
+            ModelInfo(id="gpt-4o", name="GPT-4o", provider="openai"),
+            ModelInfo(id="gpt-4o-mini", name="GPT-4o Mini", provider="openai"),
+        ]
+        result = runner.invoke(app, ["models"])
+        assert result.exit_code == 0
+        assert "[openai]" in result.output
+        assert "gpt-4o" in result.output
+        assert "GPT-4o Mini" in result.output
+
+    @patch("workrecap.cli.main.discover_models")
+    def test_models_no_results(self, mock_discover, patch_llm):
+        """모델이 없으면 안내 메시지 출력."""
+        mock_discover.return_value = []
+        result = runner.invoke(app, ["models"])
+        assert result.exit_code == 0
+        assert "No models discovered" in result.output

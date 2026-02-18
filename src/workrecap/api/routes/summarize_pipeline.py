@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from workrecap.api.deps import get_config, get_job_store
 from workrecap.api.job_store import JobStore
 from workrecap.config import AppConfig
-from workrecap.infra.llm_client import LLMClient
+from workrecap.api.deps import get_llm_router
 from workrecap.models import JobStatus
 from workrecap.services.daily_state import DailyStateStore
 from workrecap.services.summarizer import SummarizerService
@@ -54,7 +54,7 @@ def _summarize_daily_single_task(
     store.update(job_id, JobStatus.RUNNING)
 
     try:
-        llm = LLMClient(config.llm_provider, config.llm_api_key, config.llm_model)
+        llm = get_llm_router(config)
         ds = DailyStateStore(config.daily_state_path)
         service = SummarizerService(config, llm, daily_state=ds)
         path = service.daily(target_date, force=force)
@@ -83,7 +83,7 @@ def _summarize_daily_range_task(
     store.update(job_id, JobStatus.RUNNING)
 
     try:
-        llm = LLMClient(config.llm_provider, config.llm_api_key, config.llm_model)
+        llm = get_llm_router(config)
         ds = DailyStateStore(config.daily_state_path)
         service = SummarizerService(config, llm, daily_state=ds)
         results = service.daily_range(since, until, force=force, max_workers=max_workers)
@@ -117,7 +117,7 @@ def _summarize_weekly_task(
     store.update(job_id, JobStatus.RUNNING)
 
     try:
-        llm = LLMClient(config.llm_provider, config.llm_api_key, config.llm_model)
+        llm = get_llm_router(config)
         service = SummarizerService(config, llm)
         path = service.weekly(year, week, force=force)
         store.update(job_id, JobStatus.COMPLETED, result=str(path))
@@ -139,7 +139,7 @@ def _summarize_monthly_task(
     store.update(job_id, JobStatus.RUNNING)
 
     try:
-        llm = LLMClient(config.llm_provider, config.llm_api_key, config.llm_model)
+        llm = get_llm_router(config)
         service = SummarizerService(config, llm)
         path = service.monthly(year, month, force=force)
         store.update(job_id, JobStatus.COMPLETED, result=str(path))
@@ -160,7 +160,7 @@ def _summarize_yearly_task(
     store.update(job_id, JobStatus.RUNNING)
 
     try:
-        llm = LLMClient(config.llm_provider, config.llm_api_key, config.llm_model)
+        llm = get_llm_router(config)
         service = SummarizerService(config, llm)
         path = service.yearly(year, force=force)
         store.update(job_id, JobStatus.COMPLETED, result=str(path))

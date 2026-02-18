@@ -88,3 +88,7 @@ class AppConfig(BaseSettings):
     def yearly_summary_path(self, year: int) -> Path:
         """data/summaries/2025/yearly.md"""
         return self.summaries_dir / str(year) / "yearly.md"
+
+    @property
+    def provider_config_path(self) -> Path:
+        return Path(".provider/config.toml")

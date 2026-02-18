@@ -17,7 +17,7 @@ LLM 기반으로 일/주/월/년 단위 업무 요약을 자동 생성하는 개
 
 - Python 3.12+
 - GHES 인스턴스 + Personal Access Token
-- LLM API 키 (OpenAI 또는 Anthropic)
+- LLM API 키 (OpenAI, Anthropic, Gemini, 또는 OpenAI-compatible 서버)
 
 ## 설치
 
@@ -44,6 +44,66 @@ LLM_API_KEY=sk-xxxxxxxxxxxxxxxxxxxx
 LLM_MODEL=gpt-4o-mini
 MAX_WORKERS=5                 # 병렬 실행 워커 수 (기본: 5)
 ```
+
+### Multi-Provider 설정 (선택사항)
+
+`.provider/config.toml`을 생성하면 태스크별로 다른 provider+model을 사용할 수 있다.
+TOML 파일이 없으면 `.env`의 단일 provider 설정으로 동작한다 (100% 하위 호환).
+
+```toml
+# .provider/config.toml
+
+[strategy]
+mode = "adaptive"  # economy | standard | premium | adaptive | fixed
+
+[providers.openai]
+api_key = "sk-..."
+
+[providers.anthropic]
+api_key = "sk-ant-..."
+
+[providers.gemini]
+api_key = "AIza..."
+
+[providers.custom]
+api_key = ""
+base_url = "http://localhost:11434/v1"  # Ollama, vLLM 등
+
+[tasks.enrich]
+provider = "anthropic"
+model = "claude-haiku-4-5-20251001"
+escalation_model = "claude-sonnet-4-5-20250929"
+
+[tasks.daily]
+provider = "openai"
+model = "gpt-4o-mini"
+
+[tasks.weekly]
+provider = "openai"
+model = "gpt-4o-mini"
+
+[tasks.monthly]
+provider = "anthropic"
+model = "claude-sonnet-4-5-20250929"
+
+[tasks.yearly]
+provider = "anthropic"
+model = "claude-sonnet-4-5-20250929"
+
+[tasks.query]
+provider = "openai"
+model = "gpt-4o"
+```
+
+**Strategy 모드:**
+
+| 모드 | 동작 |
+|------|------|
+| `economy` | base_model만, escalation 없음 |
+| `standard` | base_model + escalation 가능 |
+| `premium` | escalation_model 직접 사용 (있으면) |
+| `adaptive` | 경량 모델 → 자체 판단 → 필요시 escalation |
+| `fixed` | task config의 model 그대로, escalation 없음 |
 
 ## 사용법
 
@@ -98,6 +158,9 @@ recap run                           # catch-up (last_summarize_date 이후 자�
 # 자유 질문
 recap ask "이번 달 주요 성과는?"
 recap ask "Q1에 가장 임팩트 있던 작업?" --months 6
+
+# 모델 탐색
+recap models                           # 설정된 provider별 모델 목록
 ```
 
 ### 웹 UI
@@ -199,8 +262,20 @@ work-recap/
 │   ├── models.py               # 데이터 모델 + 직렬화
 │   ├── infra/
 │   │   ├── ghes_client.py      # GHES REST API 클라이언트 (retry, rate limit)
-│   │   ├── llm_client.py       # LLM 클라이언트 (OpenAI, Anthropic)
-│   │   └── client_pool.py      # GHESClientPool (병렬 enrichment용 스레드 안전 풀)
+│   │   ├── llm_client.py       # [Deprecated] 레거시 LLM 클라이언트
+│   │   ├── llm_router.py       # LLM Router (task-based multi-provider routing)
+│   │   ├── provider_config.py  # .provider/config.toml 파싱 + .env fallback
+│   │   ├── escalation.py       # Adaptive escalation handler
+│   │   ├── usage_tracker.py    # Per-model usage tracking + cost estimation
+│   │   ├── pricing.py          # Built-in pricing table ($/1M tokens)
+│   │   ├── model_discovery.py  # Provider별 모델 목록 탐색
+│   │   ├── client_pool.py      # GHESClientPool (병렬 enrichment용 스레드 안전 풀)
+│   │   └── providers/
+│   │       ├── base.py         # LLMProvider ABC + ModelInfo
+│   │       ├── openai_provider.py
+│   │       ├── anthropic_provider.py
+│   │       ├── gemini_provider.py
+│   │       └── custom_provider.py  # OpenAI-compatible (Ollama, vLLM 등)
 │   ├── services/
 │   │   ├── date_utils.py       # 날짜 범위 유틸리티 (weekly, monthly, yearly, catch-up)
 │   │   ├── fetcher.py          # PR/Commit/Issue 데이터 수집 (검색, dedup, enrich, 병렬)
@@ -211,10 +286,10 @@ work-recap/
 │   │   ├── checkpoint.py       # 스레드 안전 체크포인트 업데이트
 │   │   └── fetch_progress.py   # FetchProgressStore (fetch 재개용 chunk 캐시)
 │   ├── cli/
-│   │   └── main.py             # Typer CLI (fetch, normalize, summarize, run, ask)
+│   │   └── main.py             # Typer CLI (fetch, normalize, summarize, run, ask, models)
 │   └── api/
 │       ├── app.py              # FastAPI 앱 (CORS, 정적 파일 서빙)
-│       ├── deps.py             # 의존성 주입 (get_config, get_job_store)
+│       ├── deps.py             # 의존성 주입 (get_config, get_job_store, get_llm_router)
 │       ├── job_store.py        # Async job 파일 CRUD
 │       └── routes/
 │           ├── pipeline.py     # 전체 파이프라인 실행 + job polling
@@ -236,7 +311,7 @@ work-recap/
 │   └── query.md
 ├── designs/                    # 모듈별 상세 설계 문서
 ├── tests/
-│   ├── unit/                   # 686개 단위 테스트 (18개 파일)
+│   ├── unit/                   # 766개 단위 테스트 (26개 파일)
 │   └── integration/            # 통합 테스트 (실제 API 호출, -m integration)
 ├── pyproject.toml
 └── .env.example
@@ -245,7 +320,7 @@ work-recap/
 ## 테스트
 
 ```bash
-# 전체 단위 테스트 (686개)
+# 전체 단위 테스트 (766개)
 pytest
 
 # 통합 테스트 (실제 GHES + LLM API 호출, .env 필요)
@@ -270,16 +345,20 @@ coverage run -m pytest && coverage report
 │              Service Layer                        │
 │   OrchestratorService                            │
 │     ├── FetcherService     (+ GHESClientPool)    │
-│     ├── NormalizerService  (+ LLMClient)         │
-│     └── SummarizerService  (+ LLMClient)         │
+│     ├── NormalizerService  (+ LLMRouter)          │
+│     └── SummarizerService  (+ LLMRouter)          │
 │                                                  │
 │   DailyStateStore · Checkpoint · FetchProgress   │
 └──────────┬────────────────────┬──────────────────┘
            │                    │
 ┌──────────▼──────────┐ ┌──────▼───────────────────┐
-│   GHESClient        │ │   LLMClient              │
-│   (httpx + retry)   │ │   (OpenAI / Anthropic)   │
-└─────────────────────┘ └──────────────────────────┘
+│   GHESClient        │ │   LLMRouter              │
+│   (httpx + retry)   │ │   (task-based routing)   │
+└─────────────────────┘ └──────┬───────────────────┘
+                               │
+                  ┌────────────┼────────────┐
+                  ▼            ▼            ▼
+             OpenAI      Anthropic     Gemini/Custom
 ```
 
 - **Interface Layer** (CLI, API)는 Service Layer에 의존
@@ -299,6 +378,9 @@ coverage run -m pytest && coverage report
 | D-5: Sync-over-async | API BackgroundTasks 내에서 동기 서비스 코드 실행 (async 불필요) |
 | D-6: LLM enrichment | Normalize 단계에서 intent/change_summary 추출, 실패 시 graceful degradation |
 | D-7: 계층적 요약 | weekly/monthly/yearly는 하위 단계 요약을 input으로 사용하여 토큰 효율 확보 |
+| D-8: Multi-provider routing | 태스크별(enrich/daily/weekly/monthly/yearly/query) 다른 provider+model 배정. `.provider/config.toml`로 설정, 없으면 `.env` fallback (100% 하위 호환) |
+| D-9: Adaptive escalation | 경량 모델이 자체 판단(confidence 0.0-1.0)으로 고급 모델에 에스컬레이션. JSON envelope 파싱 실패 시 원본 응답 사용 (graceful fallback) |
+| D-10: Auto-logging | `.log/YYYYMMDD_HHMMSS.log`에 DEBUG 레벨 자동 기록. LLM usage report 포함 |
 
 ## 라이선스
 

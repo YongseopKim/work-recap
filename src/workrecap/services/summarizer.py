@@ -16,7 +16,7 @@ from jinja2 import Template
 
 from workrecap.config import AppConfig
 from workrecap.exceptions import SummarizeError
-from workrecap.infra.llm_client import LLMClient
+from workrecap.infra.llm_router import LLMRouter
 from workrecap.models import load_json, load_jsonl
 from workrecap.services.date_utils import date_range
 
@@ -27,7 +27,7 @@ class SummarizerService:
     def __init__(
         self,
         config: AppConfig,
-        llm_client: LLMClient,
+        llm_client: LLMRouter,
         daily_state: DailyStateStore | None = None,
     ) -> None:
         self._config = config
@@ -73,7 +73,7 @@ class SummarizerService:
             "LLM prompt: system=%d chars, user=%d chars", len(system_prompt), len(user_content)
         )
 
-        response = self._llm.chat(system_prompt, user_content)
+        response = self._llm.chat(system_prompt, user_content, task="daily")
 
         output_path = self._config.daily_summary_path(target_date)
         self._save_markdown(output_path, response)
@@ -169,7 +169,7 @@ class SummarizerService:
         system_prompt = self._render_prompt("weekly.md", year=year, week=week)
         user_content = "\n\n---\n\n".join(daily_contents)
 
-        response = self._llm.chat(system_prompt, user_content)
+        response = self._llm.chat(system_prompt, user_content, task="weekly")
 
         self._save_markdown(output_path, response)
 
@@ -191,7 +191,7 @@ class SummarizerService:
         system_prompt = self._render_prompt("monthly.md", year=year, month=month)
         user_content = "\n\n---\n\n".join(weekly_contents)
 
-        response = self._llm.chat(system_prompt, user_content)
+        response = self._llm.chat(system_prompt, user_content, task="monthly")
 
         self._save_markdown(output_path, response)
 
@@ -218,7 +218,7 @@ class SummarizerService:
         system_prompt = self._render_prompt("yearly.md", year=year)
         user_content = "\n\n---\n\n".join(monthly_contents)
 
-        response = self._llm.chat(system_prompt, user_content)
+        response = self._llm.chat(system_prompt, user_content, task="yearly")
 
         self._save_markdown(output_path, response)
 
@@ -234,7 +234,7 @@ class SummarizerService:
         system_prompt = self._render_prompt("query.md")
         user_content = f"## Context\n\n{context}\n\n## 질문\n\n{question}"
 
-        return self._llm.chat(system_prompt, user_content)
+        return self._llm.chat(system_prompt, user_content, task="query")
 
     # ── Staleness 체크 ──
 

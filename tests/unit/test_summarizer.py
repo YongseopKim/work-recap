@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from workrecap.exceptions import SummarizeError
-from workrecap.infra.llm_client import LLMClient
+from workrecap.infra.llm_router import LLMRouter
 from workrecap.models import (
     Activity,
     ActivityKind,
@@ -25,7 +25,7 @@ DATE = "2025-02-16"
 
 @pytest.fixture
 def mock_llm():
-    llm = MagicMock(spec=LLMClient)
+    llm = MagicMock(spec=LLMRouter)
     llm.chat.return_value = "# LLM Generated Summary\n\nMock content."
     return llm
 

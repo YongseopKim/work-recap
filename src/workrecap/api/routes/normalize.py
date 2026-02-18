@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from workrecap.api.deps import get_config, get_job_store
 from workrecap.api.job_store import JobStore
 from workrecap.config import AppConfig
-from workrecap.infra.llm_client import LLMClient
+from workrecap.api.deps import get_llm_router
 from workrecap.models import JobStatus
 from workrecap.services.daily_state import DailyStateStore
 from workrecap.services.normalizer import NormalizerService
@@ -45,9 +45,7 @@ def _normalize_single_task(
 
     try:
         ds = DailyStateStore(config.daily_state_path)
-        llm = (
-            LLMClient(config.llm_provider, config.llm_api_key, config.llm_model) if enrich else None
-        )
+        llm = get_llm_router(config) if enrich else None
         service = NormalizerService(config, daily_state=ds, llm=llm)
         act_path, stats_path = service.normalize(target_date)
         store.update(
@@ -76,9 +74,7 @@ def _normalize_range_task(
 
     try:
         ds = DailyStateStore(config.daily_state_path)
-        llm = (
-            LLMClient(config.llm_provider, config.llm_api_key, config.llm_model) if enrich else None
-        )
+        llm = get_llm_router(config) if enrich else None
         service = NormalizerService(config, daily_state=ds, llm=llm)
         results = service.normalize_range(since, until, force=force, max_workers=max_workers)
 

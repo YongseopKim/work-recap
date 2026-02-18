@@ -9,7 +9,8 @@ import typer
 
 from workrecap.config import AppConfig
 from workrecap.exceptions import WorkRecapError, SummarizeError
-from workrecap.logging_config import setup_logging
+from workrecap.infra.model_discovery import discover_models
+from workrecap.logging_config import setup_file_logging, setup_logging
 from workrecap.services import date_utils
 from workrecap.services.daily_state import DailyStateStore
 from workrecap.services.fetcher import FetcherService
@@ -31,6 +32,9 @@ def main(
     """GHES activity summarizer with LLM."""
     level = logging.DEBUG if verbose else logging.INFO
     setup_logging(level)
+    from pathlib import Path
+
+    setup_file_logging(Path(".log"))
 
 
 VALID_TYPES = {"prs", "commits", "issues"}
@@ -46,10 +50,20 @@ def _get_ghes_client(config: AppConfig):
     return GHESClient(config.ghes_url, config.ghes_token)
 
 
-def _get_llm_client(config: AppConfig):
-    from workrecap.infra.llm_client import LLMClient
+def _get_llm_router(config: AppConfig):
+    from workrecap.infra.llm_router import LLMRouter
+    from workrecap.infra.provider_config import ProviderConfig
+    from workrecap.infra.usage_tracker import UsageTracker
+    from workrecap.infra.pricing import PricingTable
 
-    return LLMClient(config.llm_provider, config.llm_api_key, config.llm_model)
+    config_path = config.provider_config_path
+    if config_path.exists():
+        pc = ProviderConfig(config_path=config_path)
+    else:
+        pc = ProviderConfig(config_path=None, fallback_config=config)
+
+    tracker = UsageTracker(pricing=PricingTable())
+    return LLMRouter(pc, usage_tracker=tracker)
 
 
 def _handle_error(e: WorkRecapError) -> None:
@@ -62,14 +76,20 @@ def _progress(msg: str) -> None:
     typer.echo(msg)
 
 
-def _print_token_usage(llm) -> None:
-    """LLM 토큰 사용량 출력."""
-    u = llm.usage
-    if u.call_count > 0:
-        typer.echo(
-            f"Token usage: {u.prompt_tokens:,} prompt + {u.completion_tokens:,} completion"
-            f" = {u.total_tokens:,} total ({u.call_count} calls)"
-        )
+def _print_usage_report(llm) -> None:
+    """LLM usage report 출력 (per-model breakdown + cost)."""
+    tracker = getattr(llm, "usage_tracker", None)
+    if tracker:
+        report = tracker.format_report()
+        if "No LLM usage" not in report:
+            typer.echo(report)
+    else:
+        u = llm.usage
+        if u.call_count > 0:
+            typer.echo(
+                f"Token usage: {u.prompt_tokens:,} prompt + {u.completion_tokens:,} completion"
+                f" = {u.total_tokens:,} total ({u.call_count} calls)"
+            )
 
 
 def _read_last_fetch_date(config: AppConfig) -> str | None:
@@ -353,7 +373,7 @@ def normalize(
 
     try:
         ds = DailyStateStore(config.daily_state_path)
-        llm = _get_llm_client(config) if enrich else None
+        llm = _get_llm_router(config) if enrich else None
         service = NormalizerService(config, daily_state=ds, llm=llm)
 
         range_ep = endpoints or catchup_endpoints
@@ -371,7 +391,7 @@ def normalize(
             typer.echo("Normalized 1 day(s)")
             typer.echo(f"  {dates[0]}: {act_path}, {stats_path}")
         if llm:
-            _print_token_usage(llm)
+            _print_usage_report(llm)
     except WorkRecapError as e:
         _handle_error(e)
 
@@ -416,7 +436,7 @@ def summarize_daily(
     max_workers = workers if workers is not None else config.max_workers
 
     try:
-        llm = _get_llm_client(config)
+        llm = _get_llm_router(config)
         ds = DailyStateStore(config.daily_state_path)
         service = SummarizerService(config, llm, daily_state=ds)
 
@@ -433,7 +453,7 @@ def summarize_daily(
         else:
             path = service.daily(dates[0])
             typer.echo(f"Daily summary → {path}")
-        _print_token_usage(llm)
+        _print_usage_report(llm)
     except WorkRecapError as e:
         _handle_error(e)
 
@@ -449,11 +469,11 @@ def summarize_weekly(
     config = _get_config()
 
     try:
-        llm = _get_llm_client(config)
+        llm = _get_llm_router(config)
         service = SummarizerService(config, llm)
         path = service.weekly(year, week, force=force)
         typer.echo(f"Weekly summary → {path}")
-        _print_token_usage(llm)
+        _print_usage_report(llm)
     except WorkRecapError as e:
         _handle_error(e)
 
@@ -469,11 +489,11 @@ def summarize_monthly(
     config = _get_config()
 
     try:
-        llm = _get_llm_client(config)
+        llm = _get_llm_router(config)
         service = SummarizerService(config, llm)
         path = service.monthly(year, month, force=force)
         typer.echo(f"Monthly summary → {path}")
-        _print_token_usage(llm)
+        _print_usage_report(llm)
     except WorkRecapError as e:
         _handle_error(e)
 
@@ -488,11 +508,11 @@ def summarize_yearly(
     config = _get_config()
 
     try:
-        llm = _get_llm_client(config)
+        llm = _get_llm_router(config)
         service = SummarizerService(config, llm)
         path = service.yearly(year, force=force)
         typer.echo(f"Yearly summary → {path}")
-        _print_token_usage(llm)
+        _print_usage_report(llm)
     except WorkRecapError as e:
         _handle_error(e)
 
@@ -555,7 +575,7 @@ def run(
         from workrecap.services.fetch_progress import FetchProgressStore
 
         ghes = _get_ghes_client(config)
-        llm = _get_llm_client(config)
+        llm = _get_llm_router(config)
         ds = DailyStateStore(config.daily_state_path)
         progress_store = FetchProgressStore(config.state_dir / "fetch_progress")
         fetch_kwargs: dict = {
@@ -622,14 +642,14 @@ def run(
                     path = summarizer.yearly(yearly, force=force)
                     typer.echo(f"Yearly summary → {path}")
 
-            _print_token_usage(llm)
+            _print_usage_report(llm)
             if failed > 0:
                 raise typer.Exit(code=1)
         else:
             path = orchestrator.run_daily(dates[0], types=types)
             ghes.close()
             typer.echo(f"Pipeline complete → {path}")
-            _print_token_usage(llm)
+            _print_usage_report(llm)
     except WorkRecapError as e:
         _handle_error(e)
     finally:
@@ -650,10 +670,47 @@ def ask(
     config = _get_config()
 
     try:
-        llm = _get_llm_client(config)
+        llm = _get_llm_router(config)
         service = SummarizerService(config, llm)
         answer = service.query(question, months_back=months)
         typer.echo(answer)
-        _print_token_usage(llm)
+        _print_usage_report(llm)
     except WorkRecapError as e:
         _handle_error(e)
+
+
+# ── 모델 탐색 ──
+
+
+@app.command()
+def models() -> None:
+    """List available models from configured providers."""
+    from workrecap.infra.provider_config import ProviderConfig
+
+    config = _get_config()
+    config_path = config.provider_config_path
+    if config_path.exists():
+        pc = ProviderConfig(config_path=config_path)
+    else:
+        pc = ProviderConfig(config_path=None, fallback_config=config)
+
+    # Create providers for all configured entries
+    router = _get_llm_router(config)
+    providers = {}
+    for name in pc.providers:
+        try:
+            providers[name] = router._get_provider(name)
+        except Exception:
+            pass
+
+    model_list = discover_models(providers)
+    if not model_list:
+        typer.echo("No models discovered. Check provider configuration.")
+        return
+
+    current_provider = ""
+    for m in model_list:
+        if m.provider != current_provider:
+            current_provider = m.provider
+            typer.echo(f"\n[{current_provider}]")
+        typer.echo(f"  {m.id:40s}  {m.name}")

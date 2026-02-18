@@ -13,7 +13,7 @@ from workrecap.config import AppConfig
 from workrecap.exceptions import SummarizeError
 from workrecap.infra.client_pool import GHESClientPool
 from workrecap.infra.ghes_client import GHESClient
-from workrecap.infra.llm_client import LLMClient
+from workrecap.api.deps import get_llm_router
 from workrecap.models import JobStatus
 from workrecap.services.daily_state import DailyStateStore
 from workrecap.services.fetch_progress import FetchProgressStore
@@ -122,7 +122,7 @@ def _run_pipeline_task(
     ghes = None
     try:
         ghes = GHESClient(config.ghes_url, config.ghes_token, search_interval=2.0)
-        llm = LLMClient(config.llm_provider, config.llm_api_key, config.llm_model)
+        llm = get_llm_router(config)
         ds = DailyStateStore(config.daily_state_path)
         ps = FetchProgressStore(config.state_dir / "fetch_progress")
         fetcher = FetcherService(config, ghes, daily_state=ds, progress_store=ps)
@@ -170,7 +170,7 @@ def _run_range_task(
     ghes = None
     try:
         ghes = GHESClient(config.ghes_url, config.ghes_token, search_interval=2.0)
-        llm = LLMClient(config.llm_provider, config.llm_api_key, config.llm_model)
+        llm = get_llm_router(config)
         ds = DailyStateStore(config.daily_state_path)
         ps = FetchProgressStore(config.state_dir / "fetch_progress")
         fetch_kwargs: dict = {"daily_state": ds, "progress_store": ps}

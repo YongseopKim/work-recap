@@ -1,4 +1,9 @@
-"""Provider-agnostic LLM client."""
+"""Provider-agnostic LLM client.
+
+.. deprecated::
+    Use :class:`workrecap.infra.llm_router.LLMRouter` instead.
+    This module is kept for backward compatibility and reference.
+"""
 
 import logging
 import threading
