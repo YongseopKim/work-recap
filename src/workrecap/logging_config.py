@@ -56,6 +56,13 @@ def setup_file_logging(log_dir: Path) -> logging.FileHandler:
 
     root = logging.getLogger("workrecap")
     root.addHandler(handler)
+
+    # CLI output logger: file-only (no stderr duplication)
+    cli_output = logging.getLogger("workrecap.cli.output")
+    cli_output.setLevel(logging.DEBUG)
+    cli_output.propagate = False
+    cli_output.addHandler(handler)
+
     return handler
 
 
@@ -66,3 +73,6 @@ def reset_logging() -> None:
     root = logging.getLogger("workrecap")
     root.handlers.clear()
     root.setLevel(logging.WARNING)
+    cli_output = logging.getLogger("workrecap.cli.output")
+    cli_output.handlers.clear()
+    cli_output.propagate = True

@@ -19,10 +19,19 @@ from workrecap.services.orchestrator import OrchestratorService
 from workrecap.services.summarizer import SummarizerService
 
 logger = logging.getLogger(__name__)
+_file_logger = logging.getLogger("workrecap.cli.output")
 
 app = typer.Typer(help="GHES activity summarizer with LLM")
 summarize_app = typer.Typer(help="Generate summaries")
 app.add_typer(summarize_app, name="summarize")
+
+
+def _echo(msg: str = "", err: bool = False) -> None:
+    """Echo to terminal AND log to file."""
+    typer.echo(msg, err=err)
+    if msg:
+        level = logging.ERROR if err else logging.INFO
+        _file_logger.log(level, msg)
 
 
 @app.callback()
@@ -67,13 +76,13 @@ def _get_llm_router(config: AppConfig):
 
 
 def _handle_error(e: WorkRecapError) -> None:
-    typer.echo(f"Error: {e}", err=True)
+    _echo(f"Error: {e}", err=True)
     raise typer.Exit(code=1)
 
 
 def _progress(msg: str) -> None:
     """진행 상황 콜백."""
-    typer.echo(msg)
+    _echo(msg)
 
 
 def _print_usage_report(llm) -> None:
@@ -82,11 +91,11 @@ def _print_usage_report(llm) -> None:
     if tracker:
         report = tracker.format_report()
         if "No LLM usage" not in report:
-            typer.echo(report)
+            _echo(report)
     else:
         u = llm.usage
         if u.call_count > 0:
-            typer.echo(
+            _echo(
                 f"Token usage: {u.prompt_tokens:,} prompt + {u.completion_tokens:,} completion"
                 f" = {u.total_tokens:,} total ({u.call_count} calls)"
             )
@@ -162,7 +171,7 @@ def _resolve_dates(
         ]
     )
     if range_opts > 1:
-        typer.echo(
+        _echo(
             "Error: Only one of target_date, --since/--until, --weekly, "
             "--monthly, --yearly can be specified.",
             err=True,
@@ -170,7 +179,7 @@ def _resolve_dates(
         raise typer.Exit(code=1)
 
     if (since is None) != (until is None):
-        typer.echo("Error: --since and --until must be used together.", err=True)
+        _echo("Error: --since and --until must be used together.", err=True)
         raise typer.Exit(code=1)
 
     if since and until:
@@ -237,7 +246,7 @@ def fetch(
     types: set[str] | None = None
     if type is not None:
         if type not in VALID_TYPES:
-            typer.echo(f"Invalid type: {type}. Must be one of {VALID_TYPES}", err=True)
+            _echo(f"Invalid type: {type}. Must be one of {VALID_TYPES}", err=True)
             raise typer.Exit(code=1)
         types = {type}
 
@@ -254,7 +263,7 @@ def fetch(
             s, u = date_utils.catchup_range(last)
             dates = date_utils.date_range(s, u)
             if not dates:
-                typer.echo("Already up to date.")
+                _echo("Already up to date.")
                 return
             catchup_endpoints = (s, u)
         else:
@@ -294,21 +303,21 @@ def fetch(
                 succeeded = sum(1 for r in range_results if r["status"] == "success")
                 skipped = sum(1 for r in range_results if r["status"] == "skipped")
                 failed = sum(1 for r in range_results if r["status"] == "failed")
-                typer.echo(
+                _echo(
                     f"Fetched {len(range_results)} day(s): "
                     f"{succeeded} succeeded, {skipped} skipped, {failed} failed"
                 )
                 for r in range_results:
                     mark = {"success": "+", "skipped": "=", "failed": "!"}[r["status"]]
-                    typer.echo(f"  {mark} {r['date']}: {r['status']}")
+                    _echo(f"  {mark} {r['date']}: {r['status']}")
                 if failed > 0:
                     raise typer.Exit(code=1)
             else:
                 # 단일 날짜
                 result = service.fetch(dates[0], types=types)
-                typer.echo("Fetched 1 day(s)")
+                _echo("Fetched 1 day(s)")
                 for type_name, path in sorted(result.items()):
-                    typer.echo(f"  {dates[0]} {type_name}: {path}")
+                    _echo(f"  {dates[0]} {type_name}: {path}")
     except WorkRecapError as e:
         _handle_error(e)
     finally:
@@ -321,13 +330,13 @@ def _print_range_results(label: str, range_results: list[dict]) -> None:
     succeeded = sum(1 for r in range_results if r["status"] == "success")
     skipped = sum(1 for r in range_results if r["status"] == "skipped")
     failed = sum(1 for r in range_results if r["status"] == "failed")
-    typer.echo(
+    _echo(
         f"{label} {len(range_results)} day(s): "
         f"{succeeded} succeeded, {skipped} skipped, {failed} failed"
     )
     for r in range_results:
         mark = {"success": "+", "skipped": "=", "failed": "!"}[r["status"]]
-        typer.echo(f"  {mark} {r['date']}: {r['status']}")
+        _echo(f"  {mark} {r['date']}: {r['status']}")
     if failed > 0:
         raise typer.Exit(code=1)
 
@@ -362,7 +371,7 @@ def normalize(
             s, u = date_utils.catchup_range(last)
             dates = date_utils.date_range(s, u)
             if not dates:
-                typer.echo("Already up to date.")
+                _echo("Already up to date.")
                 return
             catchup_endpoints = (s, u)
         else:
@@ -388,8 +397,8 @@ def normalize(
             _print_range_results("Normalized", range_results)
         else:
             act_path, stats_path = service.normalize(dates[0])
-            typer.echo("Normalized 1 day(s)")
-            typer.echo(f"  {dates[0]}: {act_path}, {stats_path}")
+            _echo("Normalized 1 day(s)")
+            _echo(f"  {dates[0]}: {act_path}, {stats_path}")
         if llm:
             _print_usage_report(llm)
     except WorkRecapError as e:
@@ -426,7 +435,7 @@ def summarize_daily(
             s, u = date_utils.catchup_range(last)
             dates = date_utils.date_range(s, u)
             if not dates:
-                typer.echo("Already up to date.")
+                _echo("Already up to date.")
                 return
             catchup_endpoints = (s, u)
         else:
@@ -452,7 +461,7 @@ def summarize_daily(
             _print_range_results("Daily summary", range_results)
         else:
             path = service.daily(dates[0])
-            typer.echo(f"Daily summary → {path}")
+            _echo(f"Daily summary → {path}")
         _print_usage_report(llm)
     except WorkRecapError as e:
         _handle_error(e)
@@ -472,7 +481,7 @@ def summarize_weekly(
         llm = _get_llm_router(config)
         service = SummarizerService(config, llm)
         path = service.weekly(year, week, force=force)
-        typer.echo(f"Weekly summary → {path}")
+        _echo(f"Weekly summary → {path}")
         _print_usage_report(llm)
     except WorkRecapError as e:
         _handle_error(e)
@@ -492,7 +501,7 @@ def summarize_monthly(
         llm = _get_llm_router(config)
         service = SummarizerService(config, llm)
         path = service.monthly(year, month, force=force)
-        typer.echo(f"Monthly summary → {path}")
+        _echo(f"Monthly summary → {path}")
         _print_usage_report(llm)
     except WorkRecapError as e:
         _handle_error(e)
@@ -511,7 +520,7 @@ def summarize_yearly(
         llm = _get_llm_router(config)
         service = SummarizerService(config, llm)
         path = service.yearly(year, force=force)
-        typer.echo(f"Yearly summary → {path}")
+        _echo(f"Yearly summary → {path}")
         _print_usage_report(llm)
     except WorkRecapError as e:
         _handle_error(e)
@@ -545,7 +554,7 @@ def run(
     types: set[str] | None = None
     if type is not None:
         if type not in VALID_TYPES:
-            typer.echo(f"Invalid type: {type}. Must be one of {VALID_TYPES}", err=True)
+            _echo(f"Invalid type: {type}. Must be one of {VALID_TYPES}", err=True)
             raise typer.Exit(code=1)
         types = {type}
 
@@ -561,7 +570,7 @@ def run(
             s, u = date_utils.catchup_range(last)
             dates = date_utils.date_range(s, u)
             if not dates:
-                typer.echo("Already up to date.")
+                _echo("Already up to date.")
                 return
             catchup_endpoints = (s, u)
         else:
@@ -606,11 +615,11 @@ def run(
             succeeded = sum(1 for r in results if r["status"] == "success")
             skipped = sum(1 for r in results if r["status"] == "skipped")
             failed = sum(1 for r in results if r["status"] == "failed")
-            typer.echo(f"Range complete: {succeeded} succeeded, {skipped} skipped, {failed} failed")
+            _echo(f"Range complete: {succeeded} succeeded, {skipped} skipped, {failed} failed")
             for r in results:
                 mark = {"success": "✓", "skipped": "—", "failed": "✗"}.get(r["status"], "?")
                 msg = r.get("path", r.get("error", ""))
-                typer.echo(f"  {mark} {r['date']}: {msg}")
+                _echo(f"  {mark} {r['date']}: {msg}")
             ghes.close()
 
             # Hierarchical summarization after daily pipeline
@@ -618,7 +627,7 @@ def run(
                 if weekly:
                     yr, wk = _parse_weekly(weekly)
                     path = summarizer.weekly(yr, wk, force=force)
-                    typer.echo(f"Weekly summary → {path}")
+                    _echo(f"Weekly summary → {path}")
                 elif monthly:
                     yr, mo = _parse_monthly(monthly)
                     for wy, ww in _weeks_in_month(yr, mo):
@@ -627,7 +636,7 @@ def run(
                         except SummarizeError:
                             pass
                     path = summarizer.monthly(yr, mo, force=force)
-                    typer.echo(f"Monthly summary → {path}")
+                    _echo(f"Monthly summary → {path}")
                 elif yearly is not None:
                     for mo in range(1, 13):
                         for wy, ww in _weeks_in_month(yearly, mo):
@@ -640,7 +649,7 @@ def run(
                         except SummarizeError:
                             pass
                     path = summarizer.yearly(yearly, force=force)
-                    typer.echo(f"Yearly summary → {path}")
+                    _echo(f"Yearly summary → {path}")
 
             _print_usage_report(llm)
             if failed > 0:
@@ -648,7 +657,7 @@ def run(
         else:
             path = orchestrator.run_daily(dates[0], types=types)
             ghes.close()
-            typer.echo(f"Pipeline complete → {path}")
+            _echo(f"Pipeline complete → {path}")
             _print_usage_report(llm)
     except WorkRecapError as e:
         _handle_error(e)
@@ -673,7 +682,7 @@ def ask(
         llm = _get_llm_router(config)
         service = SummarizerService(config, llm)
         answer = service.query(question, months_back=months)
-        typer.echo(answer)
+        _echo(answer)
         _print_usage_report(llm)
     except WorkRecapError as e:
         _handle_error(e)
@@ -705,12 +714,12 @@ def models() -> None:
 
     model_list = discover_models(providers)
     if not model_list:
-        typer.echo("No models discovered. Check provider configuration.")
+        _echo("No models discovered. Check provider configuration.")
         return
 
     current_provider = ""
     for m in model_list:
         if m.provider != current_provider:
             current_provider = m.provider
-            typer.echo(f"\n[{current_provider}]")
-        typer.echo(f"  {m.id:40s}  {m.name}")
+            _echo(f"\n[{current_provider}]")
+        _echo(f"  {m.id:40s}  {m.name}")

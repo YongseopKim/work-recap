@@ -1905,3 +1905,40 @@ class TestModelsCommand:
         result = runner.invoke(app, ["models"])
         assert result.exit_code == 0
         assert "No models discovered" in result.output
+
+
+# ── _echo 래퍼 테스트 ──
+
+
+class TestEcho:
+    """_echo() wraps typer.echo AND logs to file-only logger."""
+
+    @patch("workrecap.cli.main.typer")
+    @patch("workrecap.cli.main._file_logger")
+    def test_echo_normal_msg(self, mock_logger, mock_typer):
+        """일반 메시지 → typer.echo + INFO 로그."""
+        from workrecap.cli.main import _echo
+
+        _echo("hello")
+        mock_typer.echo.assert_called_once_with("hello", err=False)
+        mock_logger.log.assert_called_once_with(logging.INFO, "hello")
+
+    @patch("workrecap.cli.main.typer")
+    @patch("workrecap.cli.main._file_logger")
+    def test_echo_err_msg(self, mock_logger, mock_typer):
+        """err=True → typer.echo(err=True) + ERROR 로그."""
+        from workrecap.cli.main import _echo
+
+        _echo("bad", err=True)
+        mock_typer.echo.assert_called_once_with("bad", err=True)
+        mock_logger.log.assert_called_once_with(logging.ERROR, "bad")
+
+    @patch("workrecap.cli.main.typer")
+    @patch("workrecap.cli.main._file_logger")
+    def test_echo_empty_skips_log(self, mock_logger, mock_typer):
+        """빈 문자열 → typer.echo는 호출, 로그는 생략."""
+        from workrecap.cli.main import _echo
+
+        _echo("")
+        mock_typer.echo.assert_called_once_with("", err=False)
+        mock_logger.log.assert_not_called()
