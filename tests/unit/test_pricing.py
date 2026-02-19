@@ -76,3 +76,28 @@ class TestPricingTable:
             completion_tokens=0,
         )
         assert cost > 0
+
+    def test_claude_sonnet_4_6_has_pricing(self):
+        """claude-sonnet-4-6 must have pricing (was missing, causing $0 reports)."""
+        pt = PricingTable()
+        rate = pt.get_rate("anthropic", "claude-sonnet-4-6")
+        assert rate is not None
+        assert rate == (3.00, 15.00)
+
+    def test_claude_opus_4_6_has_pricing(self):
+        pt = PricingTable()
+        rate = pt.get_rate("anthropic", "claude-opus-4-6")
+        assert rate is not None
+        assert rate == (5.00, 25.00)
+
+    def test_gpt5_has_pricing(self):
+        pt = PricingTable()
+        rate = pt.get_rate("openai", "gpt-5")
+        assert rate is not None
+        assert rate == (1.25, 10.00)
+
+    def test_gemini_3_pro_has_pricing(self):
+        pt = PricingTable()
+        rate = pt.get_rate("gemini", "gemini-3-pro")
+        assert rate is not None
+        assert rate == (2.00, 12.00)
