@@ -18,6 +18,12 @@ if TYPE_CHECKING:
 from workrecap.exceptions import SummarizeError
 from workrecap.infra.provider_config import ProviderConfig
 from workrecap.infra.providers.base import LLMProvider
+from workrecap.infra.providers.batch_mixin import (
+    BatchCapable,
+    BatchRequest,
+    BatchResult,
+    BatchStatus,
+)
 from workrecap.models import TokenUsage
 
 logger = logging.getLogger(__name__)
@@ -202,6 +208,92 @@ class LLMRouter:
     def usage_tracker(self) -> UsageTracker | None:
         """Per-model usage tracker, if configured."""
         return self._tracker
+
+    # ── Batch API ──
+
+    def submit_batch(self, requests: list[dict], *, task: str = "default") -> str:
+        """Submit a batch job. Returns batch_id.
+
+        Args:
+            requests: List of dicts with keys: custom_id, system_prompt, user_content,
+                      and optional: json_mode, max_tokens, cache_system_prompt.
+            task: Task name for routing (determines provider/model).
+
+        Raises:
+            ValueError: If the provider does not support batch processing.
+        """
+        task_config = self._config.get_task_config(task)
+        provider = self._get_provider(task_config.provider)
+
+        if not isinstance(provider, BatchCapable):
+            raise ValueError(f"Provider '{task_config.provider}' does not support batch processing")
+
+        batch_requests = [
+            BatchRequest(
+                custom_id=r["custom_id"],
+                model=task_config.model,
+                system_prompt=r["system_prompt"],
+                user_content=r["user_content"],
+                json_mode=r.get("json_mode", False),
+                max_tokens=r.get("max_tokens") or task_config.max_tokens,
+                cache_system_prompt=r.get("cache_system_prompt", False),
+            )
+            for r in requests
+        ]
+        logger.info(
+            "Submitting batch: task=%s provider=%s requests=%d",
+            task,
+            task_config.provider,
+            len(batch_requests),
+        )
+        return provider.submit_batch(batch_requests)
+
+    def get_batch_status(self, batch_id: str, *, task: str) -> BatchStatus:
+        """Get the current status of a batch job."""
+        provider = self._get_batch_provider(task)
+        return provider.get_batch_status(batch_id)
+
+    def get_batch_results(self, batch_id: str, *, task: str) -> list[BatchResult]:
+        """Retrieve results from a completed batch."""
+        provider = self._get_batch_provider(task)
+        return provider.get_batch_results(batch_id)
+
+    def wait_for_batch(
+        self,
+        batch_id: str,
+        *,
+        task: str,
+        timeout: int | float = 3600,
+        poll_interval: int | float = 10,
+    ) -> list[BatchResult]:
+        """Poll until batch completes, then return results.
+
+        Raises:
+            TimeoutError: If batch doesn't complete within timeout.
+            RuntimeError: If batch fails or expires.
+        """
+        provider = self._get_batch_provider(task)
+        deadline = time.monotonic() + timeout
+
+        while True:
+            status = provider.get_batch_status(batch_id)
+            if status == BatchStatus.COMPLETED:
+                return provider.get_batch_results(batch_id)
+            if status in (BatchStatus.FAILED, BatchStatus.EXPIRED):
+                raise RuntimeError(f"Batch {batch_id} failed with status: {status.value}")
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Batch {batch_id} timed out after {timeout}s (status: {status.value})"
+                )
+            time.sleep(poll_interval)
+
+    def _get_batch_provider(self, task: str) -> BatchCapable:
+        """Get a BatchCapable provider for the given task."""
+        task_config = self._config.get_task_config(task)
+        provider = self._get_provider(task_config.provider)
+        if not isinstance(provider, BatchCapable):
+            raise ValueError(f"Provider '{task_config.provider}' does not support batch processing")
+        return provider
 
     def _get_provider(self, provider_name: str) -> LLMProvider:
         """Get or create a provider instance (lazy + cached)."""

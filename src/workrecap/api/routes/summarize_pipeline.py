@@ -23,6 +23,7 @@ class SummarizeDailyRangeRequest(BaseModel):
     until: str
     force: bool = False
     max_workers: int | None = None
+    batch: bool = False
 
 
 class SummarizeWeeklyRequest(BaseModel):
@@ -72,6 +73,7 @@ def _summarize_daily_range_task(
     store: JobStore,
     force: bool = False,
     max_workers: int = 1,
+    batch: bool = False,
 ) -> None:
     """BackgroundTask: 기간 범위 daily summary 생성."""
     logger.info(
@@ -86,7 +88,9 @@ def _summarize_daily_range_task(
         llm = get_llm_router(config)
         ds = DailyStateStore(config.daily_state_path)
         service = SummarizerService(config, llm, daily_state=ds)
-        results = service.daily_range(since, until, force=force, max_workers=max_workers)
+        results = service.daily_range(
+            since, until, force=force, max_workers=max_workers, batch=batch
+        )
 
         succeeded = sum(1 for r in results if r["status"] == "success")
         result_msg = f"{succeeded}/{len(results)} succeeded"
@@ -188,6 +192,7 @@ def summarize_daily_range(
         store,
         force=body.force,
         max_workers=max_workers,
+        batch=body.batch,
     )
     return {"job_id": job.job_id, "status": job.status.value}
 

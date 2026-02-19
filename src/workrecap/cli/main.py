@@ -357,9 +357,16 @@ def normalize(
         True, "--enrich/--no-enrich", help="Enrich activities with LLM (change_summary, intent)"
     ),
     workers: int = typer.Option(None, "--workers", "-w", help="Parallel workers (default: config)"),
+    batch: bool = typer.Option(False, "--batch/--no-batch", help="Use batch API for LLM calls"),
 ) -> None:
     """Normalize raw PR data into activities and stats."""
-    logger.info("Command: normalize date=%s force=%s enrich=%s", target_date, force, enrich)
+    logger.info(
+        "Command: normalize date=%s force=%s enrich=%s batch=%s",
+        target_date,
+        force,
+        enrich,
+        batch,
+    )
     dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
     endpoints = _resolve_range_endpoints(target_date, since, until, weekly, monthly, yearly)
 
@@ -394,6 +401,7 @@ def normalize(
                 force=force,
                 progress=_progress,
                 max_workers=max_workers,
+                batch=batch,
             )
             _print_range_results("Normalized", range_results)
         else:
@@ -421,9 +429,10 @@ def summarize_daily(
     yearly: int = typer.Option(None, help="Year, e.g. 2026"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-summarize even if data exists"),
     workers: int = typer.Option(None, "--workers", "-w", help="Parallel workers (default: config)"),
+    batch: bool = typer.Option(False, "--batch/--no-batch", help="Use batch API for LLM calls"),
 ) -> None:
     """Generate daily summary."""
-    logger.info("Command: summarize daily date=%s force=%s", target_date, force)
+    logger.info("Command: summarize daily date=%s force=%s batch=%s", target_date, force, batch)
     dates = _resolve_dates(target_date, since, until, weekly, monthly, yearly)
     endpoints = _resolve_range_endpoints(target_date, since, until, weekly, monthly, yearly)
 
@@ -458,6 +467,7 @@ def summarize_daily(
                 force=force,
                 progress=_progress,
                 max_workers=max_workers,
+                batch=batch,
             )
             _print_range_results("Daily summary", range_results)
         else:
@@ -547,10 +557,16 @@ def run(
         True, "--enrich/--no-enrich", help="Enrich activities with LLM (change_summary, intent)"
     ),
     workers: int = typer.Option(None, "--workers", "-w", help="Parallel workers (default: config)"),
+    batch: bool = typer.Option(False, "--batch/--no-batch", help="Use batch API for LLM calls"),
 ) -> None:
     """Run full pipeline (fetch → normalize → summarize)."""
     logger.info(
-        "Command: run date=%s types=%s force=%s enrich=%s", target_date, type, force, enrich
+        "Command: run date=%s types=%s force=%s enrich=%s batch=%s",
+        target_date,
+        type,
+        force,
+        enrich,
+        batch,
     )
     # --type 검증
     types: set[str] | None = None
@@ -613,6 +629,7 @@ def run(
                 types=types,
                 progress=_progress,
                 max_workers=max_workers,
+                batch=batch,
             )
             succeeded = sum(1 for r in results if r["status"] == "success")
             skipped = sum(1 for r in results if r["status"] == "skipped")

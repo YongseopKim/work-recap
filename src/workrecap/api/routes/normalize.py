@@ -29,6 +29,7 @@ class NormalizeRangeRequest(BaseModel):
     force: bool = False
     enrich: bool = True
     max_workers: int | None = None
+    batch: bool = False
 
 
 def _normalize_single_task(
@@ -67,6 +68,7 @@ def _normalize_range_task(
     force: bool = False,
     enrich: bool = True,
     max_workers: int = 1,
+    batch: bool = False,
 ) -> None:
     """BackgroundTask: 기간 범위 normalize."""
     logger.info("Background task start: normalize_range %s..%s (job=%s)", since, until, job_id)
@@ -76,7 +78,9 @@ def _normalize_range_task(
         ds = DailyStateStore(config.daily_state_path)
         llm = get_llm_router(config) if enrich else None
         service = NormalizerService(config, daily_state=ds, llm=llm)
-        results = service.normalize_range(since, until, force=force, max_workers=max_workers)
+        results = service.normalize_range(
+            since, until, force=force, max_workers=max_workers, batch=batch
+        )
 
         succeeded = sum(1 for r in results if r["status"] == "success")
         result_msg = f"{succeeded}/{len(results)} succeeded"
@@ -109,6 +113,7 @@ def normalize_range(
         force=body.force,
         enrich=body.enrich,
         max_workers=max_workers,
+        batch=body.batch,
     )
     return {"job_id": job.job_id, "status": job.status.value}
 
