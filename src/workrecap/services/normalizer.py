@@ -138,19 +138,28 @@ class NormalizerService:
         force: bool = False,
         progress: Callable[[str], None] | None = None,
         max_workers: int = 1,
+        batch: bool = False,
     ) -> list[dict]:
-        """날짜 범위 순회하며 normalize. skip/force/resilience 지원."""
+        """날짜 범위 순회하며 normalize. skip/force/resilience 지원.
+
+        Args:
+            batch: If True, use batch API for LLM enrichment (all dates in one batch call).
+        """
         dates = date_range(since, until)
         logger.info(
-            "normalize_range %s..%s (%d dates, force=%s, workers=%d)",
+            "normalize_range %s..%s (%d dates, force=%s, workers=%d, batch=%s)",
             since,
             until,
             len(dates),
             force,
             max_workers,
+            batch,
         )
         if progress:
             progress(f"Normalizing {since}..{until} ({len(dates)} dates)")
+
+        if batch and self._llm is not None:
+            return self._normalize_range_batch(dates, force, progress)
 
         if max_workers <= 1:
             return self._normalize_range_sequential(dates, force, progress)
@@ -203,6 +212,182 @@ class NormalizerService:
         # Return in original date order
         return [results_by_date[d] for d in dates]
 
+    def _normalize_range_batch(
+        self,
+        dates: list[str],
+        force: bool,
+        progress: Callable[[str], None] | None,
+    ) -> list[dict]:
+        """Batch mode: normalize all dates, then enrich via single batch API call."""
+        # Phase 1: Normalize all dates without enrichment, collecting activities per date
+        date_activities: dict[str, list[Activity]] = {}
+        results: list[dict] = []
+
+        for d in dates:
+            try:
+                if not force and self._is_date_normalized(d):
+                    results.append({"date": d, "status": "skipped"})
+                    continue
+                activities = self._normalize_without_enrich(d, progress)
+                date_activities[d] = activities
+                results.append({"date": d, "status": "success"})
+            except Exception as e:
+                logger.warning("Failed to normalize %s: %s", d, e)
+                results.append({"date": d, "status": "failed", "error": str(e)})
+
+        # Phase 2: Batch enrichment for all collected activities
+        if date_activities:
+            self._batch_enrich(date_activities)
+
+        # Phase 3: Save enriched activities
+        for d, activities in date_activities.items():
+            try:
+                out_dir = self._config.date_normalized_dir(d)
+                save_jsonl(activities, out_dir / "activities.jsonl")
+            except Exception as e:
+                logger.warning("Failed to save enriched activities for %s: %s", d, e)
+
+        return results
+
+    def _normalize_without_enrich(
+        self, target_date: str, progress: Callable[[str], None] | None
+    ) -> list[Activity]:
+        """Normalize a single date without LLM enrichment. Returns activities list."""
+        logger.info("Normalizing (no enrich) %s", target_date)
+        if progress:
+            progress(f"Normalizing {target_date}...")
+        raw_path = self._config.date_raw_dir(target_date) / "prs.json"
+        if not raw_path.exists():
+            raise NormalizeError(f"Raw file not found: {raw_path}")
+
+        raw_data = load_json(raw_path)
+        prs = [pr_raw_from_dict(d) for d in raw_data]
+
+        raw_dir = self._config.date_raw_dir(target_date)
+        commits: list[CommitRaw] = []
+        commits_path = raw_dir / "commits.json"
+        if commits_path.exists():
+            try:
+                commits = [commit_raw_from_dict(d) for d in load_json(commits_path)]
+            except Exception:
+                logger.warning("Failed to parse %s, skipping commits", commits_path)
+
+        issues: list[IssueRaw] = []
+        issues_path = raw_dir / "issues.json"
+        if issues_path.exists():
+            try:
+                issues = [issue_raw_from_dict(d) for d in load_json(issues_path)]
+            except Exception:
+                logger.warning("Failed to parse %s, skipping issues", issues_path)
+
+        pr_activities = self._convert_activities(prs, target_date)
+        commit_activities = self._convert_commit_activities(commits, target_date)
+        issue_activities = self._convert_issue_activities(issues, target_date)
+
+        activities = pr_activities + commit_activities + issue_activities
+        activities.sort(key=lambda a: a.ts)
+
+        stats = self._compute_stats(activities, target_date)
+
+        out_dir = self._config.date_normalized_dir(target_date)
+        save_jsonl(activities, out_dir / "activities.jsonl")
+        save_json(stats, out_dir / "stats.json")
+
+        self._update_checkpoint(target_date)
+        return activities
+
+    def _batch_enrich(self, date_activities: dict[str, list[Activity]]) -> None:
+        """Submit enrichment for all dates as a single batch and apply results."""
+        batch_requests: list[dict] = []
+
+        for d, activities in date_activities.items():
+            if not activities:
+                continue
+            prompt = self._prepare_enrich_prompt(activities)
+            if prompt is None:
+                continue
+            system_prompt, user_content = prompt
+            batch_requests.append(
+                {
+                    "custom_id": f"enrich-{d}",
+                    "system_prompt": system_prompt,
+                    "user_content": user_content,
+                    "json_mode": True,
+                }
+            )
+
+        if not batch_requests:
+            logger.info("No enrichment prompts prepared for batch")
+            return
+
+        try:
+            logger.info("Submitting batch enrichment for %d dates", len(batch_requests))
+            batch_id = self._llm.submit_batch(batch_requests, task="enrich")
+            results = self._llm.wait_for_batch(batch_id, task="enrich")
+
+            # Build result map: custom_id → content
+            result_map: dict[str, str] = {}
+            for r in results:
+                if r.content is not None:
+                    result_map[r.custom_id] = r.content
+                elif r.error:
+                    logger.warning("Batch enrichment error for %s: %s", r.custom_id, r.error)
+
+            # Apply enrichment results
+            for d, activities in date_activities.items():
+                key = f"enrich-{d}"
+                if key in result_map:
+                    self._apply_enrichment(activities, result_map[key])
+
+        except Exception as e:
+            logger.warning("Batch enrichment failed, continuing without enrichment: %s", e)
+
+    def _prepare_enrich_prompt(self, activities: list[Activity]) -> tuple[str, str] | None:
+        """Prepare (system_prompt, user_content) for enrichment. Returns None if no template."""
+        template_path = self._config.prompts_dir / "enrich.md"
+        if not template_path.exists():
+            return None
+
+        template_text = template_path.read_text(encoding="utf-8")
+        marker = "<!-- SPLIT -->"
+
+        act_dicts = [
+            {
+                "kind": act.kind.value,
+                "title": act.title,
+                "repo": act.repo,
+                "body": act.body,
+                "files": act.files,
+                "file_patches": act.file_patches,
+                "review_bodies": act.review_bodies,
+                "comment_bodies": act.comment_bodies,
+            }
+            for act in activities
+        ]
+
+        if marker in template_text:
+            static_part, dynamic_part = template_text.split(marker, 1)
+            system_prompt = static_part.strip()
+            user_content = Template(dynamic_part).render(activities=act_dicts).strip()
+        else:
+            system_prompt = "You are a code change classifier."
+            user_content = Template(template_text).render(activities=act_dicts)
+
+        return system_prompt, user_content
+
+    @staticmethod
+    def _apply_enrichment(activities: list[Activity], response_text: str) -> None:
+        """Parse enrichment JSON and apply to activities."""
+        try:
+            enrichments = json.loads(response_text)
+            for entry in enrichments:
+                idx = entry.get("index")
+                if idx is not None and 0 <= idx < len(activities):
+                    activities[idx].change_summary = entry.get("change_summary", "")
+                    activities[idx].intent = entry.get("intent", "")
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning("Failed to parse enrichment response: %s", e)
+
     def _is_date_normalized(self, date_str: str) -> bool:
         """daily_state 있으면 timestamp cascade 체크, 없으면 파일 존재 체크."""
         if self._daily_state is not None:
@@ -232,37 +417,12 @@ class NormalizerService:
 
         logger.info("Enriching %d activities with LLM", len(activities))
         try:
-            template_path = self._config.prompts_dir / "enrich.md"
-            if not template_path.exists():
-                logger.warning("Enrich template not found: %s", template_path)
+            prompt = self._prepare_enrich_prompt(activities)
+            if prompt is None:
+                logger.warning("Enrich template not found")
                 return
 
-            template_text = template_path.read_text(encoding="utf-8")
-            marker = "<!-- SPLIT -->"
-
-            act_dicts = []
-            for act in activities:
-                act_dicts.append(
-                    {
-                        "kind": act.kind.value,
-                        "title": act.title,
-                        "repo": act.repo,
-                        "body": act.body,
-                        "files": act.files,
-                        "file_patches": act.file_patches,
-                        "review_bodies": act.review_bodies,
-                        "comment_bodies": act.comment_bodies,
-                    }
-                )
-
-            if marker in template_text:
-                static_part, dynamic_part = template_text.split(marker, 1)
-                system_prompt = static_part.strip()
-                user_content = Template(dynamic_part).render(activities=act_dicts).strip()
-            else:
-                system_prompt = "You are a code change classifier."
-                user_content = Template(template_text).render(activities=act_dicts)
-
+            system_prompt, user_content = prompt
             response = self._llm.chat(
                 system_prompt,
                 user_content,
@@ -270,14 +430,8 @@ class NormalizerService:
                 json_mode=True,
             )
 
-            enrichments = json.loads(response)
-            for entry in enrichments:
-                idx = entry.get("index")
-                if idx is not None and 0 <= idx < len(activities):
-                    activities[idx].change_summary = entry.get("change_summary", "")
-                    activities[idx].intent = entry.get("intent", "")
-
-            logger.info("Enrichment complete: %d activities enriched", len(enrichments))
+            self._apply_enrichment(activities, response)
+            logger.info("Enrichment complete for %d activities", len(activities))
         except Exception as e:
             logger.warning("LLM enrichment failed, continuing without enrichment: %s", e)
 

@@ -45,6 +45,7 @@ class RunRangeRequest(BaseModel):
     summarize_weekly: str | None = None
     summarize_monthly: str | None = None
     summarize_yearly: int | None = None
+    batch: bool = False
 
 
 def _weeks_in_month(year: int, month: int) -> list[tuple[int, int]]:
@@ -156,6 +157,7 @@ def _run_range_task(
     summarize_weekly: str | None = None,
     summarize_monthly: str | None = None,
     summarize_yearly: int | None = None,
+    batch: bool = False,
 ) -> None:
     """BackgroundTask: 기간 범위 파이프라인 실행."""
     logger.info(
@@ -191,6 +193,7 @@ def _run_range_task(
             force=force,
             types=types,
             max_workers=max_workers,
+            batch=batch,
         )
 
         succeeded = sum(1 for r in results if r["status"] == "success")
@@ -249,6 +252,7 @@ def run_pipeline_range(
         summarize_weekly=body.summarize_weekly,
         summarize_monthly=body.summarize_monthly,
         summarize_yearly=body.summarize_yearly,
+        batch=body.batch,
     )
     return {"job_id": job.job_id, "status": job.status.value}
 

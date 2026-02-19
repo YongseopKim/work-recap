@@ -17,6 +17,7 @@ from jinja2 import Template
 from workrecap.config import AppConfig
 from workrecap.exceptions import SummarizeError
 from workrecap.infra.llm_router import LLMRouter
+from workrecap.infra.providers.batch_mixin import BatchResult
 from workrecap.models import load_json, load_jsonl
 from workrecap.services.date_utils import date_range
 
@@ -92,19 +93,28 @@ class SummarizerService:
         force: bool = False,
         progress: Callable[[str], None] | None = None,
         max_workers: int = 1,
+        batch: bool = False,
     ) -> list[dict]:
-        """날짜 범위 순회하며 daily summary 생성. skip/force/resilience 지원."""
+        """날짜 범위 순회하며 daily summary 생성. skip/force/resilience 지원.
+
+        Args:
+            batch: If True, use batch API for LLM calls (all dates in one batch).
+        """
         dates = date_range(since, until)
         logger.info(
-            "daily_range %s..%s (%d dates, force=%s, workers=%d)",
+            "daily_range %s..%s (%d dates, force=%s, workers=%d, batch=%s)",
             since,
             until,
             len(dates),
             force,
             max_workers,
+            batch,
         )
         if progress:
             progress(f"Summarizing {since}..{until} ({len(dates)} dates)")
+
+        if batch:
+            return self._daily_range_batch(dates, force, progress)
 
         if max_workers <= 1:
             return self._daily_range_sequential(dates, force, progress)
@@ -155,6 +165,101 @@ class SummarizerService:
                 results_by_date[result["date"]] = result
 
         return [results_by_date[d] for d in dates]
+
+    def _daily_range_batch(
+        self,
+        dates: list[str],
+        force: bool,
+        progress: Callable[[str], None] | None,
+    ) -> list[dict]:
+        """Batch mode: prepare all daily prompts, submit as one batch."""
+        results: list[dict] = []
+        batch_requests: list[dict] = []
+        # Track which dates need batch vs marker vs skip
+        batch_dates: set[str] = set()
+        marker_dates: set[str] = set()
+
+        for d in dates:
+            if not force and self._is_date_summarized(d):
+                results.append({"date": d, "status": "skipped"})
+                continue
+
+            norm_dir = self._config.date_normalized_dir(d)
+            activities_path = norm_dir / "activities.jsonl"
+            stats_path = norm_dir / "stats.json"
+
+            if not activities_path.exists() or not stats_path.exists():
+                results.append(
+                    {
+                        "date": d,
+                        "status": "failed",
+                        "error": f"Normalized data not found for {d}",
+                    }
+                )
+                continue
+
+            activities = load_jsonl(activities_path)
+            stats = load_json(stats_path)
+
+            if not activities:
+                # Write marker file for empty days
+                output_path = self._config.daily_summary_path(d)
+                marker = (
+                    f"# {d} Daily Summary\n\n활동이 없는 날입니다. (No activity on this day.)\n"
+                )
+                self._save_markdown(output_path, marker)
+                self._update_checkpoint(d)
+                marker_dates.add(d)
+                results.append({"date": d, "status": "success"})
+                continue
+
+            system_prompt, dynamic = self._render_split_prompt("daily.md", date=d, stats=stats)
+            user_content = dynamic + "\n\n" + self._format_activities(activities)
+
+            batch_requests.append(
+                {
+                    "custom_id": f"daily-{d}",
+                    "system_prompt": system_prompt,
+                    "user_content": user_content,
+                }
+            )
+            batch_dates.add(d)
+
+        if not batch_requests:
+            return results
+
+        try:
+            logger.info("Submitting batch summarization for %d dates", len(batch_requests))
+            batch_id = self._llm.submit_batch(batch_requests, task="daily")
+            batch_results = self._llm.wait_for_batch(batch_id, task="daily")
+
+            result_map: dict[str, BatchResult] = {r.custom_id: r for r in batch_results}
+
+            for d in dates:
+                if d not in batch_dates:
+                    continue
+                key = f"daily-{d}"
+                br = result_map.get(key)
+
+                if br is None or br.error:
+                    error_msg = br.error if br else "No result returned"
+                    results.append({"date": d, "status": "failed", "error": error_msg})
+                    continue
+
+                output_path = self._config.daily_summary_path(d)
+                self._save_markdown(output_path, br.content)
+                self._update_checkpoint(d)
+                results.append({"date": d, "status": "success"})
+
+        except Exception as e:
+            logger.error("Batch summarization failed: %s", e)
+            for d in dates:
+                if d in batch_dates and not any(r["date"] == d for r in results):
+                    results.append({"date": d, "status": "failed", "error": str(e)})
+
+        # Ensure results are in date order
+        result_by_date = {r["date"]: r for r in results}
+        return [result_by_date[d] for d in dates if d in result_by_date]
 
     def weekly(self, year: int, week: int, force: bool = False) -> Path:
         """Weekly summary 생성."""

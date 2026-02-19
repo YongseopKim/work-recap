@@ -478,6 +478,7 @@ class TestNormalizeDateRange:
             force=False,
             progress=ANY,
             max_workers=5,
+            batch=False,
         )
         assert "3 day(s)" in result.output
 
@@ -565,6 +566,7 @@ class TestSummarizeDailyDateRange:
             force=False,
             progress=ANY,
             max_workers=5,
+            batch=False,
         )
         assert "3 day(s)" in result.output
 
@@ -748,6 +750,7 @@ class TestRun:
             types=None,
             progress=ANY,
             max_workers=5,
+            batch=False,
         )
 
     @patch("workrecap.cli.main.date_utils")
@@ -872,6 +875,7 @@ class TestRunForce:
             types=None,
             progress=ANY,
             max_workers=5,
+            batch=False,
         )
 
     @patch("workrecap.cli.main.OrchestratorService")
@@ -902,6 +906,7 @@ class TestRunForce:
             types=None,
             progress=ANY,
             max_workers=5,
+            batch=False,
         )
 
     @patch("workrecap.cli.main.OrchestratorService")
@@ -1028,6 +1033,7 @@ class TestNormalizeCatchUp:
             force=False,
             progress=ANY,
             max_workers=5,
+            batch=False,
         )
 
     @patch("workrecap.cli.main.date_utils")
@@ -1065,6 +1071,7 @@ class TestNormalizeForce:
             force=True,
             progress=ANY,
             max_workers=5,
+            batch=False,
         )
 
     @patch("workrecap.cli.main.NormalizerService")
@@ -1147,6 +1154,7 @@ class TestSummarizeDailyCatchUp:
             force=False,
             progress=ANY,
             max_workers=5,
+            batch=False,
         )
 
     @patch("workrecap.cli.main.date_utils")
@@ -1184,6 +1192,7 @@ class TestSummarizeDailyForce:
             force=True,
             progress=ANY,
             max_workers=5,
+            batch=False,
         )
 
 
@@ -1315,6 +1324,7 @@ class TestRunTypeFilter:
             types={"commits"},
             progress=ANY,
             max_workers=5,
+            batch=False,
         )
 
     def test_type_invalid(self):
@@ -1353,6 +1363,7 @@ class TestRunTypeFilter:
             types={"issues"},
             progress=ANY,
             max_workers=5,
+            batch=False,
         )
 
 
@@ -1942,3 +1953,84 @@ class TestEcho:
         _echo("")
         mock_typer.echo.assert_called_once_with("", err=False)
         mock_logger.log.assert_not_called()
+
+
+# ── --batch 옵션 테스트 ──
+
+
+class TestBatchOption:
+    @patch("workrecap.cli.main.NormalizerService")
+    def test_normalize_batch_flag(self, mock_cls):
+        """normalize --batch → normalize_range(batch=True)."""
+        mock_cls.return_value.normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        result = runner.invoke(
+            app,
+            ["normalize", "--since", "2025-02-14", "--until", "2025-02-14", "--batch"],
+        )
+        assert result.exit_code == 0
+        _, kwargs = mock_cls.return_value.normalize_range.call_args
+        assert kwargs.get("batch") is True
+
+    @patch("workrecap.cli.main.NormalizerService")
+    def test_normalize_no_batch_default(self, mock_cls):
+        """normalize 기본값 → batch=False."""
+        mock_cls.return_value.normalize_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        result = runner.invoke(
+            app,
+            ["normalize", "--since", "2025-02-14", "--until", "2025-02-14"],
+        )
+        assert result.exit_code == 0
+        _, kwargs = mock_cls.return_value.normalize_range.call_args
+        assert kwargs.get("batch", False) is False
+
+    @patch("workrecap.cli.main.SummarizerService")
+    def test_summarize_daily_batch_flag(self, mock_cls):
+        """summarize daily --batch → daily_range(batch=True)."""
+        mock_cls.return_value.daily_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        result = runner.invoke(
+            app,
+            ["summarize", "daily", "--since", "2025-02-14", "--until", "2025-02-14", "--batch"],
+        )
+        assert result.exit_code == 0
+        _, kwargs = mock_cls.return_value.daily_range.call_args
+        assert kwargs.get("batch") is True
+
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
+    def test_run_batch_flag(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        """run --batch → orchestrator.run_range(batch=True)."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2025-02-14", "status": "success", "path": "/tmp/summary.md"},
+        ]
+        result = runner.invoke(
+            app,
+            ["run", "--since", "2025-02-14", "--until", "2025-02-14", "--batch"],
+        )
+        assert result.exit_code == 0
+        _, kwargs = mock_orch.return_value.run_range.call_args
+        assert kwargs.get("batch") is True
+
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
+    def test_run_no_batch_default(self, mock_fetch, mock_norm, mock_summ, mock_orch):
+        """run 기본값 → batch=False."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2025-02-14", "status": "success", "path": "/tmp/summary.md"},
+        ]
+        result = runner.invoke(
+            app,
+            ["run", "--since", "2025-02-14", "--until", "2025-02-14"],
+        )
+        assert result.exit_code == 0
+        _, kwargs = mock_orch.return_value.run_range.call_args
+        assert kwargs.get("batch", False) is False

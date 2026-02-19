@@ -1237,6 +1237,77 @@ class TestQuery:
 # ── TestStaticFiles ──
 
 
+# ── Batch API 옵션 테스트 ──
+
+
+class TestBatchApiOption:
+    """batch 파라미터가 API request body를 통해 서비스에 전달되는지 검증."""
+
+    @patch("workrecap.api.routes.pipeline.OrchestratorService")
+    @patch("workrecap.api.routes.pipeline.SummarizerService")
+    @patch("workrecap.api.routes.pipeline.NormalizerService")
+    @patch("workrecap.api.routes.pipeline.FetcherService")
+    @patch("workrecap.api.routes.pipeline.FetchProgressStore")
+    @patch("workrecap.api.routes.pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.pipeline.get_llm_router")
+    @patch("workrecap.api.routes.pipeline.GHESClient")
+    def test_pipeline_run_range_batch(
+        self,
+        mock_ghes,
+        mock_llm,
+        mock_ds,
+        mock_ps,
+        mock_fetch,
+        mock_norm,
+        mock_summ,
+        mock_orch,
+        client,
+    ):
+        """POST /api/pipeline/run/range with batch=true → orchestrator.run_range(batch=True)."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2025-02-15", "status": "success", "path": "/p1"},
+        ]
+        resp = client.post(
+            "/api/pipeline/run/range",
+            json={"since": "2025-02-15", "until": "2025-02-15", "batch": True},
+        )
+        assert resp.status_code == 202
+        _, kwargs = mock_orch.return_value.run_range.call_args
+        assert kwargs.get("batch") is True
+
+    @patch("workrecap.api.routes.normalize.NormalizerService")
+    @patch("workrecap.api.routes.normalize.DailyStateStore")
+    @patch("workrecap.api.routes.normalize.get_llm_router")
+    def test_normalize_range_batch(self, mock_llm, mock_ds, mock_norm, client):
+        """POST /api/pipeline/normalize/range with batch=true → normalize_range(batch=True)."""
+        mock_norm.return_value.normalize_range.return_value = [
+            {"date": "2025-02-15", "status": "success"},
+        ]
+        resp = client.post(
+            "/api/pipeline/normalize/range",
+            json={"since": "2025-02-15", "until": "2025-02-15", "batch": True},
+        )
+        assert resp.status_code == 202
+        _, kwargs = mock_norm.return_value.normalize_range.call_args
+        assert kwargs.get("batch") is True
+
+    @patch("workrecap.api.routes.summarize_pipeline.SummarizerService")
+    @patch("workrecap.api.routes.summarize_pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.summarize_pipeline.get_llm_router")
+    def test_summarize_daily_range_batch(self, mock_llm, mock_ds, mock_summ, client):
+        """POST /api/pipeline/summarize/daily/range with batch=true → daily_range(batch=True)."""
+        mock_summ.return_value.daily_range.return_value = [
+            {"date": "2025-02-15", "status": "success"},
+        ]
+        resp = client.post(
+            "/api/pipeline/summarize/daily/range",
+            json={"since": "2025-02-15", "until": "2025-02-15", "batch": True},
+        )
+        assert resp.status_code == 202
+        _, kwargs = mock_summ.return_value.daily_range.call_args
+        assert kwargs.get("batch") is True
+
+
 class TestStaticFiles:
     def test_serves_index_html(self, client):
         """GET / → index.html 반환."""
