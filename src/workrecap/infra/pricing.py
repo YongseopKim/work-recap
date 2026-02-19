@@ -1,52 +1,31 @@
-"""Built-in pricing table for LLM cost estimation.
+"""Pricing table for LLM cost estimation — loaded from TOML.
 
-Prices are in USD per 1M tokens. Last updated: 2026-02-19.
-Sources:
-  - Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
-  - OpenAI: https://openai.com/api/pricing/
-  - Google: https://ai.google.dev/gemini-api/docs/pricing
+Prices are in USD per 1M tokens.
+File: pricing.toml (repo root, git-tracked).
 Unknown models return 0 cost (no error).
 """
 
 from __future__ import annotations
 
-# (prompt_rate, completion_rate) per 1M tokens
-_PRICING: dict[str, dict[str, tuple[float, float]]] = {
-    "openai": {
-        "gpt-5": (1.25, 10.00),
-        "gpt-5-mini": (0.25, 2.00),
-        "gpt-5-nano": (0.05, 0.40),
-        "gpt-4o": (2.50, 10.00),
-        "gpt-4o-mini": (0.15, 0.60),
-        "gpt-4.1": (2.00, 8.00),
-        "gpt-4.1-mini": (0.40, 1.60),
-        "gpt-4.1-nano": (0.10, 0.40),
-        "o3": (2.00, 8.00),
-        "o3-mini": (1.10, 4.40),
-        "o4-mini": (1.10, 4.40),
-    },
-    "anthropic": {
-        "claude-opus-4-6": (5.00, 25.00),
-        "claude-opus-4-5": (5.00, 25.00),
-        "claude-opus-4-1": (15.00, 75.00),
-        "claude-opus-4": (15.00, 75.00),
-        "claude-sonnet-4-6": (3.00, 15.00),
-        "claude-sonnet-4-5": (3.00, 15.00),
-        "claude-sonnet-4": (3.00, 15.00),
-        "claude-haiku-4-5": (1.00, 5.00),
-        "claude-haiku-3-5": (0.80, 4.00),
-        "claude-haiku-3": (0.25, 1.25),
-    },
-    "gemini": {
-        "gemini-3-pro": (2.00, 12.00),
-        "gemini-3-flash": (0.50, 3.00),
-        "gemini-2.5-pro": (1.25, 10.00),
-        "gemini-2.5-flash": (0.30, 2.50),
-        "gemini-2.5-flash-lite": (0.10, 0.40),
-        "gemini-2.0-flash": (0.10, 0.40),
-        "gemini-2.0-flash-lite": (0.075, 0.30),
-    },
-}
+import logging
+import tomllib
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+def _load_pricing(path: Path) -> dict[str, dict[str, tuple[float, float]]]:
+    """Load pricing data from a TOML file.
+
+    Returns {provider: {model: (input_rate, output_rate)}}.
+    """
+    raw = tomllib.loads(path.read_text())
+    pricing: dict[str, dict[str, tuple[float, float]]] = {}
+    for provider, models in raw.items():
+        pricing[provider] = {
+            model: (entry["input"], entry["output"]) for model, entry in models.items()
+        }
+    return pricing
 
 
 def _normalize_model_name(model: str) -> str:
@@ -59,11 +38,19 @@ def _normalize_model_name(model: str) -> str:
 
 
 class PricingTable:
-    """Built-in pricing lookup for known models."""
+    """Pricing lookup for known models, loaded from TOML."""
+
+    def __init__(self, path: Path | None = None) -> None:
+        resolved = path or Path("pricing.toml")
+        if resolved.exists():
+            self._pricing = _load_pricing(resolved)
+        else:
+            logger.warning("Pricing file not found: %s — all costs will be $0", resolved)
+            self._pricing: dict[str, dict[str, tuple[float, float]]] = {}
 
     def get_rate(self, provider: str, model: str) -> tuple[float, float] | None:
         """Get (prompt_rate, completion_rate) per 1M tokens, or None if unknown."""
-        provider_rates = _PRICING.get(provider, {})
+        provider_rates = self._pricing.get(provider, {})
         # Try exact match first
         if model in provider_rates:
             return provider_rates[model]
