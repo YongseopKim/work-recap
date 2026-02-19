@@ -12,6 +12,9 @@ LLM 기반으로 일/주/월/년 단위 업무 요약을 자동 생성하는 개
 - **범위 최적화** — 다중 날짜 fetch 시 월 단위 range 검색으로 API 호출 30배 절감
 - **병렬 실행** — `--workers` 옵션으로 fetch enrichment 및 LLM 호출 병렬화
 - **재개 가능** — fetch_range 중단 시 chunk 캐시에서 이어서 실행
+- **Batch API** — `--batch` 옵션으로 대량 LLM 호출을 일괄 처리 (50% 비용 절감)
+- **Prompt Caching** — Anthropic `cache_control: ephemeral`로 system prompt 캐싱 (반복 호출 시 input 비용 90% 절감)
+- **Cache-aware 비용 추적** — provider별 cache 할인 반영한 실시간 비용 계산
 
 ## 요구사항
 
@@ -67,28 +70,34 @@ base_url = "http://localhost:11434/v1"  # Ollama, vLLM 등
 
 [tasks.enrich]
 provider = "anthropic"
-model = "claude-haiku-4-5-20251001"
-escalation_model = "claude-sonnet-4-5-20250929"
+model = "claude-haiku-4-5"
+escalation_model = "claude-sonnet-4-6"
+max_tokens = 1024
 
 [tasks.daily]
-provider = "openai"
-model = "gpt-4o-mini"
+provider = "anthropic"
+model = "claude-sonnet-4-6"
+max_tokens = 4096
 
 [tasks.weekly]
-provider = "openai"
-model = "gpt-4o-mini"
+provider = "anthropic"
+model = "claude-sonnet-4-6"
+max_tokens = 4096
 
 [tasks.monthly]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-opus-4-6"
+max_tokens = 4096
 
 [tasks.yearly]
 provider = "anthropic"
-model = "claude-sonnet-4-5-20250929"
+model = "claude-opus-4-6"
+max_tokens = 4096
 
 [tasks.query]
-provider = "openai"
-model = "gpt-4o"
+provider = "anthropic"
+model = "claude-sonnet-4-6"
+max_tokens = 4096
 ```
 
 **Strategy 모드:**
@@ -141,6 +150,11 @@ recap fetch --since 2025-02-01 --until 2025-02-16 --force
 recap normalize --since 2025-02-01 --until 2025-02-16 --force
 recap summarize daily --weekly 2025-7 --force
 
+# Batch API (normalize, summarize daily, run에서 사용 가능)
+recap normalize --batch --since 2025-02-01 --until 2025-02-16  # 50% 비용 절감
+recap summarize daily --batch --weekly 2025-7
+recap run --batch --since 2025-02-01 --until 2025-02-16
+
 # 전체 파이프라인 (fetch → normalize → summarize)
 recap run 2025-02-16                # 단일 날짜
 recap run --since 2025-02-01 --until 2025-02-16  # 기간 범위
@@ -180,7 +194,7 @@ uvicorn workrecap.api.app:app --reload
 | Method | Endpoint | 설명 | Body |
 |--------|----------|------|------|
 | POST | `/api/pipeline/run/{date}` | 단일 날짜 파이프라인 | force?, types?, enrich? |
-| POST | `/api/pipeline/run/range` | 기간 범위 파이프라인 | since, until, force?, types?, max_workers?, enrich?, summarize_weekly/monthly/yearly? |
+| POST | `/api/pipeline/run/range` | 기간 범위 파이프라인 | since, until, force?, types?, max_workers?, enrich?, batch?, summarize_weekly/monthly/yearly? |
 | GET | `/api/pipeline/jobs/{job_id}` | Job 상태 조회 | — |
 
 **개별 단계 실행**
@@ -190,9 +204,9 @@ uvicorn workrecap.api.app:app --reload
 | POST | `/api/pipeline/fetch/{date}` | 단일 날짜 fetch | types?, force? |
 | POST | `/api/pipeline/fetch/range` | 기간 범위 fetch | since, until, types?, force?, max_workers? |
 | POST | `/api/pipeline/normalize/{date}` | 단일 날짜 normalize | enrich?, force? |
-| POST | `/api/pipeline/normalize/range` | 기간 범위 normalize | since, until, force?, enrich?, max_workers? |
+| POST | `/api/pipeline/normalize/range` | 기간 범위 normalize | since, until, force?, enrich?, max_workers?, batch? |
 | POST | `/api/pipeline/summarize/daily/{date}` | 단일 날짜 summarize | force? |
-| POST | `/api/pipeline/summarize/daily/range` | 기간 범위 summarize | since, until, force?, max_workers? |
+| POST | `/api/pipeline/summarize/daily/range` | 기간 범위 summarize | since, until, force?, max_workers?, batch? |
 | POST | `/api/pipeline/summarize/weekly` | Weekly summary 생성 | year, week, force? |
 | POST | `/api/pipeline/summarize/monthly` | Monthly summary 생성 | year, month, force? |
 | POST | `/api/pipeline/summarize/yearly` | Yearly summary 생성 | year, force? |
@@ -263,14 +277,15 @@ work-recap/
 │   │   ├── provider_config.py  # .provider/config.toml 파싱
 │   │   ├── escalation.py       # Adaptive escalation handler
 │   │   ├── usage_tracker.py    # Per-model usage tracking + cost estimation
-│   │   ├── pricing.py          # Built-in pricing table ($/1M tokens)
+│   │   ├── pricing.py          # Built-in pricing table ($/1M tokens, cache-aware)
 │   │   ├── model_discovery.py  # Provider별 모델 목록 탐색
 │   │   ├── client_pool.py      # GHESClientPool (병렬 enrichment용 스레드 안전 풀)
 │   │   └── providers/
 │   │       ├── base.py         # LLMProvider ABC + ModelInfo
-│   │       ├── openai_provider.py
-│   │       ├── anthropic_provider.py
-│   │       ├── gemini_provider.py
+│   │       ├── batch_mixin.py  # BatchCapable ABC + BatchRequest/Result/Status
+│   │       ├── openai_provider.py   # (+ BatchCapable)
+│   │       ├── anthropic_provider.py  # (+ BatchCapable, prompt caching)
+│   │       ├── gemini_provider.py   # (+ BatchCapable, cache metrics)
 │   │       └── custom_provider.py  # OpenAI-compatible (Ollama, vLLM 등)
 │   ├── services/
 │   │   ├── date_utils.py       # 날짜 범위 유틸리티 (weekly, monthly, yearly, catch-up)
@@ -278,7 +293,10 @@ work-recap/
 │   │   ├── normalizer.py       # Activity 변환 + LLM enrichment + 통계 계산
 │   │   ├── summarizer.py       # LLM 요약 생성 (Jinja2 템플릿, 계층적 staleness)
 │   │   ├── orchestrator.py     # 파이프라인 오케스트레이션
+│   │   ├── protocols.py        # DataSourceFetcher/Normalizer Protocol 정의
+│   │   ├── source_registry.py  # SourceRegistry (멀티 소스 팩토리 레지스트리)
 │   │   ├── daily_state.py      # DailyStateStore (날짜별 cascade staleness 추적)
+│   │   ├── batch_state.py      # BatchStateStore (batch job 상태 persist/crash recovery)
 │   │   ├── checkpoint.py       # 스레드 안전 체크포인트 업데이트
 │   │   └── fetch_progress.py   # FetchProgressStore (fetch 재개용 chunk 캐시)
 │   ├── cli/
@@ -298,16 +316,17 @@ work-recap/
 │   ├── index.html              # SPA (Pico CSS + marked.js)
 │   ├── style.css
 │   └── app.js
-├── prompts/                    # LLM 프롬프트 템플릿 (Jinja2)
+├── prompts/                    # LLM 프롬프트 템플릿 (Jinja2, <!-- SPLIT --> 마커)
 │   ├── daily.md
 │   ├── weekly.md
 │   ├── monthly.md
 │   ├── yearly.md
 │   ├── enrich.md               # Activity LLM enrichment (intent, change_summary)
 │   └── query.md
+├── pricing.toml                # LLM 가격표 (USD/1M tokens, 코드 변경 없이 업데이트)
 ├── designs/                    # 모듈별 상세 설계 문서
 ├── tests/
-│   ├── unit/                   # 766개 단위 테스트 (26개 파일)
+│   ├── unit/                   # 914개 단위 테스트 (36개 파일)
 │   └── integration/            # 통합 테스트 (실제 API 호출, -m integration)
 ├── pyproject.toml
 └── .env.example
@@ -316,11 +335,13 @@ work-recap/
 ## 테스트
 
 ```bash
-# 전체 단위 테스트 (766개)
+# 전체 단위 테스트 (914개)
 pytest
 
 # 통합 테스트 (실제 GHES + LLM API 호출, .env 필요)
 pytest -m integration -x -v
+# 통합 테스트 날짜 지정
+INTEGRATION_TEST_DATE=2026-02-14 pytest -m integration -x -v
 
 # 특정 모듈
 pytest tests/unit/test_fetcher.py -v
@@ -344,7 +365,7 @@ coverage run -m pytest && coverage report
 │     ├── NormalizerService  (+ LLMRouter)          │
 │     └── SummarizerService  (+ LLMRouter)          │
 │                                                  │
-│   DailyStateStore · Checkpoint · FetchProgress   │
+│   DailyStateStore · BatchStateStore · Checkpoint  │
 └──────────┬────────────────────┬──────────────────┘
            │                    │
 ┌──────────▼──────────┐ ┌──────▼───────────────────┐
@@ -361,6 +382,8 @@ coverage run -m pytest && coverage report
 - **Service Layer** 간에는 Orchestrator만 다른 Service를 의존
 - 모든 Service는 `AppConfig`를 주입받음
 - **병렬 실행**: `GHESClientPool` (fetch enrichment), `ThreadPoolExecutor` (날짜별 처리)
+- **Batch 실행**: `--batch` 시 normalizer/summarizer가 전체 날짜를 1개 batch로 제출 → 50% 비용 절감
+- **Prompt Caching**: system prompt에 `cache_control: ephemeral` 적용, 반복 호출 시 Anthropic input 비용 90% 절감
 - **Cascade staleness**: fetch → normalize → summarize 순서로 상위 단계가 갱신되면 하위 재처리
 
 ## 설계 결정사항
@@ -377,6 +400,10 @@ coverage run -m pytest && coverage report
 | D-8: Multi-provider routing | 태스크별(enrich/daily/weekly/monthly/yearly/query) 다른 provider+model 배정. `.provider/config.toml`이 단일 설정 소스 |
 | D-9: Adaptive escalation | 경량 모델이 자체 판단(confidence 0.0-1.0)으로 고급 모델에 에스컬레이션. JSON envelope 파싱 실패 시 원본 응답 사용 (graceful fallback) |
 | D-10: Auto-logging | `.log/YYYYMMDD_HHMMSS.log`에 DEBUG 레벨 자동 기록. LLM usage report 포함 |
+| D-11: Prompt caching | `cache_system_prompt=True` 기본값. Anthropic `cache_control: ephemeral` (5분 TTL, input 90% 할인). OpenAI/Gemini는 자동 캐싱으로 플래그 무시. `<!-- SPLIT -->` 마커로 정적 instructions(캐시) / 동적 data(비캐시) 분리 |
+| D-12: max_tokens per task | config.toml `max_tokens`로 태스크별 출력 제한 설정. output format에 바인딩 — escalation 시에도 동일 값 유지. 해상도: explicit kwarg > config.toml > None |
+| D-13: Batch API | `--batch` 옵션으로 50% 비용 절감 (기본 off). BatchCapable mixin으로 provider 수준 지원 (Anthropic/OpenAI/Gemini). base_model만 사용 (escalation 없음). crash recovery용 BatchStateStore |
+| D-14: Cache-aware pricing | `pricing.toml`에서 코드 변경 없이 가격 업데이트. provider별 cache discount factor 적용 (Anthropic 90% read / 25% write, OpenAI 50% read, Gemini 75% read) |
 
 ## 라이선스
 
