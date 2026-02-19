@@ -38,3 +38,4 @@ htmlcov/
 
 .pytest_cash
 .claude
+.serena/
