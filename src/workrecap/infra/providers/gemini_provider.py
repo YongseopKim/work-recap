@@ -66,6 +66,7 @@ class GeminiProvider(LLMProvider, BatchCapable):
             completion_tokens=meta.candidates_token_count,
             total_tokens=meta.total_token_count,
             call_count=1,
+            cache_read_tokens=getattr(meta, "cached_content_token_count", 0) or 0,
         )
         return text, usage
 
