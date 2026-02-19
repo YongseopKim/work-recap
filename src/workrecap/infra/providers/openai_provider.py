@@ -67,7 +67,7 @@ class OpenAIProvider(LLMProvider, BatchCapable):
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
+            kwargs["max_completion_tokens"] = max_tokens
         # cache_system_prompt is ignored — OpenAI auto-caches prompts ≥1024 tokens
         response = self._client.chat.completions.create(**kwargs)
         text = response.choices[0].message.content
@@ -170,7 +170,7 @@ class OpenAIProvider(LLMProvider, BatchCapable):
         if req.json_mode:
             body["response_format"] = {"type": "json_object"}
         if req.max_tokens is not None:
-            body["max_tokens"] = req.max_tokens
+            body["max_completion_tokens"] = req.max_tokens
         return {
             "custom_id": req.custom_id,
             "method": "POST",

@@ -152,11 +152,11 @@ class TestOpenAIProvider:
         p.chat("gpt-4o-mini", "system", "user", max_tokens=1000)
 
         call_kwargs = mock_instance.chat.completions.create.call_args.kwargs
-        assert call_kwargs["max_tokens"] == 1000
+        assert call_kwargs["max_completion_tokens"] == 1000
 
     @patch("workrecap.infra.providers.openai_provider.OpenAI")
     def test_chat_max_tokens_none_not_passed(self, mock_cls):
-        """max_tokens=None (default) does not pass max_tokens."""
+        """max_tokens=None (default) does not pass max_completion_tokens."""
         mock_instance = MagicMock()
         mock_instance.chat.completions.create.return_value = _openai_response()
         mock_cls.return_value = mock_instance
@@ -165,7 +165,7 @@ class TestOpenAIProvider:
         p.chat("gpt-4o-mini", "system", "user")
 
         call_kwargs = mock_instance.chat.completions.create.call_args.kwargs
-        assert "max_tokens" not in call_kwargs
+        assert "max_completion_tokens" not in call_kwargs
 
     @patch("workrecap.infra.providers.openai_provider.OpenAI")
     def test_cache_tokens_extracted(self, mock_cls):

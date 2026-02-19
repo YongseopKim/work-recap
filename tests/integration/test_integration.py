@@ -52,12 +52,13 @@ class TestIntegrationPipeline:
         assert activities_path.exists(), "activities.jsonl not created"
         assert stats_path.exists(), "stats.json not created"
 
-        # stats 검증
+        # stats 검증 (nested DailyStats 구조: github.authored_count 등)
         stats = json.loads(stats_path.read_text(encoding="utf-8"))
         assert stats["date"] == test_date
-        assert stats["authored_count"] >= 0
-        assert stats["reviewed_count"] >= 0
-        assert stats["commit_count"] >= 0
+        gh = stats["github"]
+        assert gh["authored_count"] >= 0
+        assert gh["reviewed_count"] >= 0
+        assert gh["commit_count"] >= 0
 
     def test_03_summarize_daily(self, real_config, llm_router, test_date):
         """Step 3: LLM을 호출하여 daily summary markdown 생성."""

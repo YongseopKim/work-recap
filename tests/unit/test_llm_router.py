@@ -459,7 +459,7 @@ class TestRouterMaxTokens:
         router.chat("sys", "usr", task="enrich")
 
         call_kwargs = mock_instance.chat.completions.create.call_args.kwargs
-        assert call_kwargs["max_tokens"] == 1000
+        assert call_kwargs["max_completion_tokens"] == 1000
 
     @patch("workrecap.infra.providers.openai_provider.OpenAI")
     def test_max_tokens_not_in_config_not_passed(self, mock_openai_cls, fallback_config):
@@ -477,7 +477,7 @@ class TestRouterMaxTokens:
         router.chat("sys", "usr", task="daily")
 
         call_kwargs = mock_instance.chat.completions.create.call_args.kwargs
-        assert "max_tokens" not in call_kwargs
+        assert "max_completion_tokens" not in call_kwargs
 
     @patch("workrecap.infra.providers.openai_provider.OpenAI")
     def test_max_tokens_kwarg_overrides_config(self, mock_openai_cls, tmp_path):
@@ -509,7 +509,7 @@ class TestRouterMaxTokens:
         router.chat("sys", "usr", task="enrich", max_tokens=500)
 
         call_kwargs = mock_instance.chat.completions.create.call_args.kwargs
-        assert call_kwargs["max_tokens"] == 500
+        assert call_kwargs["max_completion_tokens"] == 500
 
 
 class TestRouterErrorHandling:

@@ -74,13 +74,13 @@ class TestOpenAIBatchCapable:
         assert line1["url"] == "/v1/chat/completions"
         body1 = line1["body"]
         assert body1["model"] == "gpt-4o-mini"
-        assert body1["max_tokens"] == 1024
+        assert body1["max_completion_tokens"] == 1024
         assert "response_format" not in body1
 
         line2 = json.loads(lines[1])
         body2 = line2["body"]
         assert body2["response_format"] == {"type": "json_object"}
-        assert body2["max_tokens"] == 512
+        assert body2["max_completion_tokens"] == 512
 
         # Verify batch creation
         batch_call = provider._client.batches.create.call_args
