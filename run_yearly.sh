@@ -3,10 +3,24 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# --- Parse options ---
+
+DRY_RUN=false
+POSITIONAL=()
+
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) DRY_RUN=true ;;
+        *) POSITIONAL+=("$arg") ;;
+    esac
+done
+set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
+
 if [[ $# -lt 1 ]]; then
-    echo "Usage: $0 <start_year> [workers]"
+    echo "Usage: $0 [--dry-run] <start_year> [workers]"
     echo "  start_year: GitHub 가입 연도 (e.g. 2015)"
     echo "  workers:    병렬 워커 수 (default: 3)"
+    echo "  --dry-run:  명령을 실행하지 않고 출력만 표시"
     exit 1
 fi
 
@@ -34,8 +48,8 @@ if [[ -z "${VIRTUAL_ENV:-}" ]]; then
     source "${VENV_DIR}/bin/activate"
 fi
 
-if ! command -v workrecap &>/dev/null; then
-    echo "Error: 'workrecap' command not found"
+if ! command -v recap &>/dev/null; then
+    echo "Error: 'recap' command not found"
     echo "  Run: pip install -e '.[dev]' in the project .venv"
     exit 1
 fi
@@ -52,18 +66,27 @@ fi
 
 # --- Run ---
 
-echo "=== work-recap: ${START_YEAR} ~ ${CURRENT_YEAR} (workers=${WORKERS}, batch=on) ==="
+if $DRY_RUN; then
+    echo "=== [DRY RUN] work-recap: ${START_YEAR} ~ ${CURRENT_YEAR} (workers=${WORKERS}, batch=on) ==="
+else
+    echo "=== work-recap: ${START_YEAR} ~ ${CURRENT_YEAR} (workers=${WORKERS}, batch=on) ==="
+fi
 
 failed_years=()
 
 for (( year=START_YEAR; year<=CURRENT_YEAR; year++ )); do
     echo ""
     echo "--- ${year} ---"
-    if workrecap run --yearly "$year" --batch -w "$WORKERS"; then
-        echo "✓ ${year} done"
+    if $DRY_RUN; then
+        echo "[dry-run] recap run --yearly ${year} --batch -w ${WORKERS}"
+        echo "✓ ${year} (skipped)"
     else
-        echo "✗ ${year} failed (continuing...)"
-        failed_years+=("$year")
+        if recap run --yearly "$year" --batch -w "$WORKERS"; then
+            echo "✓ ${year} done"
+        else
+            echo "✗ ${year} failed (continuing...)"
+            failed_years+=("$year")
+        fi
     fi
 done
 
