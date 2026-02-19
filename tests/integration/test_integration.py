@@ -93,3 +93,72 @@ class TestIntegrationPipeline:
 
         assert summary_path.exists()
         assert len(summary_path.read_text(encoding="utf-8").strip()) > 0
+
+
+class TestPromptCaching:
+    """cache_system_prompt=True로 동일 system prompt 2회 호출 시 cache hit 확인."""
+
+    def test_cache_read_tokens_on_second_call(self, real_config):
+        """Same system prompt called twice → second call should have cache_read_tokens > 0.
+
+        Tests at the provider level (bypassing router/escalation) to isolate
+        Anthropic prompt caching behavior directly.
+        """
+        from workrecap.infra.provider_config import ProviderConfig
+        from workrecap.infra.providers.anthropic_provider import AnthropicProvider
+
+        pc = ProviderConfig(real_config.provider_config_path)
+        api_key = pc.providers["anthropic"].api_key
+        provider = AnthropicProvider(api_key=api_key)
+
+        # Anthropic caching minimum: empirically ~2048 tokens for Sonnet 4.6
+        # (docs say 1024, but actual threshold is higher).
+        # Generate diverse text (~3000 tokens) to safely exceed the minimum.
+        lines = []
+        for i in range(150):
+            lines.append(
+                f"Section {i}: The engineer reviewed PR #{i + 100} involving "
+                f"refactoring of the authentication module to support OAuth2 "
+                f"bearer tokens and JWT validation with RSA-256 signatures. "
+                f"The changes touched {i + 5} files across {i + 2} directories."
+            )
+        system_prompt = (
+            "You are a helpful assistant that summarizes software engineering work. "
+            "Respond with a single short sentence.\n\n" + "\n".join(lines)
+        )
+        model = pc.get_task_config("daily").model
+
+        # 1st call — cache miss (should populate cache, cache_write > 0)
+        text1, usage1 = provider.chat(
+            model,
+            system_prompt,
+            "Summarize: fixed a login bug.",
+            cache_system_prompt=True,
+        )
+        print(
+            f"\n  1st call: prompt={usage1.prompt_tokens} "
+            f"cache_read={usage1.cache_read_tokens} "
+            f"cache_write={usage1.cache_write_tokens}"
+        )
+
+        # 2nd call — same system prompt, different user → cache hit expected
+        text2, usage2 = provider.chat(
+            model,
+            system_prompt,
+            "Summarize: added unit tests.",
+            cache_system_prompt=True,
+        )
+        print(
+            f"  2nd call: prompt={usage2.prompt_tokens} "
+            f"cache_read={usage2.cache_read_tokens} "
+            f"cache_write={usage2.cache_write_tokens}"
+        )
+
+        # 1st call should write to cache
+        assert usage1.cache_write_tokens > 0, (
+            f"Expected cache_write_tokens > 0 on 1st call, got {usage1.cache_write_tokens}"
+        )
+        # 2nd call should read from cache
+        assert usage2.cache_read_tokens > 0, (
+            f"Expected cache_read_tokens > 0 on 2nd call, got {usage2.cache_read_tokens}"
+        )
