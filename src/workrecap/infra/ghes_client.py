@@ -1,6 +1,14 @@
-"""GHES REST API v3 HTTP client with retry and rate limit handling."""
+"""GHES REST API v3 HTTP client with retry and rate limit handling.
+
+Resilience design follows GitHub's official rate limit guidance:
+- Primary limits (429, 403+rate-limit): respect Retry-After / X-RateLimit-Reset headers
+- Secondary limits: "use exponentially increasing amount of time between retries"
+- "Continuing to make requests while rate limited may result in banning"
+- Jitter on all waits prevents thundering herd from parallel workers
+"""
 
 import logging
+import random
 import threading
 import time
 
@@ -13,6 +21,16 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 3
 BACKOFF_BASE = 2.0
 REQUEST_TIMEOUT = 30.0
+
+# Rate limit retry constants — separate from server error retries.
+# GitHub may temporarily rate-limit during bursts (common in 10-year history runs)
+# but bans integrations that "continue making requests while rate limited".
+# 7 retries with exponential backoff (max 5 min) covers ~10 min total,
+# enough for most primary rate limit windows to reset.
+RATE_LIMIT_MAX_RETRIES = 7
+RATE_LIMIT_BACKOFF_BASE = 2.0  # 2^attempt seconds
+RATE_LIMIT_BACKOFF_MAX = 300.0  # cap at 5 minutes
+RATE_LIMIT_JITTER_FACTOR = 0.25  # ±25% randomization
 
 
 class GHESClient:
@@ -124,9 +142,21 @@ class GHESClient:
         params: dict | None = None,
         extra_headers: dict | None = None,
     ) -> dict | list:
-        last_error: Exception | None = None
+        """Execute HTTP request with separate retry budgets for rate limits vs server errors.
 
-        for attempt in range(MAX_RETRIES + 1):
+        Rate limit errors (429, 403+rate-limit) get RATE_LIMIT_MAX_RETRIES (7) attempts
+        with _compute_rate_limit_wait (Retry-After → X-RateLimit-Reset → exponential backoff).
+        Server errors (5xx) and network errors get MAX_RETRIES (3) attempts with simple backoff.
+
+        Counters are independent: a request can survive up to 10 total attempts
+        (7 rate limit + 3 server error), enabling resilient ~4,000-day historical runs
+        where transient rate limits are common but shouldn't poison server error budget.
+        """
+        last_error: Exception | None = None
+        rate_limit_attempts = 0
+        server_error_attempts = 0
+
+        while True:
             try:
                 logger.debug("Request: %s %s params=%s", method, path, params)
                 response = self._client.request(
@@ -137,42 +167,36 @@ class GHESClient:
                 )
                 logger.debug("Response: %s %s → %d", method, path, response.status_code)
 
-                if response.status_code == 429:
-                    retry_after = self._get_retry_after(response)
+                if response.status_code == 429 or (
+                    response.status_code == 403 and self._is_rate_limit_403(response)
+                ):
+                    rate_limit_attempts += 1
+                    wait = self._compute_rate_limit_wait(response, rate_limit_attempts - 1)
                     logger.warning(
-                        "Rate limited (429). Retry after %.1fs (attempt %d/%d)",
-                        retry_after,
-                        attempt + 1,
-                        MAX_RETRIES,
+                        "Rate limited (%d). Waiting %.1fs (attempt %d/%d)",
+                        response.status_code,
+                        wait,
+                        rate_limit_attempts,
+                        RATE_LIMIT_MAX_RETRIES,
                     )
-                    if attempt < MAX_RETRIES:
-                        time.sleep(retry_after)
+                    if rate_limit_attempts <= RATE_LIMIT_MAX_RETRIES:
+                        time.sleep(wait)
                         continue
-                    raise FetchError(f"Rate limit exceeded after {MAX_RETRIES} retries: {path}")
-
-                if response.status_code == 403 and self._is_rate_limit_403(response):
-                    retry_after = self._get_retry_after(response)
-                    logger.warning(
-                        "Rate limited (403). Retry after %.1fs (attempt %d/%d)",
-                        retry_after,
-                        attempt + 1,
-                        MAX_RETRIES,
+                    raise FetchError(
+                        f"Rate limit exceeded after {RATE_LIMIT_MAX_RETRIES} retries: {path}"
                     )
-                    if attempt < MAX_RETRIES:
-                        time.sleep(retry_after)
-                        continue
-                    raise FetchError(f"Rate limit exceeded after {MAX_RETRIES} retries: {path}")
 
                 if response.status_code >= 500:
+                    server_error_attempts += 1
                     logger.warning(
                         "Server error %d on %s (attempt %d/%d)",
                         response.status_code,
                         path,
-                        attempt + 1,
+                        server_error_attempts,
                         MAX_RETRIES,
                     )
-                    if attempt < MAX_RETRIES:
-                        time.sleep(BACKOFF_BASE**attempt)
+                    if server_error_attempts <= MAX_RETRIES:
+                        time.sleep(BACKOFF_BASE ** (server_error_attempts - 1))
                         continue
                     raise FetchError(
                         f"Server error {response.status_code} after {MAX_RETRIES} retries: {path}"
@@ -187,19 +211,21 @@ class GHESClient:
                 return response.json()
 
             except httpx.HTTPError as e:
+                server_error_attempts += 1
                 last_error = e
                 logger.warning(
                     "HTTP error on %s (attempt %d/%d): %s",
                     path,
-                    attempt + 1,
+                    server_error_attempts,
                     MAX_RETRIES,
                     e,
                 )
-                if attempt < MAX_RETRIES:
-                    time.sleep(BACKOFF_BASE**attempt)
+                if server_error_attempts <= MAX_RETRIES:
+                    time.sleep(BACKOFF_BASE ** (server_error_attempts - 1))
                     continue
-
-        raise FetchError(f"Request failed after {MAX_RETRIES} retries: {path}") from last_error
+                raise FetchError(
+                    f"Request failed after {MAX_RETRIES} retries: {path}"
+                ) from last_error
 
     def _track_rate_limit(self, response: httpx.Response) -> None:
         """Track X-RateLimit-Remaining/Reset from response headers.
@@ -246,14 +272,55 @@ class GHESClient:
         """Detect GitHub 403 responses that indicate rate limiting."""
         return "rate limit" in response.text.lower()
 
-    def _get_retry_after(self, response: httpx.Response) -> float:
+    def _get_retry_after(self, response: httpx.Response) -> float | None:
+        """Extract Retry-After header value in seconds.
+
+        Returns None when no valid header is present, allowing callers to
+        fall through to alternative wait strategies (X-RateLimit-Reset or
+        exponential backoff) instead of a blind 60s default.
+        """
         retry_after = response.headers.get("Retry-After")
         if retry_after:
             try:
                 return float(retry_after)
             except ValueError:
                 pass
-        return 60.0
+        return None
+
+    def _compute_rate_limit_wait(self, response: httpx.Response, attempt: int) -> float:
+        """Compute how long to wait before retrying a rate-limited request.
+
+        Three-tier strategy (in priority order):
+        1. Retry-After header — most authoritative, server-specified exact wait
+        2. X-RateLimit-Reset — compute seconds until the rate limit window resets
+        3. Exponential backoff min(2^attempt, 300s) — safe fallback
+
+        All values get ±25% jitter to prevent thundering herd when multiple
+        parallel workers (GHESClientPool) hit rate limits simultaneously.
+        The minimum wait is always 1 second to avoid busy-spinning.
+        """
+        # Tier 1: Retry-After header
+        wait = self._get_retry_after(response)
+
+        # Tier 2: X-RateLimit-Reset timestamp
+        if wait is None:
+            reset_str = response.headers.get("X-RateLimit-Reset")
+            if reset_str:
+                try:
+                    reset_ts = int(reset_str)
+                    wait = max(0, reset_ts - time.time()) + 1  # +1s buffer
+                except (ValueError, TypeError):
+                    pass
+
+        # Tier 3: Exponential backoff
+        if wait is None:
+            wait = min(RATE_LIMIT_BACKOFF_BASE**attempt, RATE_LIMIT_BACKOFF_MAX)
+
+        # Apply jitter ±25% to prevent thundering herd
+        jitter = random.uniform(1 - RATE_LIMIT_JITTER_FACTOR, 1 + RATE_LIMIT_JITTER_FACTOR)
+        wait = wait * jitter
+
+        return max(wait, 1.0)
 
     def _paginate(self, path: str, per_page: int = 100) -> list[dict]:
         all_items: list[dict] = []

@@ -13,6 +13,7 @@ from workrecap.infra.model_discovery import discover_models
 from workrecap.logging_config import setup_file_logging, setup_logging
 from workrecap.services import date_utils
 from workrecap.services.daily_state import DailyStateStore
+from workrecap.services.failed_dates import FailedDateStore
 from workrecap.services.fetcher import FetcherService
 from workrecap.services.normalizer import NormalizerService
 from workrecap.services.orchestrator import OrchestratorService
@@ -279,9 +280,14 @@ def fetch(
 
             ds = DailyStateStore(config.daily_state_path)
             progress_store = FetchProgressStore(config.state_dir / "fetch_progress")
+            failed_store = FailedDateStore(
+                config.state_dir / "failed_dates.json",
+                max_retries=config.max_fetch_retries,
+            )
             fetch_kwargs: dict = {
                 "daily_state": ds,
                 "progress_store": progress_store,
+                "failed_date_store": failed_store,
             }
             if workers > 1:
                 from workrecap.infra.client_pool import GHESClientPool
@@ -311,6 +317,13 @@ def fetch(
                 for r in range_results:
                     mark = {"success": "+", "skipped": "=", "failed": "!"}[r["status"]]
                     _echo(f"  {mark} {r['date']}: {r['status']}")
+                # Report exhausted dates (max retries reached)
+                exhausted = failed_store.exhausted_dates()
+                if exhausted:
+                    _echo(
+                        f"  {len(exhausted)} date(s) exhausted "
+                        f"(max {config.max_fetch_retries} retries reached)"
+                    )
                 if failed > 0:
                     raise typer.Exit(code=1)
             else:
@@ -605,9 +618,14 @@ def run(
         llm = _get_llm_router(config)
         ds = DailyStateStore(config.daily_state_path)
         progress_store = FetchProgressStore(config.state_dir / "fetch_progress")
+        failed_store = FailedDateStore(
+            config.state_dir / "failed_dates.json",
+            max_retries=config.max_fetch_retries,
+        )
         fetch_kwargs: dict = {
             "daily_state": ds,
             "progress_store": progress_store,
+            "failed_date_store": failed_store,
         }
         if max_workers > 1:
             from workrecap.infra.client_pool import GHESClientPool
@@ -669,6 +687,14 @@ def run(
                             pass
                     path = summarizer.yearly(yearly, force=force)
                     _echo(f"Yearly summary → {path}")
+
+            # Report exhausted dates (max retries reached)
+            exhausted = failed_store.exhausted_dates()
+            if exhausted:
+                _echo(
+                    f"  {len(exhausted)} date(s) exhausted "
+                    f"(max {config.max_fetch_retries} retries reached)"
+                )
 
             _print_usage_report(llm)
             if failed > 0:

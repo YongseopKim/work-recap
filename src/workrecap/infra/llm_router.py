@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -27,6 +28,45 @@ from workrecap.infra.providers.batch_mixin import (
 from workrecap.models import TokenUsage
 
 logger = logging.getLogger(__name__)
+
+# ── Batch timeout constants ──
+# Dynamic timeout scales with batch size, solving two problems:
+# - Small batches (10 prompts): old 1-hour timeout wastes 55 min waiting
+# - Large batches (4,000 prompts for 10-year history): old 1-hour timeout is insufficient
+BATCH_TIMEOUT_BASE = 300  # minimum 5 minutes
+BATCH_TIMEOUT_PER_REQUEST = 30  # 30 seconds per request
+BATCH_TIMEOUT_MAX = 14400  # cap at 4 hours
+
+# Adaptive polling starts fast (catches quick batches) then slows down
+# to reduce unnecessary API calls during long waits
+BATCH_POLL_INTERVAL_MIN = 5  # initial poll every 5 seconds
+BATCH_POLL_INTERVAL_MAX = 60  # max poll every 60 seconds
+
+
+def _compute_batch_timeout(batch_size: int) -> float:
+    """Compute dynamic timeout based on batch size.
+
+    Formula: base + per_request * batch_size, capped at max.
+    Examples:
+      - 10 requests:  600s (10 min)  — quick feedback
+      - 100 requests: 3,300s (55 min) — close to original default
+      - 500+ requests: 14,400s (4 hours) — handles year-scale history
+    """
+    return min(BATCH_TIMEOUT_BASE + BATCH_TIMEOUT_PER_REQUEST * batch_size, BATCH_TIMEOUT_MAX)
+
+
+def _adaptive_poll_interval(elapsed: float, timeout: float) -> float:
+    """Compute adaptive polling interval based on elapsed/total ratio.
+
+    Starts at BATCH_POLL_INTERVAL_MIN (5s) for responsiveness, linearly
+    increases to BATCH_POLL_INTERVAL_MAX (60s) as timeout approaches.
+    This prevents wasted API calls during 4-hour waits while staying
+    responsive for quick batches.
+    """
+    if timeout <= 0:
+        return BATCH_POLL_INTERVAL_MIN
+    ratio = min(elapsed / timeout, 1.0)
+    return BATCH_POLL_INTERVAL_MIN + ratio * (BATCH_POLL_INTERVAL_MAX - BATCH_POLL_INTERVAL_MIN)
 
 
 class LLMRouter:
@@ -268,20 +308,49 @@ class LLMRouter:
         batch_id: str,
         *,
         task: str,
-        timeout: int | float = 3600,
-        poll_interval: int | float = 10,
+        timeout: int | float | None = None,
+        poll_interval: int | float | None = None,
+        batch_size: int | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> list[BatchResult]:
         """Poll until batch completes, then return results.
+
+        Args:
+            timeout: Explicit timeout in seconds. If None, auto-computed from batch_size.
+            poll_interval: Explicit poll interval. If None, uses adaptive polling.
+            batch_size: Number of requests in the batch (for auto-timeout computation).
+            progress: Optional callback for status updates.
 
         Raises:
             TimeoutError: If batch doesn't complete within timeout.
             RuntimeError: If batch fails or expires.
         """
         provider = self._get_batch_provider(task)
+
+        # Determine timeout: explicit > auto-from-batch-size > default 1 hour
+        if timeout is None:
+            if batch_size is not None:
+                timeout = _compute_batch_timeout(batch_size)
+            else:
+                timeout = 3600  # backward-compat default
         deadline = time.monotonic() + timeout
+        start = time.monotonic()
 
         while True:
             status = provider.get_batch_status(batch_id)
+            elapsed = time.monotonic() - start
+
+            if progress:
+                progress(f"Batch {batch_id}... {status.value} ({elapsed:.0f}s/{timeout:.0f}s)")
+            elif elapsed > 60 and int(elapsed) % 60 < (poll_interval or BATCH_POLL_INTERVAL_MIN):
+                logger.info(
+                    "Batch %s: %s (%.0fs/%.0fs)",
+                    batch_id,
+                    status.value,
+                    elapsed,
+                    timeout,
+                )
+
             if status == BatchStatus.COMPLETED:
                 return provider.get_batch_results(batch_id)
             if status in (BatchStatus.FAILED, BatchStatus.EXPIRED):
@@ -290,7 +359,12 @@ class LLMRouter:
                 raise TimeoutError(
                     f"Batch {batch_id} timed out after {timeout}s (status: {status.value})"
                 )
-            time.sleep(poll_interval)
+
+            # Use adaptive polling if no explicit interval specified
+            if poll_interval is not None:
+                time.sleep(poll_interval)
+            else:
+                time.sleep(_adaptive_poll_interval(elapsed, timeout))
 
     def _get_batch_provider(self, task: str) -> BatchCapable:
         """Get a BatchCapable provider for the given task."""

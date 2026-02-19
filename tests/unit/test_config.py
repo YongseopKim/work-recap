@@ -61,3 +61,13 @@ class TestAppConfig:
         """max_workers를 직접 인자로 설정 가능."""
         config = AppConfig(ghes_url="u", ghes_token="t", username="u", max_workers=10)
         assert config.max_workers == 10
+
+    def test_max_fetch_retries_default(self):
+        """max_fetch_retries defaults to 5 — enough for transient issues without infinite loops."""
+        config = AppConfig(ghes_url="u", ghes_token="t", username="u")
+        assert config.max_fetch_retries == 5
+
+    def test_max_fetch_retries_from_kwarg(self):
+        """max_fetch_retries can be overridden (e.g., higher for very long runs)."""
+        config = AppConfig(ghes_url="u", ghes_token="t", username="u", max_fetch_retries=10)
+        assert config.max_fetch_retries == 10

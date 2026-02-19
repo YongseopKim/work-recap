@@ -3,7 +3,7 @@ import pytest
 import respx
 
 from workrecap.exceptions import FetchError
-from workrecap.infra.ghes_client import GHESClient
+from workrecap.infra.ghes_client import GHESClient, RATE_LIMIT_MAX_RETRIES
 
 BASE_URL = "https://github.example.com"
 API_BASE = f"{BASE_URL}/api/v3"
@@ -67,6 +67,7 @@ class TestRetry:
     @respx.mock
     def test_retries_on_429(self, client, monkeypatch):
         monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: 1.0)
         route = respx.get(f"{API_BASE}/search/issues").mock(
             side_effect=[
                 httpx.Response(429, headers={"Retry-After": "0"}),
@@ -92,12 +93,16 @@ class TestRetry:
 
     @respx.mock
     def test_raises_fetch_error_after_max_retries_429(self, client, monkeypatch):
+        """Rate limit retries up to RATE_LIMIT_MAX_RETRIES (7), then raises."""
         monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
-        respx.get(f"{API_BASE}/search/issues").mock(
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: 1.0)
+        route = respx.get(f"{API_BASE}/search/issues").mock(
             return_value=httpx.Response(429, headers={"Retry-After": "0"})
         )
         with pytest.raises(FetchError, match="Rate limit exceeded"):
             client.search_issues("test")
+        # 1 initial + RATE_LIMIT_MAX_RETRIES retries
+        assert route.call_count == RATE_LIMIT_MAX_RETRIES + 1
 
     @respx.mock
     def test_raises_fetch_error_after_max_retries_500(self, client, monkeypatch):
@@ -135,6 +140,29 @@ class TestRetry:
         )
         result = client.search_issues("test")
         assert route.call_count == 2
+        assert result["total_count"] == 0
+
+    @respx.mock
+    def test_rate_limit_and_server_error_counters_independent(self, client, monkeypatch):
+        """Rate limit (7 max) and server error (3 max) counters are independent.
+
+        A request can survive mixed errors: e.g., 2 rate limits + 2 server errors
+        + success = 5 total attempts, which the old single-counter design (3 max)
+        would have failed on.
+        """
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: 1.0)
+        route = respx.get(f"{API_BASE}/search/issues").mock(
+            side_effect=[
+                httpx.Response(429, headers={"Retry-After": "0"}),  # rate limit #1
+                httpx.Response(429, headers={"Retry-After": "0"}),  # rate limit #2
+                httpx.Response(500),  # server error #1
+                httpx.Response(500),  # server error #2
+                httpx.Response(200, json={"total_count": 0, "items": []}),  # success
+            ]
+        )
+        result = client.search_issues("test")
+        assert route.call_count == 5
         assert result["total_count"] == 0
 
 
@@ -373,6 +401,7 @@ class TestRateLimitRetry403:
     def test_retries_on_403_rate_limit(self, client, monkeypatch):
         """403 with 'rate limit' in body → retry → success."""
         monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: 1.0)
         route = respx.get(f"{API_BASE}/search/issues").mock(
             side_effect=[
                 httpx.Response(
@@ -394,6 +423,7 @@ class TestRateLimitRetry403:
             "workrecap.infra.ghes_client.time.sleep",
             lambda v: sleep_values.append(v),
         )
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: 1.0)
         respx.get(f"{API_BASE}/search/issues").mock(
             side_effect=[
                 httpx.Response(
@@ -409,12 +439,13 @@ class TestRateLimitRetry403:
 
     @respx.mock
     def test_403_rate_limit_default_retry_after(self, client, monkeypatch):
-        """Defaults to 60s when no Retry-After header on 403 rate limit."""
+        """Without Retry-After header on 403, uses exponential backoff via _compute_rate_limit_wait."""
         sleep_values = []
         monkeypatch.setattr(
             "workrecap.infra.ghes_client.time.sleep",
             lambda v: sleep_values.append(v),
         )
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: 1.0)
         respx.get(f"{API_BASE}/search/issues").mock(
             side_effect=[
                 httpx.Response(403, json={"message": "rate limit exceeded"}),
@@ -422,17 +453,20 @@ class TestRateLimitRetry403:
             ]
         )
         client.search_issues("test")
-        assert sleep_values[0] == 60.0
+        # attempt=0 → 2^0 = 1.0s exponential backoff
+        assert sleep_values[0] == 1.0
 
     @respx.mock
     def test_403_rate_limit_exhausts_retries(self, client, monkeypatch):
-        """All attempts return 403 rate limit → raises FetchError."""
+        """All attempts return 403 rate limit → raises FetchError after RATE_LIMIT_MAX_RETRIES."""
         monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
-        respx.get(f"{API_BASE}/search/issues").mock(
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: 1.0)
+        route = respx.get(f"{API_BASE}/search/issues").mock(
             return_value=httpx.Response(403, json={"message": "API rate limit exceeded"})
         )
         with pytest.raises(FetchError, match="Rate limit exceeded"):
             client.search_issues("test")
+        assert route.call_count == RATE_LIMIT_MAX_RETRIES + 1
 
     @respx.mock
     def test_403_permission_denied_no_retry(self, client):
@@ -450,6 +484,7 @@ class TestRateLimitRetry403:
     def test_403_rate_limit_with_plain_text_body(self, client, monkeypatch):
         """Non-JSON body with 'rate limit' text still detected."""
         monkeypatch.setattr("workrecap.infra.ghes_client.time.sleep", lambda _: None)
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: 1.0)
         route = respx.get(f"{API_BASE}/search/issues").mock(
             side_effect=[
                 httpx.Response(403, text="rate limit exceeded"),
@@ -469,6 +504,7 @@ class TestRetryAfterHeader:
             "workrecap.infra.ghes_client.time.sleep",
             lambda v: sleep_values.append(v),
         )
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: 1.0)
         respx.get(f"{API_BASE}/search/issues").mock(
             side_effect=[
                 httpx.Response(429, headers={"Retry-After": "5"}),
@@ -478,13 +514,35 @@ class TestRetryAfterHeader:
         client.search_issues("test")
         assert sleep_values[0] == 5.0
 
+    def test_get_retry_after_returns_header_value(self, client):
+        """_get_retry_after parses Retry-After header as float."""
+        resp = httpx.Response(429, headers={"Retry-After": "42"})
+        assert client._get_retry_after(resp) == 42.0
+
+    def test_get_retry_after_returns_none_when_missing(self, client):
+        """_get_retry_after returns None when no Retry-After header present.
+
+        This enables callers to fall through to smarter strategies
+        (X-RateLimit-Reset or exponential backoff) instead of a fixed 60s.
+        """
+        resp = httpx.Response(429)
+        assert client._get_retry_after(resp) is None
+
+    def test_get_retry_after_returns_none_on_invalid_value(self, client):
+        """_get_retry_after returns None for non-numeric Retry-After header."""
+        resp = httpx.Response(429, headers={"Retry-After": "not-a-number"})
+        assert client._get_retry_after(resp) is None
+
     @respx.mock
     def test_default_retry_after_when_missing(self, client, monkeypatch):
+        """Without Retry-After header, uses _compute_rate_limit_wait (exponential backoff)."""
         sleep_values = []
         monkeypatch.setattr(
             "workrecap.infra.ghes_client.time.sleep",
             lambda v: sleep_values.append(v),
         )
+        # jitter = 1.0 → no randomization, so we can assert exact values
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: 1.0)
         respx.get(f"{API_BASE}/search/issues").mock(
             side_effect=[
                 httpx.Response(429),
@@ -492,7 +550,96 @@ class TestRetryAfterHeader:
             ]
         )
         client.search_issues("test")
-        assert sleep_values[0] == 60.0
+        # attempt=0 → 2^0 = 1.0s (exponential backoff tier 3)
+        assert sleep_values[0] == 1.0
+
+
+class TestComputeRateLimitWait:
+    """Tests for _compute_rate_limit_wait: three-tier wait strategy.
+
+    Strategy priority:
+    1. Retry-After header → exact server-specified wait
+    2. X-RateLimit-Reset → compute seconds until reset window
+    3. Exponential backoff min(2^attempt, 300s) → safe fallback
+    All results get ±25% jitter to prevent thundering herd.
+    """
+
+    def test_uses_retry_after_header_when_present(self, client, monkeypatch):
+        """Tier 1: Retry-After header takes priority over everything else."""
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: 1.0)
+        resp = httpx.Response(429, headers={"Retry-After": "30"})
+        wait = client._compute_rate_limit_wait(resp, attempt=0)
+        assert wait == 30.0  # jitter factor 1.0 → no change
+
+    def test_uses_ratelimit_reset_header_when_no_retry_after(self, client, monkeypatch):
+        """Tier 2: X-RateLimit-Reset timestamp when no Retry-After."""
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: 1.0)
+        monkeypatch.setattr("workrecap.infra.ghes_client.time.time", lambda: 1000.0)
+        resp = httpx.Response(429, headers={"X-RateLimit-Reset": "1060"})
+        wait = client._compute_rate_limit_wait(resp, attempt=0)
+        # 1060 - 1000 + 1 buffer = 61, jitter 1.0
+        assert wait == 61.0
+
+    def test_uses_exponential_backoff_when_no_headers(self, client, monkeypatch):
+        """Tier 3: Exponential backoff min(2^attempt, 300) when no headers."""
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: 1.0)
+        resp = httpx.Response(429)
+        # attempt 0 → 2^0 = 1s, attempt 3 → 2^3 = 8s, attempt 8 → min(256, 300) = 256s
+        assert client._compute_rate_limit_wait(resp, attempt=0) == 1.0
+        assert client._compute_rate_limit_wait(resp, attempt=3) == 8.0
+        assert client._compute_rate_limit_wait(resp, attempt=8) == 256.0
+
+    def test_exponential_backoff_caps_at_300s(self, client, monkeypatch):
+        """Backoff never exceeds RATE_LIMIT_BACKOFF_MAX (300s = 5 min)."""
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: 1.0)
+        resp = httpx.Response(429)
+        # attempt 9 → 2^9 = 512 > 300 → capped at 300
+        assert client._compute_rate_limit_wait(resp, attempt=9) == 300.0
+
+    def test_jitter_applied(self, client, monkeypatch):
+        """Jitter ±25% randomizes the wait to prevent thundering herd."""
+        # jitter_factor = 0.75 (lower bound of ±25%)
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: a)
+        resp = httpx.Response(429, headers={"Retry-After": "100"})
+        wait = client._compute_rate_limit_wait(resp, attempt=0)
+        assert wait == pytest.approx(75.0)  # 100 * 0.75
+
+    def test_minimum_wait_is_1_second(self, client, monkeypatch):
+        """Wait time never drops below 1 second even with jitter."""
+        monkeypatch.setattr("workrecap.infra.ghes_client.random.uniform", lambda a, b: a)
+        resp = httpx.Response(429, headers={"Retry-After": "0.5"})
+        wait = client._compute_rate_limit_wait(resp, attempt=0)
+        assert wait >= 1.0
+
+
+class TestRateLimitJitter:
+    """Verify jitter is applied during actual rate limit retries, not just in isolation."""
+
+    @respx.mock
+    def test_jitter_varies_sleep_times_across_retries(self, client, monkeypatch):
+        """With real random, consecutive rate limit waits are not identical.
+
+        This is crucial for parallel workers (GHESClientPool) to avoid
+        thundering herd: all workers waking up at the exact same time.
+        """
+        sleep_values = []
+        monkeypatch.setattr(
+            "workrecap.infra.ghes_client.time.sleep",
+            lambda v: sleep_values.append(v),
+        )
+        # Use real random (don't mock it) — jitter should vary
+        respx.get(f"{API_BASE}/search/issues").mock(
+            side_effect=[
+                httpx.Response(429, headers={"Retry-After": "10"}),
+                httpx.Response(429, headers={"Retry-After": "10"}),
+                httpx.Response(200, json={"total_count": 0, "items": []}),
+            ]
+        )
+        client.search_issues("test")
+        # Both waits should be in the jitter range [7.5, 12.5] (10 ± 25%)
+        assert len(sleep_values) == 2
+        for v in sleep_values:
+            assert 7.5 <= v <= 12.5, f"Wait {v} outside jitter range [7.5, 12.5]"
 
 
 class TestSearchThrottle:

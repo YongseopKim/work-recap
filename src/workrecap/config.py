@@ -27,6 +27,12 @@ class AppConfig(BaseSettings):
     # 병렬 실행
     max_workers: int = 5
 
+    # 복원력 (Resilience)
+    # Maximum retry attempts for failed dates before giving up.
+    # Applies to FailedDateStore: dates failing more than this many times
+    # are marked exhausted and reported to the user instead of retried.
+    max_fetch_retries: int = 5
+
     # 멀티소스
     enabled_sources: list[str] = ["github"]
 

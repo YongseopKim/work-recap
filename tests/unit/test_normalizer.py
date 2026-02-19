@@ -1429,6 +1429,25 @@ class TestLLMEnrichment:
         batch_requests = mock_llm.submit_batch.call_args[0][0]
         assert batch_requests[0]["cache_system_prompt"] is True
 
+    def test_batch_enrich_passes_batch_size(self, test_config):
+        """_batch_enrich passes batch_size to wait_for_batch for dynamic timeout."""
+        import shutil
+        from pathlib import Path
+
+        src_prompts = Path(__file__).parents[2] / "prompts"
+        for f in src_prompts.glob("*.md"):
+            shutil.copy(f, test_config.prompts_dir / f.name)
+
+        mock_llm = MagicMock()
+        mock_llm.wait_for_batch.return_value = []
+
+        normalizer = NormalizerService(test_config, llm=mock_llm)
+        activities = self._make_activities()
+        normalizer._batch_enrich({"2025-02-16": activities})
+
+        wait_kwargs = mock_llm.wait_for_batch.call_args.kwargs
+        assert wait_kwargs.get("batch_size") == 1  # 1 date → 1 batch request
+
 
 class TestActivityNewFields:
     def test_activity_default_values(self):

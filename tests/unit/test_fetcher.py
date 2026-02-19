@@ -1430,3 +1430,128 @@ class TestFetchRangeResume:
 
         # All should be skipped (already processed)
         assert all(r["status"] == "skipped" for r in results2)
+
+
+class TestFetchRangeFailedDates:
+    """Tests for FailedDateStore integration with fetch_range.
+
+    When FailedDateStore is injected:
+    - Failed dates from previous runs are merged with stale dates for retry
+    - Successful dates clear their failure records
+    - Failures are recorded with permanent error classification
+    """
+
+    def _setup_empty_search(self, mock_client):
+        mock_client.search_issues.return_value = {"total_count": 0, "items": []}
+        mock_client.search_commits.return_value = {"total_count": 0, "items": []}
+
+    def test_retryable_dates_included_in_range(self, test_config, mock_client):
+        """Previously failed dates are retried even if they'd normally be skipped."""
+        from workrecap.services.failed_dates import FailedDateStore
+
+        failed_store = FailedDateStore(
+            test_config.data_dir / "state" / "failed_dates.json", max_retries=3
+        )
+        # Simulate a previous failure for 2025-02-15
+        failed_store.record_failure("2025-02-15", "fetch", "Rate limit exceeded")
+
+        # Pre-create 2025-02-15 so it would normally be skipped
+        raw_dir = test_config.date_raw_dir("2025-02-15")
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / "prs.json").write_text("[]")
+        (raw_dir / "commits.json").write_text("[]")
+        (raw_dir / "issues.json").write_text("[]")
+
+        self._setup_empty_search(mock_client)
+        fetcher = FetcherService(test_config, mock_client, failed_date_store=failed_store)
+        results = fetcher.fetch_range("2025-02-14", "2025-02-16")
+        statuses = {r["date"]: r["status"] for r in results}
+
+        # 2025-02-15 should be retried (not skipped) because it has a failure record
+        assert statuses["2025-02-15"] == "success"
+
+    def test_success_clears_failure_record(self, test_config, mock_client):
+        """Successful fetch clears the failure tracking entry."""
+        from workrecap.services.failed_dates import FailedDateStore
+
+        failed_store = FailedDateStore(
+            test_config.data_dir / "state" / "failed_dates.json", max_retries=3
+        )
+        failed_store.record_failure("2025-02-15", "fetch", "Timeout")
+
+        self._setup_empty_search(mock_client)
+        fetcher = FetcherService(test_config, mock_client, failed_date_store=failed_store)
+        fetcher.fetch_range("2025-02-15", "2025-02-15")
+
+        # Failure record should be cleared
+        assert failed_store.get_entry("2025-02-15") is None
+
+    def test_failure_records_error(self, test_config, mock_client):
+        """Failed date-level processing records the error in FailedDateStore."""
+        from workrecap.services.failed_dates import FailedDateStore
+
+        failed_store = FailedDateStore(
+            test_config.data_dir / "state" / "failed_dates.json", max_retries=3
+        )
+
+        self._setup_empty_search(mock_client)
+        fetcher = FetcherService(test_config, mock_client, failed_date_store=failed_store)
+
+        # Make _save_date_from_bucket raise to simulate a date-level failure
+        with patch.object(fetcher, "_save_date_from_bucket", side_effect=FetchError("Boom")):
+            results = fetcher.fetch_range("2025-02-15", "2025-02-15")
+
+        statuses = {r["date"]: r["status"] for r in results}
+        assert statuses["2025-02-15"] == "failed"
+
+        entry = failed_store.get_entry("2025-02-15")
+        assert entry is not None
+        assert entry["attempts"] == 1
+        assert "Boom" in entry["last_error"]
+
+    def test_permanent_error_marked(self, test_config, mock_client):
+        """404 errors are marked as permanent in FailedDateStore."""
+        from workrecap.services.failed_dates import FailedDateStore
+
+        failed_store = FailedDateStore(
+            test_config.data_dir / "state" / "failed_dates.json", max_retries=3
+        )
+
+        self._setup_empty_search(mock_client)
+        fetcher = FetcherService(test_config, mock_client, failed_date_store=failed_store)
+
+        with patch.object(
+            fetcher,
+            "_save_date_from_bucket",
+            side_effect=FetchError("Client error 404: Not found"),
+        ):
+            fetcher.fetch_range("2025-02-15", "2025-02-15")
+
+        entry = failed_store.get_entry("2025-02-15")
+        assert entry["permanent"] is True
+
+    def test_exhausted_dates_not_retried(self, test_config, mock_client):
+        """Dates that exhausted max_retries are not retried."""
+        from workrecap.services.failed_dates import FailedDateStore
+
+        failed_store = FailedDateStore(
+            test_config.data_dir / "state" / "failed_dates.json", max_retries=2
+        )
+        # Exhaust retries
+        failed_store.record_failure("2025-02-15", "fetch", "Error")
+        failed_store.record_failure("2025-02-15", "fetch", "Error")
+
+        # Pre-create so it would normally be skipped
+        raw_dir = test_config.date_raw_dir("2025-02-15")
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / "prs.json").write_text("[]")
+        (raw_dir / "commits.json").write_text("[]")
+        (raw_dir / "issues.json").write_text("[]")
+
+        self._setup_empty_search(mock_client)
+        fetcher = FetcherService(test_config, mock_client, failed_date_store=failed_store)
+        results = fetcher.fetch_range("2025-02-15", "2025-02-15")
+        statuses = {r["date"]: r["status"] for r in results}
+
+        # Should be skipped because retries exhausted (won't be in retryable set)
+        assert statuses["2025-02-15"] == "skipped"
