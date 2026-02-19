@@ -33,6 +33,8 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
+> **Note:** `.venv/`는 프로젝트 루트에 위치하는 로컬 가상환경이다. `.gitignore`에 포함되어 있으므로 커밋되지 않는다. `git worktree`에서는 `pip install -e .`를 실행하지 말 것 — editable install은 단일 경로만 기록하므로 worktree 제거 시 메인 venv의 import가 깨진다. 대신 `PYTHONPATH=src pytest`를 사용한다.
+
 ## 설정
 
 `.env.example`을 복사하여 `.env` 파일을 생성하고 값을 채운다.
@@ -267,6 +269,7 @@ data/
 
 ```
 work-recap/
+├── .venv/                     # Python 가상환경 (로컬, .gitignore 대상)
 ├── src/workrecap/
 │   ├── __main__.py            # python -m workrecap 진입점
 │   ├── config.py               # AppConfig (pydantic-settings)

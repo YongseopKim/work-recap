@@ -2,10 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Virtual environment
+
+- 프로젝트 루트의 `.venv/`가 공식 가상환경. 명령 실행 전 `source .venv/bin/activate` 필요.
+- `.venv`에 이미 editable install 완료 상태 — 재설치 불필요.
+- **Worktree 주의:** `git worktree`에서 `pip install -e .` 금지. editable install은 단일 경로만 기록하므로 worktree 제거 시 메인 venv import가 깨짐. 대신 `PYTHONPATH=src pytest` 사용.
+
 ## Commands
 
 ```bash
-# Install (editable, with dev deps)
+# Install (editable, with dev deps) — 최초 1회만
 pip install -e ".[dev]"
 
 # Run unit tests (integration excluded by default)
