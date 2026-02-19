@@ -484,6 +484,42 @@ class TestGeminiProvider:
         assert models[0].id == "models/gemini-2.0-flash"
         assert models[0].provider == "gemini"
 
+    @patch("workrecap.infra.providers.gemini_provider.genai")
+    def test_chat_extracts_cache_read_tokens(self, mock_genai):
+        """cached_content_token_count → cache_read_tokens."""
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text="cached result",
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=200,
+                candidates_token_count=100,
+                total_token_count=300,
+                cached_content_token_count=150,
+            ),
+        )
+        mock_genai.Client.return_value = mock_client
+
+        p = GeminiProvider(api_key="AIza-test")
+        text, usage = p.chat("gemini-2.0-flash", "system", "user")
+
+        assert text == "cached result"
+        assert usage.cache_read_tokens == 150
+        assert usage.prompt_tokens == 200
+
+    @patch("workrecap.infra.providers.gemini_provider.genai")
+    def test_chat_no_cache_tokens_defaults_zero(self, mock_genai):
+        """No cached_content_token_count → cache_read_tokens=0."""
+        mock_client = MagicMock()
+        mock_client.models.generate_content.return_value = _gemini_response(
+            text="no cache", prompt=200, completion=100, total=300
+        )
+        mock_genai.Client.return_value = mock_client
+
+        p = GeminiProvider(api_key="AIza-test")
+        text, usage = p.chat("gemini-2.0-flash", "system", "user")
+
+        assert usage.cache_read_tokens == 0
+
 
 # ── Custom Provider (OpenAI-compatible) ──
 

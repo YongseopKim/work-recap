@@ -313,6 +313,7 @@ class NormalizerService:
                     "system_prompt": system_prompt,
                     "user_content": user_content,
                     "json_mode": True,
+                    "cache_system_prompt": True,
                 }
             )
 
@@ -428,6 +429,7 @@ class NormalizerService:
                 user_content,
                 task="enrich",
                 json_mode=True,
+                cache_system_prompt=True,
             )
 
             self._apply_enrichment(activities, response)

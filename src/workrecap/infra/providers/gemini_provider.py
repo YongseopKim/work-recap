@@ -49,6 +49,10 @@ class GeminiProvider(LLMProvider, BatchCapable):
         max_tokens: int | None = None,
         cache_system_prompt: bool = False,
     ) -> tuple[str, TokenUsage]:
+        # cache_system_prompt is accepted but not acted on — Gemini uses implicit
+        # caching (automatic since 2025-05, Gemini 2.5+). Requests sharing a common
+        # prefix get cache hits automatically. Min tokens: Flash 1024 / Pro 2048.
+        # cached_content_token_count in usage_metadata shows actual cache hits.
         config_kwargs: dict = {"system_instruction": system_prompt}
         if json_mode:
             config_kwargs["response_mime_type"] = "application/json"
@@ -66,6 +70,7 @@ class GeminiProvider(LLMProvider, BatchCapable):
             completion_tokens=meta.candidates_token_count,
             total_tokens=meta.total_token_count,
             call_count=1,
+            cache_read_tokens=getattr(meta, "cached_content_token_count", 0) or 0,
         )
         return text, usage
 

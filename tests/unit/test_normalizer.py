@@ -1389,6 +1389,46 @@ class TestLLMEnrichment:
         assert activities[0]["change_summary"] == "기능 추가"
         assert activities[0]["intent"] == "feature"
 
+    def test_enrich_passes_cache_system_prompt(self, test_config):
+        """_enrich_activities passes cache_system_prompt=True to LLM."""
+        import shutil
+        from pathlib import Path
+
+        src_prompts = Path(__file__).parents[2] / "prompts"
+        for f in src_prompts.glob("*.md"):
+            shutil.copy(f, test_config.prompts_dir / f.name)
+
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = json.dumps(
+            [{"index": 0, "change_summary": "test", "intent": "feature"}]
+        )
+
+        normalizer = NormalizerService(test_config, llm=mock_llm)
+        activities = self._make_activities()
+        normalizer._enrich_activities(activities)
+
+        call_kwargs = mock_llm.chat.call_args.kwargs
+        assert call_kwargs.get("cache_system_prompt") is True
+
+    def test_batch_enrich_passes_cache_system_prompt(self, test_config):
+        """_batch_enrich includes cache_system_prompt=True in batch requests."""
+        import shutil
+        from pathlib import Path
+
+        src_prompts = Path(__file__).parents[2] / "prompts"
+        for f in src_prompts.glob("*.md"):
+            shutil.copy(f, test_config.prompts_dir / f.name)
+
+        mock_llm = MagicMock()
+        mock_llm.wait_for_batch.return_value = []
+
+        normalizer = NormalizerService(test_config, llm=mock_llm)
+        activities = self._make_activities()
+        normalizer._batch_enrich({"2025-02-16": activities})
+
+        batch_requests = mock_llm.submit_batch.call_args[0][0]
+        assert batch_requests[0]["cache_system_prompt"] is True
+
 
 class TestActivityNewFields:
     def test_activity_default_values(self):

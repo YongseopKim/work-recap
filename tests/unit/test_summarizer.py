@@ -767,6 +767,36 @@ class TestQuery:
             summarizer.query("질문?")
 
 
+class TestCacheSystemPrompt:
+    """All chat() calls should pass cache_system_prompt=True."""
+
+    def test_daily_passes_cache_system_prompt(self, summarizer, mock_llm, test_config):
+        _save_normalized(test_config)
+        summarizer.daily(DATE)
+        assert mock_llm.chat.call_args.kwargs.get("cache_system_prompt") is True
+
+    def test_weekly_passes_cache_system_prompt(self, summarizer, mock_llm, test_config):
+        _save_daily_summary(test_config, "2025-02-10", "# Mon content")
+        summarizer.weekly(2025, 7)
+        assert mock_llm.chat.call_args.kwargs.get("cache_system_prompt") is True
+
+    def test_monthly_passes_cache_system_prompt(self, summarizer, mock_llm, test_config):
+        _save_weekly_summary(test_config, 2025, 5)
+        summarizer.monthly(2025, 2)
+        assert mock_llm.chat.call_args.kwargs.get("cache_system_prompt") is True
+
+    def test_yearly_passes_cache_system_prompt(self, summarizer, mock_llm, test_config):
+        _save_monthly_summary(test_config, 2025, 1)
+        summarizer.yearly(2025)
+        assert mock_llm.chat.call_args.kwargs.get("cache_system_prompt") is True
+
+    def test_daily_batch_passes_cache_system_prompt(self, summarizer, mock_llm, test_config):
+        _save_normalized(test_config)
+        summarizer._daily_range_batch([DATE], force=True, progress=None)
+        batch_requests = mock_llm.submit_batch.call_args[0][0]
+        assert batch_requests[0]["cache_system_prompt"] is True
+
+
 # ── _is_date_summarized 테스트 ──
 
 

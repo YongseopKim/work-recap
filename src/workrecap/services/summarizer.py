@@ -76,7 +76,9 @@ class SummarizerService:
             "LLM prompt: system=%d chars, user=%d chars", len(system_prompt), len(user_content)
         )
 
-        response = self._llm.chat(system_prompt, user_content, task="daily")
+        response = self._llm.chat(
+            system_prompt, user_content, task="daily", cache_system_prompt=True
+        )
 
         output_path = self._config.daily_summary_path(target_date)
         self._save_markdown(output_path, response)
@@ -221,6 +223,7 @@ class SummarizerService:
                     "custom_id": f"daily-{d}",
                     "system_prompt": system_prompt,
                     "user_content": user_content,
+                    "cache_system_prompt": True,
                 }
             )
             batch_dates.add(d)
@@ -276,7 +279,9 @@ class SummarizerService:
         system_prompt, dynamic = self._render_split_prompt("weekly.md", year=year, week=week)
         user_content = dynamic + "\n\n---\n\n" + "\n\n---\n\n".join(daily_contents)
 
-        response = self._llm.chat(system_prompt, user_content, task="weekly")
+        response = self._llm.chat(
+            system_prompt, user_content, task="weekly", cache_system_prompt=True
+        )
 
         self._save_markdown(output_path, response)
 
@@ -298,7 +303,9 @@ class SummarizerService:
         system_prompt, dynamic = self._render_split_prompt("monthly.md", year=year, month=month)
         user_content = dynamic + "\n\n---\n\n" + "\n\n---\n\n".join(weekly_contents)
 
-        response = self._llm.chat(system_prompt, user_content, task="monthly")
+        response = self._llm.chat(
+            system_prompt, user_content, task="monthly", cache_system_prompt=True
+        )
 
         self._save_markdown(output_path, response)
 
@@ -325,7 +332,9 @@ class SummarizerService:
         system_prompt, dynamic = self._render_split_prompt("yearly.md", year=year)
         user_content = dynamic + "\n\n---\n\n" + "\n\n---\n\n".join(monthly_contents)
 
-        response = self._llm.chat(system_prompt, user_content, task="yearly")
+        response = self._llm.chat(
+            system_prompt, user_content, task="yearly", cache_system_prompt=True
+        )
 
         self._save_markdown(output_path, response)
 
@@ -341,7 +350,7 @@ class SummarizerService:
         system_prompt = self._render_prompt("query.md")
         user_content = f"## Context\n\n{context}\n\n## 질문\n\n{question}"
 
-        return self._llm.chat(system_prompt, user_content, task="query")
+        return self._llm.chat(system_prompt, user_content, task="query", cache_system_prompt=True)
 
     # ── Staleness 체크 ──
 
