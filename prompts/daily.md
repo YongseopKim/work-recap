@@ -11,29 +11,6 @@
 - `Change Summary` 필드가 있으면 해당 내용을 활용하여 구체적인 변경사항을 설명하세요. 특히 커밋의 경우 Change Summary를 활용하면 더 풍부한 설명이 가능합니다.
 - 같은 intent를 가진 활동들을 연결하여 하루의 작업 흐름을 보여주세요.
 
-## 통계
-- 날짜: {{ date }}
-{%- if stats.github %}
-- 작성한 PR: {{ stats.github.authored_count }}건
-- 리뷰한 PR: {{ stats.github.reviewed_count }}건
-- PR 코멘트: {{ stats.github.commented_count }}건
-- 커밋: {{ stats.github.commit_count | default(0) }}건
-- 작성한 Issue: {{ stats.github.issue_authored_count | default(0) }}건
-- Issue 코멘트: {{ stats.github.issue_commented_count | default(0) }}건
-- 작성 코드: +{{ stats.github.total_additions }}/-{{ stats.github.total_deletions }}
-- 관련 저장소: {{ stats.github.repos_touched | join(", ") }}
-{%- endif %}
-{%- if stats.confluence %}
-- Confluence 페이지 생성: {{ stats.confluence.pages_created }}건
-- Confluence 페이지 편집: {{ stats.confluence.pages_edited }}건
-- Confluence 코멘트: {{ stats.confluence.comments_added }}건
-{%- endif %}
-{%- if stats.jira %}
-- Jira 티켓 생성: {{ stats.jira.tickets_created }}건
-- Jira 티켓 업데이트: {{ stats.jira.tickets_updated }}건
-- Jira 티켓 코멘트: {{ stats.jira.tickets_commented }}건
-{%- endif %}
-
 ## 출력 형식
 
 # Daily Summary: {날짜}
@@ -63,3 +40,28 @@
 
 ## 작업 분류
 (Intent별 활동 수 요약. 예: feature 3건, bugfix 2건, refactor 1건)
+
+<!-- SPLIT -->
+
+## 통계
+- 날짜: {{ date }}
+{%- if stats.github %}
+- 작성한 PR: {{ stats.github.authored_count }}건
+- 리뷰한 PR: {{ stats.github.reviewed_count }}건
+- PR 코멘트: {{ stats.github.commented_count }}건
+- 커밋: {{ stats.github.commit_count | default(0) }}건
+- 작성한 Issue: {{ stats.github.issue_authored_count | default(0) }}건
+- Issue 코멘트: {{ stats.github.issue_commented_count | default(0) }}건
+- 작성 코드: +{{ stats.github.total_additions }}/-{{ stats.github.total_deletions }}
+- 관련 저장소: {{ stats.github.repos_touched | join(", ") }}
+{%- endif %}
+{%- if stats.confluence %}
+- Confluence 페이지 생성: {{ stats.confluence.pages_created }}건
+- Confluence 페이지 편집: {{ stats.confluence.pages_edited }}건
+- Confluence 코멘트: {{ stats.confluence.comments_added }}건
+{%- endif %}
+{%- if stats.jira %}
+- Jira 티켓 생성: {{ stats.jira.tickets_created }}건
+- Jira 티켓 업데이트: {{ stats.jira.tickets_updated }}건
+- Jira 티켓 코멘트: {{ stats.jira.tickets_commented }}건
+{%- endif %}

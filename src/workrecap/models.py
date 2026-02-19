@@ -230,6 +230,8 @@ class TokenUsage:
     completion_tokens: int = 0
     total_tokens: int = 0
     call_count: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
     def __add__(self, other: "TokenUsage") -> "TokenUsage":
         return TokenUsage(
@@ -237,6 +239,8 @@ class TokenUsage:
             completion_tokens=self.completion_tokens + other.completion_tokens,
             total_tokens=self.total_tokens + other.total_tokens,
             call_count=self.call_count + other.call_count,
+            cache_read_tokens=self.cache_read_tokens + other.cache_read_tokens,
+            cache_write_tokens=self.cache_write_tokens + other.cache_write_tokens,
         )
 
 
@@ -251,6 +255,8 @@ class ModelUsage:
     total_tokens: int = 0
     call_count: int = 0
     estimated_cost_usd: float = 0.0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 # ── 직렬화 유틸리티 ──

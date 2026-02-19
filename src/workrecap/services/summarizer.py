@@ -67,8 +67,10 @@ class SummarizerService:
             self._update_checkpoint(target_date)
             return output_path
 
-        system_prompt = self._render_prompt("daily.md", date=target_date, stats=stats)
-        user_content = self._format_activities(activities)
+        system_prompt, dynamic = self._render_split_prompt(
+            "daily.md", date=target_date, stats=stats
+        )
+        user_content = dynamic + "\n\n" + self._format_activities(activities)
         logger.debug(
             "LLM prompt: system=%d chars, user=%d chars", len(system_prompt), len(user_content)
         )
@@ -166,8 +168,8 @@ class SummarizerService:
         if not daily_contents:
             raise SummarizeError(f"No daily summaries found for {year}-W{week:02d}")
 
-        system_prompt = self._render_prompt("weekly.md", year=year, week=week)
-        user_content = "\n\n---\n\n".join(daily_contents)
+        system_prompt, dynamic = self._render_split_prompt("weekly.md", year=year, week=week)
+        user_content = dynamic + "\n\n---\n\n" + "\n\n---\n\n".join(daily_contents)
 
         response = self._llm.chat(system_prompt, user_content, task="weekly")
 
@@ -188,8 +190,8 @@ class SummarizerService:
         if not weekly_contents:
             raise SummarizeError(f"No weekly summaries found for {year}-{month:02d}")
 
-        system_prompt = self._render_prompt("monthly.md", year=year, month=month)
-        user_content = "\n\n---\n\n".join(weekly_contents)
+        system_prompt, dynamic = self._render_split_prompt("monthly.md", year=year, month=month)
+        user_content = dynamic + "\n\n---\n\n" + "\n\n---\n\n".join(weekly_contents)
 
         response = self._llm.chat(system_prompt, user_content, task="monthly")
 
@@ -215,8 +217,8 @@ class SummarizerService:
         if not monthly_contents:
             raise SummarizeError(f"No monthly summaries found for {year}")
 
-        system_prompt = self._render_prompt("yearly.md", year=year)
-        user_content = "\n\n---\n\n".join(monthly_contents)
+        system_prompt, dynamic = self._render_split_prompt("yearly.md", year=year)
+        user_content = dynamic + "\n\n---\n\n" + "\n\n---\n\n".join(monthly_contents)
 
         response = self._llm.chat(system_prompt, user_content, task="yearly")
 
@@ -364,14 +366,34 @@ class SummarizerService:
     # ── 유틸리티 ──
 
     def _render_prompt(self, template_name: str, **kwargs) -> str:
-        """Jinja2 템플릿 렌더링."""
+        """Jinja2 템플릿 렌더링 (전체)."""
+        system, dynamic = self._render_split_prompt(template_name, **kwargs)
+        if dynamic:
+            return system + "\n\n" + dynamic
+        return system
+
+    def _render_split_prompt(self, template_name: str, **kwargs) -> tuple[str, str]:
+        """Jinja2 템플릿 렌더링. <!-- SPLIT --> 마커로 분할.
+
+        Returns:
+            (system_instructions, dynamic_data) — dynamic_data is "" if no marker.
+        """
         template_path = self._config.prompts_dir / template_name
         if not template_path.exists():
             raise SummarizeError(f"Prompt template not found: {template_path}")
 
         template_text = template_path.read_text(encoding="utf-8")
+        marker = "<!-- SPLIT -->"
+
+        if marker in template_text:
+            static_part, dynamic_part = template_text.split(marker, 1)
+            system = static_part.strip()
+            dynamic_template = Template(dynamic_part)
+            dynamic = dynamic_template.render(**kwargs).strip()
+            return system, dynamic
+
         template = Template(template_text)
-        return template.render(**kwargs)
+        return template.render(**kwargs), ""
 
     @staticmethod
     def _format_activities(activities: list[dict]) -> str:

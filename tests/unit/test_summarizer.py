@@ -544,8 +544,12 @@ class TestDaily:
         summarizer.daily(DATE)
 
         system_prompt = mock_llm.chat.call_args[0][0]
-        assert "2025-02-16" in system_prompt
-        assert "1" in system_prompt  # authored_count
+        user_content = mock_llm.chat.call_args[0][1]
+        # Static instructions in system prompt (cacheable)
+        assert "일일 업무 리포트" in system_prompt
+        # Dynamic stats (date, counts) in user content
+        assert "2025-02-16" in user_content
+        assert "1" in user_content  # authored_count
 
 
 class TestDailyEmptyActivities:

@@ -32,14 +32,28 @@ class CustomProvider(LLMProvider):
     def provider_name(self) -> str:
         return "custom"
 
-    def chat(self, model: str, system_prompt: str, user_content: str) -> tuple[str, TokenUsage]:
-        response = self._client.chat.completions.create(
-            model=model,
-            messages=[
+    def chat(
+        self,
+        model: str,
+        system_prompt: str,
+        user_content: str,
+        *,
+        json_mode: bool = False,
+        max_tokens: int | None = None,
+        cache_system_prompt: bool = False,
+    ) -> tuple[str, TokenUsage]:
+        kwargs: dict = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
-        )
+        }
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        response = self._client.chat.completions.create(**kwargs)
         text = response.choices[0].message.content
         # Some local models don't return usage stats
         if response.usage is not None:

@@ -340,6 +340,169 @@ class TestRouterStrategyModes:
         assert result == "fixed"
 
 
+class TestRouterJsonMode:
+    @patch("workrecap.infra.providers.openai_provider.OpenAI")
+    def test_json_mode_passed_to_provider(self, mock_openai_cls, fallback_config):
+        """json_mode=True is forwarded to the provider's chat()."""
+        from types import SimpleNamespace
+
+        mock_instance = MagicMock()
+        mock_instance.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"a":1}'))],
+            usage=SimpleNamespace(prompt_tokens=100, completion_tokens=50, total_tokens=150),
+        )
+        mock_openai_cls.return_value = mock_instance
+
+        router = LLMRouter(fallback_config)
+        result = router.chat("sys", "usr", task="daily", json_mode=True)
+
+        assert result == '{"a":1}'
+        call_kwargs = mock_instance.chat.completions.create.call_args.kwargs
+        assert call_kwargs["response_format"] == {"type": "json_object"}
+
+    @patch("workrecap.infra.providers.openai_provider.OpenAI")
+    def test_json_mode_default_false(self, mock_openai_cls, fallback_config):
+        """json_mode defaults to False — no response_format sent."""
+        from types import SimpleNamespace
+
+        mock_instance = MagicMock()
+        mock_instance.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="text"))],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+        mock_openai_cls.return_value = mock_instance
+
+        router = LLMRouter(fallback_config)
+        router.chat("sys", "usr", task="daily")
+
+        call_kwargs = mock_instance.chat.completions.create.call_args.kwargs
+        assert "response_format" not in call_kwargs
+
+
+class TestRouterCacheSystemPrompt:
+    @patch("workrecap.infra.providers.anthropic_provider.anthropic")
+    def test_cache_system_prompt_forwarded(self, mock_mod, tmp_path):
+        """cache_system_prompt=True is forwarded to provider."""
+        from types import SimpleNamespace
+
+        p = _write_toml(
+            tmp_path,
+            """\
+            [providers.anthropic]
+            api_key = "sk-ant"
+
+            [tasks.default]
+            provider = "anthropic"
+            model = "claude-haiku-4-5-20251001"
+            """,
+        )
+        config = ProviderConfig(config_path=p)
+
+        mock_instance = MagicMock()
+        mock_instance.messages.create.return_value = SimpleNamespace(
+            content=[SimpleNamespace(text="cached")],
+            usage=SimpleNamespace(
+                input_tokens=100,
+                output_tokens=50,
+                cache_creation_input_tokens=0,
+                cache_read_input_tokens=0,
+            ),
+        )
+        mock_mod.Anthropic.return_value = mock_instance
+
+        router = LLMRouter(config)
+        router.chat("sys", "usr", task="default", cache_system_prompt=True)
+
+        call_kwargs = mock_instance.messages.create.call_args.kwargs
+        system_val = call_kwargs["system"]
+        assert isinstance(system_val, list)
+        assert system_val[0]["cache_control"] == {"type": "ephemeral"}
+
+
+class TestRouterMaxTokens:
+    @patch("workrecap.infra.providers.openai_provider.OpenAI")
+    def test_max_tokens_from_task_config(self, mock_openai_cls, tmp_path):
+        """max_tokens in task config is forwarded to the provider."""
+        from types import SimpleNamespace
+
+        p = _write_toml(
+            tmp_path,
+            """\
+            [providers.openai]
+            api_key = "sk-test"
+
+            [tasks.enrich]
+            provider = "openai"
+            model = "gpt-4o-mini"
+            max_tokens = 1000
+            """,
+        )
+        config = ProviderConfig(config_path=p)
+
+        mock_instance = MagicMock()
+        mock_instance.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="r"))],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+        mock_openai_cls.return_value = mock_instance
+
+        router = LLMRouter(config)
+        router.chat("sys", "usr", task="enrich")
+
+        call_kwargs = mock_instance.chat.completions.create.call_args.kwargs
+        assert call_kwargs["max_tokens"] == 1000
+
+    @patch("workrecap.infra.providers.openai_provider.OpenAI")
+    def test_max_tokens_not_in_config_not_passed(self, mock_openai_cls, fallback_config):
+        """When max_tokens is not in config, it's not passed to provider."""
+        from types import SimpleNamespace
+
+        mock_instance = MagicMock()
+        mock_instance.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="r"))],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+        mock_openai_cls.return_value = mock_instance
+
+        router = LLMRouter(fallback_config)
+        router.chat("sys", "usr", task="daily")
+
+        call_kwargs = mock_instance.chat.completions.create.call_args.kwargs
+        assert "max_tokens" not in call_kwargs
+
+    @patch("workrecap.infra.providers.openai_provider.OpenAI")
+    def test_max_tokens_kwarg_overrides_config(self, mock_openai_cls, tmp_path):
+        """Explicit max_tokens kwarg overrides the config value."""
+        from types import SimpleNamespace
+
+        p = _write_toml(
+            tmp_path,
+            """\
+            [providers.openai]
+            api_key = "sk-test"
+
+            [tasks.enrich]
+            provider = "openai"
+            model = "gpt-4o-mini"
+            max_tokens = 1000
+            """,
+        )
+        config = ProviderConfig(config_path=p)
+
+        mock_instance = MagicMock()
+        mock_instance.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="r"))],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+        mock_openai_cls.return_value = mock_instance
+
+        router = LLMRouter(config)
+        router.chat("sys", "usr", task="enrich", max_tokens=500)
+
+        call_kwargs = mock_instance.chat.completions.create.call_args.kwargs
+        assert call_kwargs["max_tokens"] == 500
+
+
 class TestRouterErrorHandling:
     @patch("workrecap.infra.providers.openai_provider.OpenAI")
     def test_api_error_wrapped_as_summarize_error(self, mock_openai_cls, fallback_config):

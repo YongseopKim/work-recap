@@ -17,6 +17,7 @@ class TaskConfig:
     provider: str
     model: str
     escalation_model: str | None = None
+    max_tokens: int | None = None
 
 
 @dataclass
@@ -67,6 +68,7 @@ class ProviderConfig:
                 provider=task["provider"],
                 model=task["model"],
                 escalation_model=task.get("escalation_model"),
+                max_tokens=task.get("max_tokens"),
             )
 
     def get_task_config(self, task: str) -> TaskConfig:

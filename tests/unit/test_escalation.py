@@ -138,6 +138,90 @@ class TestEscalationFallback:
         escalation.chat.assert_not_called()
 
 
+class TestEscalationJsonMode:
+    def test_base_call_uses_json_mode(self):
+        """Base model always called with json_mode=True for self-assessment."""
+        base_response = json.dumps(
+            {
+                "needs_escalation": False,
+                "confidence": 0.9,
+                "reason": "",
+                "response": "Summary.",
+            }
+        )
+        base = _make_provider([base_response])
+        escalation = _make_provider([])
+
+        handler = EscalationHandler(
+            base_provider=base,
+            base_model="base-model",
+            escalation_provider=escalation,
+            escalation_model="premium-model",
+        )
+        handler.chat("system instructions", "user data")
+
+        # Verify json_mode=True was passed to base call
+        call_kwargs = base.chat.call_args.kwargs
+        assert call_kwargs.get("json_mode") is True
+
+    def test_escalation_forwards_json_mode(self):
+        """When escalating, json_mode from caller is forwarded to escalation model."""
+        base_response = json.dumps(
+            {
+                "needs_escalation": True,
+                "confidence": 0.2,
+                "reason": "too complex",
+                "response": "draft",
+            }
+        )
+        base = _make_provider([base_response])
+        escalation = _make_provider(["Premium result."])
+
+        handler = EscalationHandler(
+            base_provider=base,
+            base_model="base-model",
+            escalation_provider=escalation,
+            escalation_model="premium-model",
+        )
+        handler.chat("system", "user", json_mode=True)
+
+        call_kwargs = escalation.chat.call_args.kwargs
+        assert call_kwargs.get("json_mode") is True
+
+    def test_lean_system_prompt(self):
+        """Escalation uses a lean fixed system prompt, not embedding the original."""
+        base_response = json.dumps(
+            {
+                "needs_escalation": False,
+                "confidence": 0.9,
+                "reason": "",
+                "response": "Summary.",
+            }
+        )
+        base = _make_provider([base_response])
+        escalation = _make_provider([])
+
+        handler = EscalationHandler(
+            base_provider=base,
+            base_model="base-model",
+            escalation_provider=escalation,
+            escalation_model="premium-model",
+        )
+        handler.chat("A very long system prompt with lots of instructions", "user data")
+
+        # The system prompt sent to the base model should be the lean fixed one,
+        # NOT contain the original system prompt
+        call_args = base.chat.call_args
+        system_prompt_sent = call_args.args[1]  # model, system, user
+        assert "A very long system prompt" not in system_prompt_sent
+        assert len(system_prompt_sent) < 200  # Lean system prompt
+
+        # The original system prompt should be in the user content
+        user_content_sent = call_args.args[2]
+        assert "A very long system prompt" in user_content_sent
+        assert "user data" in user_content_sent
+
+
 class TestEscalationSameProvider:
     def test_same_provider_different_models(self):
         """Base and escalation can be same provider, different models."""

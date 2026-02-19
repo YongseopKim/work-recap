@@ -13,6 +13,7 @@ from workrecap.models import (
     JobStatus,
     PRRaw,
     Review,
+    TokenUsage,
     activity_from_dict,
     commit_raw_from_dict,
     confluence_stats_from_dict,
@@ -888,3 +889,46 @@ class TestDailyStatsNested:
         assert stats.github.authored_count == 1
         assert stats.confluence.pages_created == 2
         assert stats.jira.tickets_created == 3
+
+
+# ── TokenUsage cache fields ──
+
+
+class TestTokenUsageCacheFields:
+    def test_default_cache_fields_zero(self):
+        """cache_read_tokens and cache_write_tokens default to 0."""
+        u = TokenUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150, call_count=1)
+        assert u.cache_read_tokens == 0
+        assert u.cache_write_tokens == 0
+
+    def test_cache_fields_set(self):
+        """Cache fields can be set explicitly."""
+        u = TokenUsage(
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_tokens=150,
+            call_count=1,
+            cache_read_tokens=80,
+            cache_write_tokens=20,
+        )
+        assert u.cache_read_tokens == 80
+        assert u.cache_write_tokens == 20
+
+    def test_add_includes_cache_fields(self):
+        """__add__ sums cache fields."""
+        a = TokenUsage(100, 50, 150, 1, cache_read_tokens=80, cache_write_tokens=20)
+        b = TokenUsage(200, 100, 300, 1, cache_read_tokens=150, cache_write_tokens=0)
+        total = a + b
+        assert total.cache_read_tokens == 230
+        assert total.cache_write_tokens == 20
+        assert total.prompt_tokens == 300
+        assert total.call_count == 2
+
+    def test_add_backward_compat(self):
+        """Adding TokenUsage without cache fields still works."""
+        a = TokenUsage(100, 50, 150, 1)
+        b = TokenUsage(200, 100, 300, 1)
+        total = a + b
+        assert total.cache_read_tokens == 0
+        assert total.cache_write_tokens == 0
+        assert total.prompt_tokens == 300

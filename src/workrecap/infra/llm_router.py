@@ -56,6 +56,9 @@ class LLMRouter:
         user_content: str,
         *,
         task: str = "default",
+        json_mode: bool = False,
+        max_tokens: int | None = None,
+        cache_system_prompt: bool = False,
     ) -> str:
         """Send a chat completion, routing to the correct provider/model for the task.
 
@@ -63,6 +66,9 @@ class LLMRouter:
             system_prompt: System message.
             user_content: User message.
             task: Task name for routing (enrich, daily, weekly, monthly, yearly, query).
+            json_mode: If True, constrain output to valid JSON.
+            max_tokens: Max output tokens (overrides task config if set).
+            cache_system_prompt: If True, enable prompt caching for system prompt.
 
         Returns:
             LLM response text.
@@ -74,6 +80,9 @@ class LLMRouter:
         strategy = self._config.strategy_mode
 
         provider_name, model, use_escalation = self._resolve_model(task_config, strategy)
+
+        # Resolve max_tokens: explicit kwarg > task config > None
+        resolved_max_tokens = max_tokens if max_tokens is not None else task_config.max_tokens
 
         logger.info(
             "LLM call: task=%s provider=%s model=%s strategy=%s",
@@ -93,11 +102,24 @@ class LLMRouter:
         try:
             if use_escalation and task_config.escalation_model:
                 text, total_usage = self._chat_with_escalation(
-                    provider, task_config, system_prompt, user_content
+                    provider,
+                    task_config,
+                    system_prompt,
+                    user_content,
+                    json_mode=json_mode,
+                    max_tokens=resolved_max_tokens,
+                    cache_system_prompt=cache_system_prompt,
                 )
             else:
                 t0 = time.monotonic()
-                text, total_usage = provider.chat(model, system_prompt, user_content)
+                text, total_usage = provider.chat(
+                    model,
+                    system_prompt,
+                    user_content,
+                    json_mode=json_mode,
+                    max_tokens=resolved_max_tokens,
+                    cache_system_prompt=cache_system_prompt,
+                )
                 elapsed = time.monotonic() - t0
                 logger.info(
                     "LLM tokens: prompt=%d completion=%d total=%d (%.1fs)",
@@ -141,7 +163,17 @@ class LLMRouter:
         else:
             return provider_name, base_model, False
 
-    def _chat_with_escalation(self, provider, task_config, system_prompt, user_content):
+    def _chat_with_escalation(
+        self,
+        provider,
+        task_config,
+        system_prompt,
+        user_content,
+        *,
+        json_mode: bool = False,
+        max_tokens: int | None = None,
+        cache_system_prompt: bool = False,
+    ):
         """Use EscalationHandler for adaptive escalation."""
         from workrecap.infra.escalation import EscalationHandler
 
@@ -153,7 +185,13 @@ class LLMRouter:
             escalation_provider=provider,
             escalation_model=task_config.escalation_model,
         )
-        return handler.chat(system_prompt, user_content)
+        return handler.chat(
+            system_prompt,
+            user_content,
+            json_mode=json_mode,
+            max_tokens=max_tokens,
+            cache_system_prompt=cache_system_prompt,
+        )
 
     @property
     def usage(self) -> TokenUsage:

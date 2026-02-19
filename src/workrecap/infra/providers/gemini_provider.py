@@ -21,13 +21,25 @@ class GeminiProvider(LLMProvider):
     def provider_name(self) -> str:
         return "gemini"
 
-    def chat(self, model: str, system_prompt: str, user_content: str) -> tuple[str, TokenUsage]:
+    def chat(
+        self,
+        model: str,
+        system_prompt: str,
+        user_content: str,
+        *,
+        json_mode: bool = False,
+        max_tokens: int | None = None,
+        cache_system_prompt: bool = False,
+    ) -> tuple[str, TokenUsage]:
+        config_kwargs: dict = {"system_instruction": system_prompt}
+        if json_mode:
+            config_kwargs["response_mime_type"] = "application/json"
+        if max_tokens is not None:
+            config_kwargs["max_output_tokens"] = max_tokens
         response = self._client.models.generate_content(
             model=model,
             contents=user_content,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-            ),
+            config=types.GenerateContentConfig(**config_kwargs),
         )
         text = response.text
         meta = response.usage_metadata

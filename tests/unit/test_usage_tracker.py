@@ -113,6 +113,63 @@ class TestFormatReport:
         assert "2 calls" in report
 
 
+class TestCacheTracking:
+    def test_record_accumulates_cache_tokens(self):
+        tracker = UsageTracker()
+        u1 = TokenUsage(100, 50, 150, 1, cache_read_tokens=80, cache_write_tokens=20)
+        u2 = TokenUsage(100, 50, 150, 1, cache_read_tokens=90, cache_write_tokens=0)
+        tracker.record("anthropic", "claude-haiku", u1)
+        tracker.record("anthropic", "claude-haiku", u2)
+
+        mu = tracker.model_usages["anthropic/claude-haiku"]
+        assert mu.cache_read_tokens == 170
+        assert mu.cache_write_tokens == 20
+
+    def test_format_report_shows_cache_stats(self):
+        tracker = UsageTracker()
+        tracker.record(
+            "anthropic",
+            "claude-haiku",
+            TokenUsage(100, 50, 150, 1, cache_read_tokens=80, cache_write_tokens=20),
+        )
+        report = tracker.format_report()
+        assert "cache" in report.lower()
+        assert "80" in report  # cache_read
+        assert "20" in report  # cache_write
+
+    def test_format_report_no_cache_no_line(self):
+        tracker = UsageTracker()
+        tracker.record("openai", "gpt-4o-mini", TokenUsage(100, 50, 150, 1))
+        report = tracker.format_report()
+        assert "cache" not in report.lower()
+
+
+class TestCacheAwarePricing:
+    def test_cache_read_discount_anthropic(self, tmp_path):
+        """Cache read tokens get discounted pricing."""
+        pricing_file = tmp_path / "pricing.toml"
+        pricing_file.write_text('[anthropic]\n"claude-haiku" = { input = 1.0, output = 5.0 }\n')
+        pricing = PricingTable(path=pricing_file)
+        tracker = UsageTracker(pricing=pricing)
+
+        # 1M prompt tokens, 80% from cache
+        usage = TokenUsage(
+            prompt_tokens=1_000_000,
+            completion_tokens=100_000,
+            total_tokens=1_100_000,
+            call_count=1,
+            cache_read_tokens=800_000,
+            cache_write_tokens=0,
+        )
+        tracker.record("anthropic", "claude-haiku", usage)
+
+        mu = tracker.model_usages["anthropic/claude-haiku"]
+        # Without cache: (1M * 1.0 + 100K * 5.0) / 1M = $1.50
+        # With cache: (200K * 1.0 + 800K * 0.1 + 100K * 5.0) / 1M = $0.78
+        assert mu.estimated_cost_usd < 1.50
+        assert mu.estimated_cost_usd > 0.50
+
+
 class TestModelUsageDataclass:
     def test_defaults(self):
         mu = ModelUsage(provider="openai", model="gpt-4o")

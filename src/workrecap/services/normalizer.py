@@ -238,7 +238,7 @@ class NormalizerService:
                 return
 
             template_text = template_path.read_text(encoding="utf-8")
-            template = Template(template_text)
+            marker = "<!-- SPLIT -->"
 
             act_dicts = []
             for act in activities:
@@ -255,18 +255,22 @@ class NormalizerService:
                     }
                 )
 
-            prompt = template.render(activities=act_dicts)
-            response = self._llm.chat("You are a code change classifier.", prompt, task="enrich")
+            if marker in template_text:
+                static_part, dynamic_part = template_text.split(marker, 1)
+                system_prompt = static_part.strip()
+                user_content = Template(dynamic_part).render(activities=act_dicts).strip()
+            else:
+                system_prompt = "You are a code change classifier."
+                user_content = Template(template_text).render(activities=act_dicts)
 
-            # Parse JSON response
-            text = response.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-                if text.endswith("```"):
-                    text = text[:-3]
-                text = text.strip()
+            response = self._llm.chat(
+                system_prompt,
+                user_content,
+                task="enrich",
+                json_mode=True,
+            )
 
-            enrichments = json.loads(text)
+            enrichments = json.loads(response)
             for entry in enrichments:
                 idx = entry.get("index")
                 if idx is not None and 0 <= idx < len(activities):

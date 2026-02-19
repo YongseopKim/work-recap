@@ -155,3 +155,66 @@ class TestPricingTomlLoading:
         toml_file.write_text("not valid [[[ toml content")
         with pytest.raises(Exception):  # tomllib.TOMLDecodeError
             PricingTable(path=toml_file)
+
+
+class TestCacheAwarePricing:
+    def test_estimate_cost_with_cache_read(self, pricing_toml: Path):
+        """Cache read tokens get 90% discount on Anthropic input pricing."""
+        pt = PricingTable(path=pricing_toml)
+        # 1M total prompt, 800K from cache read
+        cost = pt.estimate_cost(
+            "anthropic",
+            "claude-haiku-4-5",
+            prompt_tokens=1_000_000,
+            completion_tokens=100_000,
+            cache_read_tokens=800_000,
+        )
+        # Without cache: (1M * 1.0 + 100K * 5.0) / 1M = $1.50
+        # With cache: (200K * 1.0 + 800K * 0.1 + 100K * 5.0) / 1M = $0.78
+        assert abs(cost - 0.78) < 0.01
+
+    def test_estimate_cost_with_cache_write(self, pricing_toml: Path):
+        """Cache write tokens cost 125% of input rate."""
+        pt = PricingTable(path=pricing_toml)
+        cost = pt.estimate_cost(
+            "anthropic",
+            "claude-haiku-4-5",
+            prompt_tokens=1_000_000,
+            completion_tokens=0,
+            cache_read_tokens=0,
+            cache_write_tokens=1_000_000,
+        )
+        # cache_write: 1M * 1.0 * 1.25 / 1M = $1.25
+        # non-cached prompt: (1M - 0 - 1M) = 0
+        assert abs(cost - 1.25) < 0.01
+
+    def test_estimate_cost_no_cache_unchanged(self, pricing_toml: Path):
+        """No cache tokens → same as before."""
+        pt = PricingTable(path=pricing_toml)
+        cost_no_cache = pt.estimate_cost(
+            "openai", "gpt-4o-mini", prompt_tokens=1_000_000, completion_tokens=500_000
+        )
+        cost_with_zeros = pt.estimate_cost(
+            "openai",
+            "gpt-4o-mini",
+            prompt_tokens=1_000_000,
+            completion_tokens=500_000,
+            cache_read_tokens=0,
+            cache_write_tokens=0,
+        )
+        assert cost_no_cache == cost_with_zeros
+
+    def test_estimate_cost_openai_cache_50_percent(self, pricing_toml: Path):
+        """OpenAI cache read = 50% discount."""
+        pt = PricingTable(path=pricing_toml)
+        cost = pt.estimate_cost(
+            "openai",
+            "gpt-4o-mini",
+            prompt_tokens=1_000_000,
+            completion_tokens=0,
+            cache_read_tokens=800_000,
+        )
+        # non-cached: 200K * 0.15 / 1M = 0.03
+        # cached: 800K * 0.15 * 0.5 / 1M = 0.06
+        # total = 0.09
+        assert abs(cost - 0.09) < 0.01

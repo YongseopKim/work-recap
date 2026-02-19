@@ -28,7 +28,12 @@ class UsageTracker:
         cost = 0.0
         if self._pricing:
             cost = self._pricing.estimate_cost(
-                provider, model, usage.prompt_tokens, usage.completion_tokens
+                provider,
+                model,
+                usage.prompt_tokens,
+                usage.completion_tokens,
+                cache_read_tokens=usage.cache_read_tokens,
+                cache_write_tokens=usage.cache_write_tokens,
             )
 
         with self._lock:
@@ -40,6 +45,8 @@ class UsageTracker:
             mu.total_tokens += usage.total_tokens
             mu.call_count += usage.call_count
             mu.estimated_cost_usd += cost
+            mu.cache_read_tokens += usage.cache_read_tokens
+            mu.cache_write_tokens += usage.cache_write_tokens
 
     @property
     def model_usages(self) -> dict[str, ModelUsage]:
@@ -75,6 +82,8 @@ class UsageTracker:
         total_completion = 0
         total_tokens = 0
         total_cost = 0.0
+        total_cache_read = 0
+        total_cache_write = 0
 
         for mu in usages:
             calls_str = f"{mu.call_count} call{'s' if mu.call_count != 1 else ''}"
@@ -84,11 +93,17 @@ class UsageTracker:
                 f"{mu.prompt_tokens:,}+{mu.completion_tokens:,}"
                 f"={mu.total_tokens:,} tokens{cost_str}"
             )
+            if mu.cache_read_tokens > 0 or mu.cache_write_tokens > 0:
+                lines.append(
+                    f"    cache: {mu.cache_read_tokens:,} read + {mu.cache_write_tokens:,} write"
+                )
             total_calls += mu.call_count
             total_prompt += mu.prompt_tokens
             total_completion += mu.completion_tokens
             total_tokens += mu.total_tokens
             total_cost += mu.estimated_cost_usd
+            total_cache_read += mu.cache_read_tokens
+            total_cache_write += mu.cache_write_tokens
 
         if len(usages) > 1:
             lines.append("  " + "─" * 50)
@@ -99,5 +114,7 @@ class UsageTracker:
                 f"{total_prompt:,}+{total_completion:,}"
                 f"={total_tokens:,} tokens{cost_str}"
             )
+            if total_cache_read > 0 or total_cache_write > 0:
+                lines.append(f"    cache: {total_cache_read:,} read + {total_cache_write:,} write")
 
         return "\n".join(lines)

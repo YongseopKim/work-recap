@@ -66,10 +66,39 @@ class PricingTable:
         model: str,
         prompt_tokens: int,
         completion_tokens: int,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
     ) -> float:
-        """Estimate cost in USD. Returns 0.0 for unknown models."""
+        """Estimate cost in USD with cache-aware pricing.
+
+        Cache discount rates by provider:
+        - Anthropic: read=10% of input, write=125% of input
+        - OpenAI: read=50% of input, write=100% of input (no penalty)
+        - Gemini: read=25% of input, write=100% of input
+        - Others: no discount applied
+        """
         rate = self.get_rate(provider, model)
         if rate is None:
             return 0.0
         prompt_rate, completion_rate = rate
-        return (prompt_tokens * prompt_rate + completion_tokens * completion_rate) / 1_000_000
+
+        # Determine cache discount rates
+        read_factor, write_factor = _CACHE_FACTORS.get(provider, (1.0, 1.0))
+
+        # Non-cached prompt tokens = total - cached
+        non_cached = max(0, prompt_tokens - cache_read_tokens - cache_write_tokens)
+        input_cost = (
+            non_cached * prompt_rate
+            + cache_read_tokens * prompt_rate * read_factor
+            + cache_write_tokens * prompt_rate * write_factor
+        )
+        output_cost = completion_tokens * completion_rate
+        return (input_cost + output_cost) / 1_000_000
+
+
+# Cache discount factors: (read_factor, write_factor) relative to input rate
+_CACHE_FACTORS: dict[str, tuple[float, float]] = {
+    "anthropic": (0.1, 1.25),  # 90% discount read, 25% surcharge write
+    "openai": (0.5, 1.0),  # 50% discount read, no surcharge write
+    "gemini": (0.25, 1.0),  # 75% discount read, no surcharge write
+}

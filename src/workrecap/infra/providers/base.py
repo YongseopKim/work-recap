@@ -23,13 +23,26 @@ class LLMProvider(ABC):
     """
 
     @abstractmethod
-    def chat(self, model: str, system_prompt: str, user_content: str) -> tuple[str, TokenUsage]:
+    def chat(
+        self,
+        model: str,
+        system_prompt: str,
+        user_content: str,
+        *,
+        json_mode: bool = False,
+        max_tokens: int | None = None,
+        cache_system_prompt: bool = False,
+    ) -> tuple[str, TokenUsage]:
         """Send a chat completion request.
 
         Args:
             model: Model identifier (e.g. "gpt-4o-mini").
             system_prompt: System message.
             user_content: User message.
+            json_mode: If True, constrain output to valid JSON.
+            max_tokens: Maximum output tokens. None = provider default.
+            cache_system_prompt: If True, enable prompt caching for system prompt.
+                Anthropic: uses cache_control blocks. OpenAI/Gemini: auto-cached (ignored).
 
         Returns:
             (response_text, token_usage) tuple.

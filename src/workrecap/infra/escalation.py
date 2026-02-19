@@ -12,28 +12,17 @@ logger = logging.getLogger(__name__)
 
 CONFIDENCE_THRESHOLD = 0.7
 
-_ESCALATION_WRAPPER = """\
-You must respond ONLY with a JSON object (no markdown, no extra text).
+_ESCALATION_SYSTEM = """\
+Complete the user's task and self-assess. Respond with JSON:
+{"needs_escalation": bool, "confidence": 0.0-1.0, "reason": "...", "response": "your answer"}\
+"""
 
-First, complete the task described below. Then self-assess your confidence.
+_ESCALATION_USER = """\
+Instructions: {system_prompt}
 
-Task system prompt:
 ---
-{system_prompt}
----
 
-Respond with this exact JSON structure:
-{{
-  "needs_escalation": true/false,
-  "confidence": 0.0 to 1.0,
-  "reason": "brief explanation if escalation needed",
-  "response": "your full response to the task"
-}}
-
-Rules:
-- Set confidence based on how well you handled the task
-- Set needs_escalation=true if the task is too complex for your capabilities
-- The "response" field must contain your complete answer to the task
+{user_content}\
 """
 
 
@@ -64,12 +53,18 @@ class EscalationHandler:
         self,
         system_prompt: str,
         user_content: str,
+        *,
+        json_mode: bool = False,
+        max_tokens: int | None = None,
+        cache_system_prompt: bool = False,
     ) -> tuple[str, TokenUsage]:
         """Execute with possible escalation. Returns (text, total_usage)."""
-        # Step 1: Call base model with escalation wrapper
-        wrapped_system = _ESCALATION_WRAPPER.format(system_prompt=system_prompt)
+        # Step 1: Call base model with lean system + merged user content
+        wrapped_user = _ESCALATION_USER.format(
+            system_prompt=system_prompt, user_content=user_content
+        )
         base_text, base_usage = self._base_provider.chat(
-            self._base_model, wrapped_system, user_content
+            self._base_model, _ESCALATION_SYSTEM, wrapped_user, json_mode=True
         )
 
         # Step 2: Parse JSON response
@@ -87,7 +82,12 @@ class EscalationHandler:
                 decision.get("reason", ""),
             )
             esc_text, esc_usage = self._escalation_provider.chat(
-                self._escalation_model, system_prompt, user_content
+                self._escalation_model,
+                system_prompt,
+                user_content,
+                json_mode=json_mode,
+                max_tokens=max_tokens,
+                cache_system_prompt=cache_system_prompt,
             )
             total_usage = base_usage + esc_usage
             return esc_text, total_usage
