@@ -39,16 +39,12 @@ cp .env.example .env
 GHES_URL=https://github.example.com
 GHES_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 GHES_USERNAME=your-username
-LLM_PROVIDER=openai          # openai | anthropic
-LLM_API_KEY=sk-xxxxxxxxxxxxxxxxxxxx
-LLM_MODEL=gpt-4o-mini
 MAX_WORKERS=5                 # 병렬 실행 워커 수 (기본: 5)
 ```
 
-### Multi-Provider 설정 (선택사항)
+### LLM Provider 설정
 
-`.provider/config.toml`을 생성하면 태스크별로 다른 provider+model을 사용할 수 있다.
-TOML 파일이 없으면 `.env`의 단일 provider 설정으로 동작한다 (100% 하위 호환).
+`.provider/config.toml`에서 태스크별로 다른 provider+model을 설정한다.
 
 ```toml
 # .provider/config.toml
@@ -264,7 +260,7 @@ work-recap/
 │   │   ├── ghes_client.py      # GHES REST API 클라이언트 (retry, rate limit)
 │   │   ├── llm_client.py       # [Deprecated] 레거시 LLM 클라이언트
 │   │   ├── llm_router.py       # LLM Router (task-based multi-provider routing)
-│   │   ├── provider_config.py  # .provider/config.toml 파싱 + .env fallback
+│   │   ├── provider_config.py  # .provider/config.toml 파싱
 │   │   ├── escalation.py       # Adaptive escalation handler
 │   │   ├── usage_tracker.py    # Per-model usage tracking + cost estimation
 │   │   ├── pricing.py          # Built-in pricing table ($/1M tokens)
@@ -378,7 +374,7 @@ coverage run -m pytest && coverage report
 | D-5: Sync-over-async | API BackgroundTasks 내에서 동기 서비스 코드 실행 (async 불필요) |
 | D-6: LLM enrichment | Normalize 단계에서 intent/change_summary 추출, 실패 시 graceful degradation |
 | D-7: 계층적 요약 | weekly/monthly/yearly는 하위 단계 요약을 input으로 사용하여 토큰 효율 확보 |
-| D-8: Multi-provider routing | 태스크별(enrich/daily/weekly/monthly/yearly/query) 다른 provider+model 배정. `.provider/config.toml`로 설정, 없으면 `.env` fallback (100% 하위 호환) |
+| D-8: Multi-provider routing | 태스크별(enrich/daily/weekly/monthly/yearly/query) 다른 provider+model 배정. `.provider/config.toml`이 단일 설정 소스 |
 | D-9: Adaptive escalation | 경량 모델이 자체 판단(confidence 0.0-1.0)으로 고급 모델에 에스컬레이션. JSON envelope 파싱 실패 시 원본 응답 사용 (graceful fallback) |
 | D-10: Auto-logging | `.log/YYYYMMDD_HHMMSS.log`에 DEBUG 레벨 자동 기록. LLM usage report 포함 |
 

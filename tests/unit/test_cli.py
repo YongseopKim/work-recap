@@ -23,7 +23,6 @@ def _mock_config():
         ghes_url="https://github.example.com",
         ghes_token="test-token",
         username="testuser",
-        llm_api_key="test-key",
         data_dir=Path("/tmp/test-data"),
         prompts_dir=Path("/tmp/test-prompts"),
     )
@@ -70,6 +69,7 @@ def patch_llm(monkeypatch):
     mock_llm = MagicMock()
     mock_llm.usage = TokenUsage()
     mock_llm.usage_tracker = None  # fallback to .usage path in _print_usage_report
+    mock_llm._config.providers = {}  # models command iterates over this
     monkeypatch.setattr("workrecap.cli.main._get_llm_router", lambda c: mock_llm)
     return mock_llm
 

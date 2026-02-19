@@ -13,14 +13,12 @@ class TestAppConfig:
             ghes_url="https://github.example.com",
             ghes_token="token",
             username="user",
-            llm_api_key="key",
         )
         assert config.ghes_url == "https://github.example.com"
-        assert config.llm_model == "gpt-4o-mini"
 
     def test_default_paths(self):
         """data_dir, prompts_dir 기본값 확인."""
-        config = AppConfig(ghes_url="u", ghes_token="t", username="u", llm_api_key="k")
+        config = AppConfig(ghes_url="u", ghes_token="t", username="u")
         assert config.data_dir == Path("data")
         assert config.prompts_dir == Path("prompts")
 
@@ -30,7 +28,6 @@ class TestAppConfig:
             ghes_url="u",
             ghes_token="t",
             username="u",
-            llm_api_key="k",
             data_dir=Path("/tmp/data"),
         )
         assert config.raw_dir == Path("/tmp/data/raw")
@@ -55,19 +52,12 @@ class TestAppConfig:
         with pytest.raises(ValidationError):
             AppConfig()
 
-    def test_llm_provider_default(self):
-        """llm_provider 기본값은 'openai'."""
-        config = AppConfig(ghes_url="u", ghes_token="t", username="u", llm_api_key="k")
-        assert config.llm_provider == "openai"
-
     def test_max_workers_default(self):
         """max_workers 기본값은 5."""
-        config = AppConfig(ghes_url="u", ghes_token="t", username="u", llm_api_key="k")
+        config = AppConfig(ghes_url="u", ghes_token="t", username="u")
         assert config.max_workers == 5
 
     def test_max_workers_from_kwarg(self):
         """max_workers를 직접 인자로 설정 가능."""
-        config = AppConfig(
-            ghes_url="u", ghes_token="t", username="u", llm_api_key="k", max_workers=10
-        )
+        config = AppConfig(ghes_url="u", ghes_token="t", username="u", max_workers=10)
         assert config.max_workers == 10

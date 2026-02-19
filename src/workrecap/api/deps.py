@@ -16,7 +16,7 @@ def get_job_store() -> JobStore:
 
 
 def get_llm_router(config: AppConfig | None = None):
-    """Create an LLMRouter instance from AppConfig."""
+    """Create an LLMRouter instance from ProviderConfig TOML."""
     from workrecap.infra.llm_router import LLMRouter
     from workrecap.infra.provider_config import ProviderConfig
     from workrecap.infra.usage_tracker import UsageTracker
@@ -25,11 +25,6 @@ def get_llm_router(config: AppConfig | None = None):
     if config is None:
         config = get_config()
 
-    config_path = config.provider_config_path
-    if config_path.exists():
-        pc = ProviderConfig(config_path=config_path)
-    else:
-        pc = ProviderConfig(config_path=None, fallback_config=config)
-
+    pc = ProviderConfig(config.provider_config_path)
     tracker = UsageTracker(pricing=PricingTable())
     return LLMRouter(pc, usage_tracker=tracker)

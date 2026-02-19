@@ -63,8 +63,20 @@ def multi_provider_config(tmp_path):
 
 
 @pytest.fixture
-def fallback_config(test_config):
-    return ProviderConfig(config_path=None, fallback_config=test_config)
+def fallback_config(tmp_path):
+    """Single-provider config (replaces the old .env fallback)."""
+    path = _write_toml(
+        tmp_path,
+        """\
+        [providers.openai]
+        api_key = "sk-test"
+
+        [tasks.default]
+        provider = "openai"
+        model = "gpt-4o-mini"
+        """,
+    )
+    return ProviderConfig(config_path=path)
 
 
 class TestRouterInit:

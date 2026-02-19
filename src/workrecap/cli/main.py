@@ -65,12 +65,7 @@ def _get_llm_router(config: AppConfig):
     from workrecap.infra.usage_tracker import UsageTracker
     from workrecap.infra.pricing import PricingTable
 
-    config_path = config.provider_config_path
-    if config_path.exists():
-        pc = ProviderConfig(config_path=config_path)
-    else:
-        pc = ProviderConfig(config_path=None, fallback_config=config)
-
+    pc = ProviderConfig(config.provider_config_path)
     tracker = UsageTracker(pricing=PricingTable())
     return LLMRouter(pc, usage_tracker=tracker)
 
@@ -694,19 +689,12 @@ def ask(
 @app.command()
 def models() -> None:
     """List available models from configured providers."""
-    from workrecap.infra.provider_config import ProviderConfig
-
     config = _get_config()
-    config_path = config.provider_config_path
-    if config_path.exists():
-        pc = ProviderConfig(config_path=config_path)
-    else:
-        pc = ProviderConfig(config_path=None, fallback_config=config)
+    router = _get_llm_router(config)
 
     # Create providers for all configured entries
-    router = _get_llm_router(config)
     providers = {}
-    for name in pc.providers:
+    for name in router._config.providers:
         try:
             providers[name] = router._get_provider(name)
         except Exception:

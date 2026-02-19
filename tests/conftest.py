@@ -31,7 +31,4 @@ def test_config(tmp_data_dir: Path, tmp_path: Path) -> AppConfig:
         username="testuser",
         data_dir=tmp_data_dir,
         prompts_dir=prompts_dir,
-        llm_provider="openai",
-        llm_api_key="test-key",
-        llm_model="gpt-4o-mini",
     )

@@ -1,14 +1,10 @@
-"""Provider configuration — TOML parsing with .env fallback."""
+"""Provider configuration — TOML-only parsing."""
 
 from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from workrecap.config import AppConfig
 
 KNOWN_TASKS = ("enrich", "daily", "weekly", "monthly", "yearly", "query")
 VALID_STRATEGIES = ("economy", "standard", "premium", "adaptive", "fixed")
@@ -33,33 +29,20 @@ class ProviderEntry:
 
 @dataclass
 class ProviderConfig:
-    """Manages provider/task configuration from TOML or .env fallback.
+    """Manages provider/task configuration from TOML file.
 
     Usage:
-        # From TOML file
-        pc = ProviderConfig(config_path=Path(".provider/config.toml"))
-
-        # Fallback from AppConfig (no TOML)
-        pc = ProviderConfig(config_path=None, fallback_config=app_config)
+        pc = ProviderConfig(Path(".provider/config.toml"))
     """
 
     _strategy_mode: str = "fixed"
     _providers: dict[str, ProviderEntry] = field(default_factory=dict)
     _tasks: dict[str, TaskConfig] = field(default_factory=dict)
 
-    def __init__(
-        self,
-        config_path: Path | None,
-        fallback_config: AppConfig | None = None,
-    ) -> None:
-        if config_path is not None:
-            if not config_path.exists():
-                raise FileNotFoundError(f"Provider config not found: {config_path}")
-            self._load_toml(config_path)
-        elif fallback_config is not None:
-            self._load_fallback(fallback_config)
-        else:
-            raise ValueError("Either config_path or fallback_config must be provided")
+    def __init__(self, config_path: Path) -> None:
+        if not config_path.exists():
+            raise FileNotFoundError(f"Provider config not found: {config_path}")
+        self._load_toml(config_path)
 
     def _load_toml(self, path: Path) -> None:
         with open(path, "rb") as f:
@@ -85,14 +68,6 @@ class ProviderConfig:
                 model=task["model"],
                 escalation_model=task.get("escalation_model"),
             )
-
-    def _load_fallback(self, config: AppConfig) -> None:
-        self._strategy_mode = "fixed"
-        self._providers = {
-            config.llm_provider: ProviderEntry(api_key=config.llm_api_key),
-        }
-        default_task = TaskConfig(provider=config.llm_provider, model=config.llm_model)
-        self._tasks = {"default": default_task}
 
     def get_task_config(self, task: str) -> TaskConfig:
         """Get configuration for a specific task, falling back to 'default'."""

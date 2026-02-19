@@ -23,7 +23,6 @@ def test_config(tmp_path):
         ghes_url="https://github.example.com",
         ghes_token="test-token",
         username="testuser",
-        llm_api_key="test-key",
         data_dir=tmp_path / "data",
         prompts_dir=tmp_path / "prompts",
     )

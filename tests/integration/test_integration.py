@@ -59,9 +59,9 @@ class TestIntegrationPipeline:
         assert stats["reviewed_count"] >= 0
         assert stats["commit_count"] >= 0
 
-    def test_03_summarize_daily(self, real_config, llm_client, test_date):
+    def test_03_summarize_daily(self, real_config, llm_router, test_date):
         """Step 3: LLM을 호출하여 daily summary markdown 생성."""
-        summarizer = SummarizerService(real_config, llm_client)
+        summarizer = SummarizerService(real_config, llm_router)
         summary_path = summarizer.daily(test_date)
 
         assert summary_path.exists(), "Daily summary markdown not created"
@@ -69,14 +69,14 @@ class TestIntegrationPipeline:
         content = summary_path.read_text(encoding="utf-8")
         assert len(content.strip()) > 0, "Daily summary is empty"
 
-    def test_04_full_pipeline(self, real_config, ghes_client, llm_client, test_date):
+    def test_04_full_pipeline(self, real_config, ghes_client, llm_router, test_date):
         """Step 4: 새로운 날짜로 전체 파이프라인 (fetch→normalize→summarize) 실행."""
         # test_date 하루 전 사용 → Step 1~3과 다른 날짜
         pipeline_date = (date.fromisoformat(test_date) - timedelta(days=1)).isoformat()
 
         fetcher = FetcherService(real_config, ghes_client)
         normalizer = NormalizerService(real_config)
-        summarizer = SummarizerService(real_config, llm_client)
+        summarizer = SummarizerService(real_config, llm_router)
         orchestrator = OrchestratorService(fetcher, normalizer, summarizer)
 
         summary_path = orchestrator.run_daily(pipeline_date)

@@ -24,11 +24,6 @@ class AppConfig(BaseSettings):
     data_dir: Path = Path("data")
     prompts_dir: Path = Path("prompts")
 
-    # LLM 설정
-    llm_provider: str = "openai"
-    llm_api_key: str
-    llm_model: str = "gpt-4o-mini"
-
     # 병렬 실행
     max_workers: int = 5
 

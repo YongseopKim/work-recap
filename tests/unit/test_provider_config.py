@@ -1,4 +1,4 @@
-"""ProviderConfig TOML parsing + .env fallback tests."""
+"""ProviderConfig TOML-only parsing tests."""
 
 import textwrap
 from pathlib import Path
@@ -6,35 +6,6 @@ from pathlib import Path
 import pytest
 
 from workrecap.infra.provider_config import ProviderConfig
-
-
-# ── Fallback from AppConfig ──
-
-
-class TestFallbackFromAppConfig:
-    def test_all_tasks_use_env_values(self, test_config):
-        """TOML 파일 없으면 모든 task가 .env의 llm_provider/model 사용."""
-        pc = ProviderConfig(config_path=None, fallback_config=test_config)
-
-        for task_name in ("enrich", "daily", "weekly", "monthly", "yearly", "query"):
-            tc = pc.get_task_config(task_name)
-            assert tc.provider == "openai"
-            assert tc.model == "gpt-4o-mini"
-            assert tc.escalation_model is None
-
-    def test_fallback_provider_entry(self, test_config):
-        pc = ProviderConfig(config_path=None, fallback_config=test_config)
-        entry = pc.get_provider_entry("openai")
-        assert entry.api_key == "test-key"
-
-    def test_fallback_strategy_mode(self, test_config):
-        pc = ProviderConfig(config_path=None, fallback_config=test_config)
-        assert pc.strategy_mode == "fixed"
-
-    def test_validate_ok(self, test_config):
-        pc = ProviderConfig(config_path=None, fallback_config=test_config)
-        errors = pc.validate()
-        assert errors == []
 
 
 # ── TOML Parsing ──

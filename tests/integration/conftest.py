@@ -7,7 +7,6 @@ import pytest
 
 from workrecap.config import AppConfig
 from workrecap.infra.ghes_client import GHESClient
-from workrecap.infra.llm_client import LLMClient
 
 # ── .env 존재 여부 확인 ──
 
@@ -54,9 +53,9 @@ def real_config(shared_tmp_dir):
 
         config = AppConfig(data_dir=data_dir, prompts_dir=prompts_dir)
 
-        required = [config.ghes_url, config.ghes_token, config.username, config.llm_api_key]
+        required = [config.ghes_url, config.ghes_token, config.username]
         if not all(required):
-            pytest.skip("Required .env keys missing (ghes_url, ghes_token, username, llm_api_key)")
+            pytest.skip("Required .env keys missing (ghes_url, ghes_token, username)")
 
         yield config
     finally:
@@ -72,10 +71,13 @@ def ghes_client(real_config):
 
 
 @pytest.fixture(scope="class")
-def llm_client(real_config):
-    """Real LLM client."""
-    return LLMClient(
-        provider=real_config.llm_provider,
-        api_key=real_config.llm_api_key,
-        model=real_config.llm_model,
-    )
+def llm_router(real_config):
+    """Real LLM router via ProviderConfig TOML."""
+    from workrecap.infra.llm_router import LLMRouter
+    from workrecap.infra.provider_config import ProviderConfig
+    from workrecap.infra.usage_tracker import UsageTracker
+    from workrecap.infra.pricing import PricingTable
+
+    pc = ProviderConfig(real_config.provider_config_path)
+    tracker = UsageTracker(pricing=PricingTable())
+    return LLMRouter(pc, usage_tracker=tracker)
