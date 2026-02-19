@@ -18,6 +18,11 @@ from workrecap.models import TokenUsage
 
 logger = logging.getLogger(__name__)
 
+# OpenAI reasoning models — max_completion_tokens includes reasoning tokens,
+# so passing a config-level limit starves visible output. Skip the parameter
+# for these models and let the API use its default.
+_REASONING_PREFIXES = ("o1", "o3", "o4", "gpt-5")
+
 # OpenAI batch status → BatchStatus mapping
 _STATUS_MAP: dict[str, BatchStatus] = {
     "validating": BatchStatus.SUBMITTED,
@@ -66,11 +71,11 @@ class OpenAIProvider(LLMProvider, BatchCapable):
         }
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
-        if max_tokens is not None:
+        if max_tokens is not None and not self._is_reasoning_model(model):
             kwargs["max_completion_tokens"] = max_tokens
         # cache_system_prompt is ignored — OpenAI auto-caches prompts ≥1024 tokens
         response = self._client.chat.completions.create(**kwargs)
-        text = response.choices[0].message.content
+        text = response.choices[0].message.content or ""
 
         # Extract auto-cache stats from OpenAI response
         details = getattr(response.usage, "prompt_tokens_details", None)
@@ -158,6 +163,15 @@ class OpenAIProvider(LLMProvider, BatchCapable):
         return results
 
     @staticmethod
+    def _is_reasoning_model(model: str) -> bool:
+        """Check if model is a reasoning model (o1/o3/o4/gpt-5 family).
+
+        Reasoning models include internal thinking tokens in max_completion_tokens,
+        so setting it to a config-level limit (e.g. 4096) starves visible output.
+        """
+        return any(model.startswith(p) for p in _REASONING_PREFIXES)
+
+    @staticmethod
     def _build_batch_line(req: BatchRequest) -> dict:
         """Convert BatchRequest to OpenAI batch JSONL line format."""
         body: dict = {
@@ -169,7 +183,7 @@ class OpenAIProvider(LLMProvider, BatchCapable):
         }
         if req.json_mode:
             body["response_format"] = {"type": "json_object"}
-        if req.max_tokens is not None:
+        if req.max_tokens is not None and not OpenAIProvider._is_reasoning_model(req.model):
             body["max_completion_tokens"] = req.max_tokens
         return {
             "custom_id": req.custom_id,

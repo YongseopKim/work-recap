@@ -168,6 +168,21 @@ class TestOpenAIProvider:
         assert "max_completion_tokens" not in call_kwargs
 
     @patch("workrecap.infra.providers.openai_provider.OpenAI")
+    def test_chat_max_tokens_skipped_for_reasoning_model(self, mock_cls):
+        """max_tokens is NOT passed for reasoning models (gpt-5, o3, etc.)."""
+        mock_instance = MagicMock()
+        mock_instance.chat.completions.create.return_value = _openai_response()
+        mock_cls.return_value = mock_instance
+
+        p = OpenAIProvider(api_key="sk-test")
+        for model in ("gpt-5", "gpt-5-mini", "o3", "o3-mini", "o4-mini"):
+            p.chat(model, "system", "user", max_tokens=4096)
+            call_kwargs = mock_instance.chat.completions.create.call_args.kwargs
+            assert "max_completion_tokens" not in call_kwargs, (
+                f"max_completion_tokens should not be passed for reasoning model {model}"
+            )
+
+    @patch("workrecap.infra.providers.openai_provider.OpenAI")
     def test_cache_tokens_extracted(self, mock_cls):
         """OpenAI auto-caching: cached_tokens extracted into cache_read_tokens."""
         mock_instance = MagicMock()

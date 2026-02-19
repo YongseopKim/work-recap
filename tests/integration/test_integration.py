@@ -127,7 +127,19 @@ class TestPromptCaching:
             "You are a helpful assistant that summarizes software engineering work. "
             "Respond with a single short sentence.\n\n" + "\n".join(lines)
         )
-        model = pc.get_task_config("daily").model
+        # Find an Anthropic task model for this test (we're testing Anthropic caching)
+        anthropic_model = None
+        for task in ("monthly", "yearly", "enrich", "daily", "weekly", "query"):
+            try:
+                tc = pc.get_task_config(task)
+                if tc.provider == "anthropic":
+                    anthropic_model = tc.model
+                    break
+            except KeyError:
+                continue
+        if not anthropic_model:
+            pytest.skip("No Anthropic task configured — cannot test prompt caching")
+        model = anthropic_model
 
         # 1st call — cache miss (should populate cache, cache_write > 0)
         text1, usage1 = provider.chat(

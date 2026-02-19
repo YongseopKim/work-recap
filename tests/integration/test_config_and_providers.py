@@ -94,14 +94,21 @@ class TestProviderConnectivity:
         if "gemini" not in pc.providers:
             pytest.skip("Gemini provider not configured")
 
+        from google.genai.errors import ClientError
+
         from workrecap.infra.providers.gemini_provider import GeminiProvider
 
         provider = GeminiProvider(api_key=pc.providers["gemini"].api_key)
-        text, usage = provider.chat(
-            "gemini-2.0-flash-lite",
-            "You are a helpful assistant.",
-            "Say 'hello' and nothing else.",
-        )
+        try:
+            text, usage = provider.chat(
+                "gemini-2.0-flash-lite",
+                "You are a helpful assistant.",
+                "Say 'hello' and nothing else.",
+            )
+        except ClientError as e:
+            if e.code == 429:
+                pytest.skip(f"Gemini rate limit exceeded: {e}")
+            raise
         assert text.strip(), "Empty response from Gemini"
         assert usage.total_tokens > 0, f"Expected total_tokens > 0, got {usage.total_tokens}"
 
@@ -124,8 +131,11 @@ class TestEnrichTask:
             json_mode=True,
         )
 
-        # Should be parseable JSON
-        parsed = json.loads(text)
+        # Should be valid JSON — either a string to parse, or already parsed
+        # (adaptive mode's escalation handler may return pre-parsed objects)
+        if isinstance(text, str):
+            parsed = json.loads(text)
+        else:
+            parsed = text
         assert parsed is not None, "Parsed JSON should not be None"
-        # Should be a list or dict (LLM may return either)
         assert isinstance(parsed, (list, dict)), f"Expected list or dict, got {type(parsed)}"
