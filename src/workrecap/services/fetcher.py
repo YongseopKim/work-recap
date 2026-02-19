@@ -57,6 +57,10 @@ class FetcherService:
         self._client_pool = client_pool
         self._progress_store = progress_store
 
+    @property
+    def source_name(self) -> str:
+        return "github"
+
     def fetch(
         self,
         target_date: str,

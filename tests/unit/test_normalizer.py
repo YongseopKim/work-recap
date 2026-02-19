@@ -425,7 +425,7 @@ class TestComputeStats:
                 ts="t",
                 kind=ActivityKind.PR_AUTHORED,
                 repo="r",
-                pr_number=1,
+                external_id=1,
                 title="t",
                 url="u",
                 summary="s",
@@ -436,7 +436,7 @@ class TestComputeStats:
                 ts="t",
                 kind=ActivityKind.PR_AUTHORED,
                 repo="r",
-                pr_number=2,
+                external_id=2,
                 title="t",
                 url="u",
                 summary="s",
@@ -447,7 +447,7 @@ class TestComputeStats:
                 ts="t",
                 kind=ActivityKind.PR_REVIEWED,
                 repo="r",
-                pr_number=3,
+                external_id=3,
                 title="t",
                 url="u",
                 summary="s",
@@ -458,16 +458,16 @@ class TestComputeStats:
                 ts="t",
                 kind=ActivityKind.PR_COMMENTED,
                 repo="r2",
-                pr_number=4,
+                external_id=4,
                 title="t",
                 url="u",
                 summary="s",
             ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
-        assert stats.authored_count == 2
-        assert stats.reviewed_count == 1
-        assert stats.commented_count == 1
+        assert stats.github.authored_count == 2
+        assert stats.github.reviewed_count == 1
+        assert stats.github.commented_count == 1
 
     def test_additions_only_from_authored(self):
         activities = [
@@ -475,7 +475,7 @@ class TestComputeStats:
                 ts="t",
                 kind=ActivityKind.PR_AUTHORED,
                 repo="r",
-                pr_number=1,
+                external_id=1,
                 title="t",
                 url="u",
                 summary="s",
@@ -486,7 +486,7 @@ class TestComputeStats:
                 ts="t",
                 kind=ActivityKind.PR_REVIEWED,
                 repo="r",
-                pr_number=2,
+                external_id=2,
                 title="t",
                 url="u",
                 summary="s",
@@ -495,8 +495,8 @@ class TestComputeStats:
             ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
-        assert stats.total_additions == 10
-        assert stats.total_deletions == 2
+        assert stats.github.total_additions == 10
+        assert stats.github.total_deletions == 2
 
     def test_repos_touched(self):
         activities = [
@@ -504,7 +504,7 @@ class TestComputeStats:
                 ts="t",
                 kind=ActivityKind.PR_AUTHORED,
                 repo="org/b",
-                pr_number=1,
+                external_id=1,
                 title="t",
                 url="u",
                 summary="s",
@@ -513,7 +513,7 @@ class TestComputeStats:
                 ts="t",
                 kind=ActivityKind.PR_REVIEWED,
                 repo="org/a",
-                pr_number=2,
+                external_id=2,
                 title="t",
                 url="u",
                 summary="s",
@@ -522,14 +522,14 @@ class TestComputeStats:
                 ts="t",
                 kind=ActivityKind.PR_COMMENTED,
                 repo="org/b",
-                pr_number=3,
+                external_id=3,
                 title="t",
                 url="u",
                 summary="s",
             ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
-        assert stats.repos_touched == ["org/a", "org/b"]
+        assert stats.github.repos_touched == ["org/a", "org/b"]
 
     def test_authored_prs_list(self):
         activities = [
@@ -537,15 +537,15 @@ class TestComputeStats:
                 ts="t",
                 kind=ActivityKind.PR_AUTHORED,
                 repo="org/r",
-                pr_number=1,
+                external_id=1,
                 title="PR1",
                 url="u1",
                 summary="s",
             ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
-        assert len(stats.authored_prs) == 1
-        assert stats.authored_prs[0] == {"url": "u1", "title": "PR1", "repo": "org/r"}
+        assert len(stats.github.authored_prs) == 1
+        assert stats.github.authored_prs[0] == {"url": "u1", "title": "PR1", "repo": "org/r"}
 
     def test_reviewed_prs_list(self):
         activities = [
@@ -553,24 +553,24 @@ class TestComputeStats:
                 ts="t",
                 kind=ActivityKind.PR_REVIEWED,
                 repo="org/r",
-                pr_number=2,
+                external_id=2,
                 title="PR2",
                 url="u2",
                 summary="s",
             ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
-        assert len(stats.reviewed_prs) == 1
-        assert stats.reviewed_prs[0] == {"url": "u2", "title": "PR2", "repo": "org/r"}
+        assert len(stats.github.reviewed_prs) == 1
+        assert stats.github.reviewed_prs[0] == {"url": "u2", "title": "PR2", "repo": "org/r"}
 
     def test_empty_activities(self):
         stats = NormalizerService._compute_stats([], DATE)
-        assert stats.authored_count == 0
-        assert stats.reviewed_count == 0
-        assert stats.commented_count == 0
-        assert stats.total_additions == 0
-        assert stats.total_deletions == 0
-        assert stats.repos_touched == []
+        assert stats.github.authored_count == 0
+        assert stats.github.reviewed_count == 0
+        assert stats.github.commented_count == 0
+        assert stats.github.total_additions == 0
+        assert stats.github.total_deletions == 0
+        assert stats.github.repos_touched == []
 
 
 class TestNormalize:
@@ -590,8 +590,8 @@ class TestNormalize:
         assert len(activities) == 2
 
         stats = load_json(stats_path)
-        assert stats["authored_count"] == 1
-        assert stats["reviewed_count"] == 1
+        assert stats["github"]["authored_count"] == 1
+        assert stats["github"]["reviewed_count"] == 1
         assert stats["date"] == DATE
 
     def test_raw_file_not_found(self, normalizer):
@@ -626,7 +626,7 @@ class TestNormalize:
         stats = load_json(stats_path)
 
         assert activities == []
-        assert stats["authored_count"] == 0
+        assert stats["github"]["authored_count"] == 0
 
 
 # ── Commit/Issue 헬퍼 ──
@@ -700,7 +700,7 @@ class TestConvertCommitActivities:
         assert len(result) == 1
         assert result[0].kind == ActivityKind.COMMIT
         assert result[0].sha == "abc123"
-        assert result[0].pr_number == 0
+        assert result[0].external_id == 0
         assert result[0].additions == 10
         assert result[0].deletions == 3
 
@@ -857,7 +857,7 @@ class TestComputeStatsExtended:
                 ts="t",
                 kind=ActivityKind.COMMIT,
                 repo="r",
-                pr_number=0,
+                external_id=0,
                 title="t",
                 url="u",
                 summary="s",
@@ -867,8 +867,8 @@ class TestComputeStatsExtended:
             ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
-        assert stats.commit_count == 1
-        assert stats.commits == [{"url": "u", "title": "t", "repo": "r", "sha": "abc"}]
+        assert stats.github.commit_count == 1
+        assert stats.github.commits == [{"url": "u", "title": "t", "repo": "r", "sha": "abc"}]
 
     def test_additions_include_commits(self):
         """total_additions/deletions는 authored PR + commit 합산."""
@@ -877,7 +877,7 @@ class TestComputeStatsExtended:
                 ts="t",
                 kind=ActivityKind.PR_AUTHORED,
                 repo="r",
-                pr_number=1,
+                external_id=1,
                 title="t",
                 url="u",
                 summary="s",
@@ -888,7 +888,7 @@ class TestComputeStatsExtended:
                 ts="t",
                 kind=ActivityKind.COMMIT,
                 repo="r",
-                pr_number=0,
+                external_id=0,
                 title="t",
                 url="u",
                 summary="s",
@@ -898,8 +898,8 @@ class TestComputeStatsExtended:
             ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
-        assert stats.total_additions == 30
-        assert stats.total_deletions == 7
+        assert stats.github.total_additions == 30
+        assert stats.github.total_deletions == 7
 
     def test_issue_counts(self):
         activities = [
@@ -907,7 +907,7 @@ class TestComputeStatsExtended:
                 ts="t",
                 kind=ActivityKind.ISSUE_AUTHORED,
                 repo="r",
-                pr_number=10,
+                external_id=10,
                 title="t",
                 url="u",
                 summary="s",
@@ -916,16 +916,16 @@ class TestComputeStatsExtended:
                 ts="t",
                 kind=ActivityKind.ISSUE_COMMENTED,
                 repo="r",
-                pr_number=10,
+                external_id=10,
                 title="t",
                 url="u2",
                 summary="s",
             ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
-        assert stats.issue_authored_count == 1
-        assert stats.issue_commented_count == 1
-        assert stats.authored_issues == [{"url": "u", "title": "t", "repo": "r"}]
+        assert stats.github.issue_authored_count == 1
+        assert stats.github.issue_commented_count == 1
+        assert stats.github.authored_issues == [{"url": "u", "title": "t", "repo": "r"}]
 
     def test_repos_touched_all_types(self):
         """모든 활동 유형에서 repos_touched 수집."""
@@ -934,7 +934,7 @@ class TestComputeStatsExtended:
                 ts="t",
                 kind=ActivityKind.PR_AUTHORED,
                 repo="org/a",
-                pr_number=1,
+                external_id=1,
                 title="t",
                 url="u",
                 summary="s",
@@ -943,7 +943,7 @@ class TestComputeStatsExtended:
                 ts="t",
                 kind=ActivityKind.COMMIT,
                 repo="org/b",
-                pr_number=0,
+                external_id=0,
                 title="t",
                 url="u",
                 summary="s",
@@ -953,14 +953,14 @@ class TestComputeStatsExtended:
                 ts="t",
                 kind=ActivityKind.ISSUE_AUTHORED,
                 repo="org/c",
-                pr_number=10,
+                external_id=10,
                 title="t",
                 url="u",
                 summary="s",
             ),
         ]
         stats = NormalizerService._compute_stats(activities, DATE)
-        assert stats.repos_touched == ["org/a", "org/b", "org/c"]
+        assert stats.github.repos_touched == ["org/a", "org/b", "org/c"]
 
 
 # ── normalize() 통합 테스트 확장 ──
@@ -978,7 +978,7 @@ class TestNormalizeWithCommitsAndIssues:
         kinds = {a["kind"] for a in activities}
         assert "pr_authored" in kinds
         assert "commit" in kinds
-        assert stats["commit_count"] == 1
+        assert stats["github"]["commit_count"] == 1
 
     def test_with_issues(self, normalizer, test_config):
         _save_raw(test_config, [])
@@ -989,7 +989,7 @@ class TestNormalizeWithCommitsAndIssues:
         stats = load_json(stats_path)
 
         assert any(a["kind"] == "issue_authored" for a in activities)
-        assert stats["issue_authored_count"] == 1
+        assert stats["github"]["issue_authored_count"] == 1
 
     def test_without_commits_issues_backward_compat(self, normalizer, test_config):
         """commits.json/issues.json 없어도 정상 동작 (하위 호환)."""
@@ -1001,8 +1001,8 @@ class TestNormalizeWithCommitsAndIssues:
         stats = load_json(stats_path)
 
         assert len(activities) == 1
-        assert stats["commit_count"] == 0
-        assert stats["issue_authored_count"] == 0
+        assert stats["github"]["commit_count"] == 0
+        assert stats["github"]["issue_authored_count"] == 0
 
     def test_sorted_by_timestamp(self, normalizer, test_config):
         """모든 활동이 시간순 정렬."""
@@ -1282,7 +1282,7 @@ class TestLLMEnrichment:
                 ts=f"{DATE}T09:00:00Z",
                 kind=ActivityKind.PR_AUTHORED,
                 repo="org/repo",
-                pr_number=1,
+                external_id=1,
                 title="Add auth feature",
                 url="https://ghes/org/repo/pull/1",
                 summary="pr_authored: Add auth feature",
@@ -1397,7 +1397,7 @@ class TestActivityNewFields:
             ts="t",
             kind=ActivityKind.PR_AUTHORED,
             repo="r",
-            pr_number=1,
+            external_id=1,
             title="t",
             url="u",
             summary="s",

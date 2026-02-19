@@ -31,6 +31,7 @@ class RunSingleRequest(BaseModel):
     force: bool = False
     types: list[str] | None = None
     enrich: bool = True
+    source: str | None = None
 
 
 class RunRangeRequest(BaseModel):
@@ -40,6 +41,7 @@ class RunRangeRequest(BaseModel):
     types: list[str] | None = None
     max_workers: int | None = None
     enrich: bool = True
+    source: str | None = None
     summarize_weekly: str | None = None
     summarize_monthly: str | None = None
     summarize_yearly: int | None = None

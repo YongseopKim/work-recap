@@ -13,14 +13,26 @@
 
 ## 통계
 - 날짜: {{ date }}
-- 작성한 PR: {{ stats.authored_count }}건
-- 리뷰한 PR: {{ stats.reviewed_count }}건
-- PR 코멘트: {{ stats.commented_count }}건
-- 커밋: {{ stats.commit_count | default(0) }}건
-- 작성한 Issue: {{ stats.issue_authored_count | default(0) }}건
-- Issue 코멘트: {{ stats.issue_commented_count | default(0) }}건
-- 작성 코드: +{{ stats.total_additions }}/-{{ stats.total_deletions }}
-- 관련 저장소: {{ stats.repos_touched | join(", ") }}
+{%- if stats.github %}
+- 작성한 PR: {{ stats.github.authored_count }}건
+- 리뷰한 PR: {{ stats.github.reviewed_count }}건
+- PR 코멘트: {{ stats.github.commented_count }}건
+- 커밋: {{ stats.github.commit_count | default(0) }}건
+- 작성한 Issue: {{ stats.github.issue_authored_count | default(0) }}건
+- Issue 코멘트: {{ stats.github.issue_commented_count | default(0) }}건
+- 작성 코드: +{{ stats.github.total_additions }}/-{{ stats.github.total_deletions }}
+- 관련 저장소: {{ stats.github.repos_touched | join(", ") }}
+{%- endif %}
+{%- if stats.confluence %}
+- Confluence 페이지 생성: {{ stats.confluence.pages_created }}건
+- Confluence 페이지 편집: {{ stats.confluence.pages_edited }}건
+- Confluence 코멘트: {{ stats.confluence.comments_added }}건
+{%- endif %}
+{%- if stats.jira %}
+- Jira 티켓 생성: {{ stats.jira.tickets_created }}건
+- Jira 티켓 업데이트: {{ stats.jira.tickets_updated }}건
+- Jira 티켓 코멘트: {{ stats.jira.tickets_commented }}건
+{%- endif %}
 
 ## 출력 형식
 

@@ -27,6 +27,9 @@ class AppConfig(BaseSettings):
     # 병렬 실행
     max_workers: int = 5
 
+    # 멀티소스
+    enabled_sources: list[str] = ["github"]
+
     # ── 파생 경로 ──
 
     @property

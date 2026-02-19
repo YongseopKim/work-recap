@@ -111,6 +111,14 @@ class ActivityKind(str, Enum):
     COMMIT = "commit"
     ISSUE_AUTHORED = "issue_authored"
     ISSUE_COMMENTED = "issue_commented"
+    # Confluence
+    CONFLUENCE_PAGE_CREATED = "confluence_page_created"
+    CONFLUENCE_PAGE_EDITED = "confluence_page_edited"
+    CONFLUENCE_COMMENT = "confluence_comment"
+    # Jira
+    JIRA_TICKET_CREATED = "jira_ticket_created"
+    JIRA_TICKET_UPDATED = "jira_ticket_updated"
+    JIRA_TICKET_COMMENTED = "jira_ticket_commented"
 
 
 @dataclass
@@ -120,9 +128,9 @@ class Activity:
     ts: str  # ISO 8601
     kind: ActivityKind
     repo: str  # "org/repo-name"
-    pr_number: int
+    external_id: int  # PR number, issue number, page id 등 소스별 식별자
     title: str
-    url: str  # PR HTML URL
+    url: str  # HTML URL
     summary: str  # 스크립트가 생성하는 1줄 요약
     sha: str = ""  # commit SHA (COMMIT kind만 사용)
     body: str = ""  # PR body / commit message / issue body
@@ -137,13 +145,13 @@ class Activity:
     comment_contexts: list[dict] = field(default_factory=list)  # [{path, line, diff_hunk, body}]
     change_summary: str = ""  # LLM 생성 코드 변경 요약
     intent: str = ""  # LLM 분류: bugfix, feature, refactor, docs, chore, test, etc.
+    source: str = "github"  # 데이터 소스: github, confluence, jira
 
 
 @dataclass
-class DailyStats:
-    """일일 활동 통계. 스크립트가 계산, LLM에 수치 주입용."""
+class GitHubStats:
+    """GitHub 활동 통계."""
 
-    date: str  # YYYY-MM-DD
     authored_count: int = 0
     reviewed_count: int = 0
     commented_count: int = 0
@@ -157,6 +165,34 @@ class DailyStats:
     issue_commented_count: int = 0
     commits: list[dict] = field(default_factory=list)  # [{url, title, repo, sha}]
     authored_issues: list[dict] = field(default_factory=list)  # [{url, title, repo}]
+
+
+@dataclass
+class ConfluenceStats:
+    """Confluence 활동 통계 (스텁)."""
+
+    pages_created: int = 0
+    pages_edited: int = 0
+    comments_added: int = 0
+
+
+@dataclass
+class JiraStats:
+    """Jira 활동 통계 (스텁)."""
+
+    tickets_created: int = 0
+    tickets_updated: int = 0
+    tickets_commented: int = 0
+
+
+@dataclass
+class DailyStats:
+    """일일 활동 통계. 소스별 중첩 구조."""
+
+    date: str  # YYYY-MM-DD
+    github: GitHubStats = field(default_factory=GitHubStats)
+    confluence: ConfluenceStats = field(default_factory=ConfluenceStats)
+    jira: JiraStats = field(default_factory=JiraStats)
 
 
 # ── 비동기 Job 모델 ──
@@ -325,7 +361,7 @@ def activity_from_dict(d: dict) -> Activity:
         ts=d["ts"],
         kind=ActivityKind(d["kind"]),
         repo=d["repo"],
-        pr_number=d["pr_number"],
+        external_id=d.get("external_id", d.get("pr_number", 0)),
         title=d["title"],
         url=d["url"],
         summary=d["summary"],
@@ -342,13 +378,13 @@ def activity_from_dict(d: dict) -> Activity:
         comment_contexts=d.get("comment_contexts", []),
         change_summary=d.get("change_summary", ""),
         intent=d.get("intent", ""),
+        source=d.get("source", "github"),
     )
 
 
-def daily_stats_from_dict(d: dict) -> DailyStats:
-    """dict → DailyStats 복원."""
-    return DailyStats(
-        date=d["date"],
+def github_stats_from_dict(d: dict) -> GitHubStats:
+    """dict → GitHubStats 복원."""
+    return GitHubStats(
         authored_count=d.get("authored_count", 0),
         reviewed_count=d.get("reviewed_count", 0),
         commented_count=d.get("commented_count", 0),
@@ -363,3 +399,39 @@ def daily_stats_from_dict(d: dict) -> DailyStats:
         commits=d.get("commits", []),
         authored_issues=d.get("authored_issues", []),
     )
+
+
+def confluence_stats_from_dict(d: dict) -> ConfluenceStats:
+    """dict → ConfluenceStats 복원."""
+    return ConfluenceStats(
+        pages_created=d.get("pages_created", 0),
+        pages_edited=d.get("pages_edited", 0),
+        comments_added=d.get("comments_added", 0),
+    )
+
+
+def jira_stats_from_dict(d: dict) -> JiraStats:
+    """dict → JiraStats 복원."""
+    return JiraStats(
+        tickets_created=d.get("tickets_created", 0),
+        tickets_updated=d.get("tickets_updated", 0),
+        tickets_commented=d.get("tickets_commented", 0),
+    )
+
+
+def daily_stats_from_dict(d: dict) -> DailyStats:
+    """dict → DailyStats 복원. flat(기존) 및 nested(신규) 포맷 모두 지원."""
+    if "github" in d:
+        # 신규 중첩 포맷
+        return DailyStats(
+            date=d["date"],
+            github=github_stats_from_dict(d["github"]),
+            confluence=confluence_stats_from_dict(d.get("confluence", {})),
+            jira=jira_stats_from_dict(d.get("jira", {})),
+        )
+    else:
+        # 기존 flat 포맷 → GitHubStats로 마이그레이션
+        return DailyStats(
+            date=d["date"],
+            github=github_stats_from_dict(d),
+        )

@@ -3,17 +3,23 @@ from workrecap.models import (
     ActivityKind,
     Comment,
     CommitRaw,
+    ConfluenceStats,
     DailyStats,
     FileChange,
+    GitHubStats,
     IssueRaw,
+    JiraStats,
     Job,
     JobStatus,
     PRRaw,
     Review,
     activity_from_dict,
     commit_raw_from_dict,
+    confluence_stats_from_dict,
     daily_stats_from_dict,
+    github_stats_from_dict,
     issue_raw_from_dict,
+    jira_stats_from_dict,
     load_json,
     load_jsonl,
     pr_raw_from_dict,
@@ -69,7 +75,7 @@ def _make_sample_activity() -> Activity:
         ts="2025-02-16T09:00:00Z",
         kind=ActivityKind.PR_AUTHORED,
         repo="org/repo",
-        pr_number=1,
+        external_id=1,
         title="Add user authentication",
         url="https://github.example.com/org/repo/pull/1",
         summary="pr_authored: Add user authentication (org/repo) +80/-0",
@@ -201,7 +207,7 @@ class TestActivity:
             ts="2025-02-16T10:00:00Z",
             kind=ActivityKind.PR_AUTHORED,
             repo="org/repo",
-            pr_number=1,
+            external_id=1,
             title="Add feature",
             url="https://github.example.com/org/repo/pull/1",
             summary="pr_authored: Add feature (org/repo) +10/-3",
@@ -220,7 +226,7 @@ class TestActivity:
         assert len(loaded) == 1
         restored = activity_from_dict(loaded[0])
         assert restored.kind == activities[0].kind
-        assert restored.pr_number == activities[0].pr_number
+        assert restored.external_id == activities[0].external_id
         assert restored.files == activities[0].files
         assert restored.additions == activities[0].additions
         assert restored.labels == activities[0].labels
@@ -231,7 +237,7 @@ class TestActivity:
             ts="2025-02-16T09:00:00Z",
             kind=ActivityKind.PR_REVIEWED,
             repo="org/repo",
-            pr_number=1,
+            external_id=1,
             title="Add feature",
             url="u",
             summary="s",
@@ -269,7 +275,7 @@ class TestActivity:
             ts="t",
             kind=ActivityKind.PR_AUTHORED,
             repo="r",
-            pr_number=1,
+            external_id=1,
             title="t",
             url="u",
             summary="s",
@@ -283,7 +289,7 @@ class TestActivity:
             ts="t",
             kind=ActivityKind.PR_AUTHORED,
             repo="r",
-            pr_number=1,
+            external_id=1,
             title="t",
             url="u",
             summary="s",
@@ -302,7 +308,7 @@ class TestActivity:
             ts="t",
             kind=ActivityKind.PR_REVIEWED,
             repo="r",
-            pr_number=1,
+            external_id=1,
             title="t",
             url="u",
             summary="s",
@@ -333,38 +339,40 @@ class TestActivity:
 class TestDailyStats:
     def test_creation_defaults(self):
         stats = DailyStats(date="2025-02-16")
-        assert stats.authored_count == 0
-        assert stats.reviewed_count == 0
-        assert stats.commented_count == 0
-        assert stats.total_additions == 0
-        assert stats.total_deletions == 0
-        assert stats.repos_touched == []
-        assert stats.authored_prs == []
-        assert stats.reviewed_prs == []
+        assert stats.github.authored_count == 0
+        assert stats.github.reviewed_count == 0
+        assert stats.github.commented_count == 0
+        assert stats.github.total_additions == 0
+        assert stats.github.total_deletions == 0
+        assert stats.github.repos_touched == []
+        assert stats.github.authored_prs == []
+        assert stats.github.reviewed_prs == []
 
     def test_roundtrip_json(self, tmp_path):
         stats = DailyStats(
             date="2025-02-16",
-            authored_count=3,
-            reviewed_count=2,
-            commented_count=1,
-            total_additions=150,
-            total_deletions=30,
-            repos_touched=["org/repo-a", "org/repo-b"],
-            authored_prs=[{"url": "u", "title": "t", "repo": "r"}],
-            reviewed_prs=[],
+            github=GitHubStats(
+                authored_count=3,
+                reviewed_count=2,
+                commented_count=1,
+                total_additions=150,
+                total_deletions=30,
+                repos_touched=["org/repo-a", "org/repo-b"],
+                authored_prs=[{"url": "u", "title": "t", "repo": "r"}],
+                reviewed_prs=[],
+            ),
         )
         path = tmp_path / "stats.json"
         save_json(stats, path)
         loaded = load_json(path)
         restored = daily_stats_from_dict(loaded)
-        assert restored.authored_count == 3
-        assert restored.reviewed_count == 2
-        assert restored.commented_count == 1
-        assert restored.total_additions == 150
-        assert restored.total_deletions == 30
-        assert restored.repos_touched == ["org/repo-a", "org/repo-b"]
-        assert restored.authored_prs == [{"url": "u", "title": "t", "repo": "r"}]
+        assert restored.github.authored_count == 3
+        assert restored.github.reviewed_count == 2
+        assert restored.github.commented_count == 1
+        assert restored.github.total_additions == 150
+        assert restored.github.total_deletions == 30
+        assert restored.github.repos_touched == ["org/repo-a", "org/repo-b"]
+        assert restored.github.authored_prs == [{"url": "u", "title": "t", "repo": "r"}]
 
 
 class TestJobStatus:
@@ -413,10 +421,10 @@ class TestSerializationUtils:
     def test_save_json_single_dataclass(self, tmp_path):
         """단일 dataclass도 저장 가능."""
         path = tmp_path / "single.json"
-        stats = DailyStats(date="2025-02-16", authored_count=5)
+        stats = DailyStats(date="2025-02-16", github=GitHubStats(authored_count=5))
         save_json(stats, path)
         loaded = load_json(path)
-        assert loaded["authored_count"] == 5
+        assert loaded["github"]["authored_count"] == 5
 
     def test_save_json_list_of_dataclass(self, tmp_path):
         """list[dataclass]도 저장 가능."""
@@ -567,7 +575,7 @@ class TestActivityWithSha:
             ts="2025-02-16T10:00:00Z",
             kind=ActivityKind.PR_AUTHORED,
             repo="org/repo",
-            pr_number=1,
+            external_id=1,
             title="PR",
             url="u",
             summary="s",
@@ -579,7 +587,7 @@ class TestActivityWithSha:
             ts="2025-02-16T10:00:00Z",
             kind=ActivityKind.COMMIT,
             repo="org/repo",
-            pr_number=0,
+            external_id=0,
             title="feat: add",
             url="u",
             summary="s",
@@ -610,30 +618,32 @@ class TestActivityWithSha:
 class TestDailyStatsExtended:
     def test_new_fields_defaults(self):
         stats = DailyStats(date="2025-02-16")
-        assert stats.commit_count == 0
-        assert stats.issue_authored_count == 0
-        assert stats.issue_commented_count == 0
-        assert stats.commits == []
-        assert stats.authored_issues == []
+        assert stats.github.commit_count == 0
+        assert stats.github.issue_authored_count == 0
+        assert stats.github.issue_commented_count == 0
+        assert stats.github.commits == []
+        assert stats.github.authored_issues == []
 
     def test_new_fields_roundtrip(self, tmp_path):
         stats = DailyStats(
             date="2025-02-16",
-            commit_count=3,
-            issue_authored_count=1,
-            issue_commented_count=2,
-            commits=[{"url": "u", "title": "t", "repo": "r", "sha": "abc"}],
-            authored_issues=[{"url": "u", "title": "t", "repo": "r"}],
+            github=GitHubStats(
+                commit_count=3,
+                issue_authored_count=1,
+                issue_commented_count=2,
+                commits=[{"url": "u", "title": "t", "repo": "r", "sha": "abc"}],
+                authored_issues=[{"url": "u", "title": "t", "repo": "r"}],
+            ),
         )
         path = tmp_path / "stats.json"
         save_json(stats, path)
         loaded = load_json(path)
         restored = daily_stats_from_dict(loaded)
-        assert restored.commit_count == 3
-        assert restored.issue_authored_count == 1
-        assert restored.issue_commented_count == 2
-        assert restored.commits == [{"url": "u", "title": "t", "repo": "r", "sha": "abc"}]
-        assert restored.authored_issues == [{"url": "u", "title": "t", "repo": "r"}]
+        assert restored.github.commit_count == 3
+        assert restored.github.issue_authored_count == 1
+        assert restored.github.issue_commented_count == 2
+        assert restored.github.commits == [{"url": "u", "title": "t", "repo": "r", "sha": "abc"}]
+        assert restored.github.authored_issues == [{"url": "u", "title": "t", "repo": "r"}]
 
     def test_backward_compat_no_new_fields(self):
         """옛 데이터(새 필드 없음)로 from_dict 호출 시 정상 동작."""
@@ -644,8 +654,237 @@ class TestDailyStatsExtended:
             "commented_count": 0,
         }
         stats = daily_stats_from_dict(d)
-        assert stats.commit_count == 0
-        assert stats.issue_authored_count == 0
-        assert stats.issue_commented_count == 0
-        assert stats.commits == []
-        assert stats.authored_issues == []
+        assert stats.github.commit_count == 0
+        assert stats.github.issue_authored_count == 0
+        assert stats.github.issue_commented_count == 0
+        assert stats.github.commits == []
+        assert stats.github.authored_issues == []
+
+
+# ── SP-3: source 필드 + ActivityKind 확장 ──
+
+
+class TestActivitySource:
+    """Activity.source 필드 테스트."""
+
+    def test_default_source_is_github(self):
+        """source 기본값이 'github'."""
+        act = Activity(
+            ts="2025-02-16T09:00:00Z",
+            kind=ActivityKind.PR_AUTHORED,
+            repo="org/repo",
+            external_id=1,
+            title="Test PR",
+            url="https://example.com/pr/1",
+            summary="test",
+        )
+        assert act.source == "github"
+
+    def test_explicit_source(self):
+        """source를 명시적으로 설정 가능."""
+        act = Activity(
+            ts="2025-02-16T09:00:00Z",
+            kind=ActivityKind.CONFLUENCE_PAGE_CREATED,
+            repo="",
+            external_id=123,
+            title="Test Page",
+            url="https://confluence.example.com/page/123",
+            summary="test",
+            source="confluence",
+        )
+        assert act.source == "confluence"
+
+    def test_activity_from_dict_default_source(self):
+        """dict에 source 없으면 'github' 기본값."""
+        d = {
+            "ts": "2025-02-16T09:00:00Z",
+            "kind": "pr_authored",
+            "repo": "org/repo",
+            "external_id": 1,
+            "title": "Test",
+            "url": "https://example.com",
+            "summary": "test",
+        }
+        act = activity_from_dict(d)
+        assert act.source == "github"
+
+    def test_activity_from_dict_explicit_source(self):
+        """dict에 source 있으면 해당 값 사용."""
+        d = {
+            "ts": "2025-02-16T09:00:00Z",
+            "kind": "confluence_page_created",
+            "repo": "",
+            "external_id": 123,
+            "title": "Test",
+            "url": "https://example.com",
+            "summary": "test",
+            "source": "confluence",
+        }
+        act = activity_from_dict(d)
+        assert act.source == "confluence"
+
+    def test_source_roundtrip(self, tmp_path):
+        """source 필드 직렬화/역직렬화 roundtrip."""
+        act = Activity(
+            ts="2025-02-16T09:00:00Z",
+            kind=ActivityKind.JIRA_TICKET_CREATED,
+            repo="",
+            external_id=42,
+            title="PROJ-42",
+            url="https://jira.example.com/PROJ-42",
+            summary="test",
+            source="jira",
+        )
+        path = tmp_path / "act.json"
+        save_json(act, path)
+        loaded = load_json(path)
+        restored = activity_from_dict(loaded)
+        assert restored.source == "jira"
+        assert restored.kind == ActivityKind.JIRA_TICKET_CREATED
+
+
+class TestActivityKindExtension:
+    """새 ActivityKind 값 테스트."""
+
+    def test_confluence_kinds_exist(self):
+        assert ActivityKind.CONFLUENCE_PAGE_CREATED == "confluence_page_created"
+        assert ActivityKind.CONFLUENCE_PAGE_EDITED == "confluence_page_edited"
+        assert ActivityKind.CONFLUENCE_COMMENT == "confluence_comment"
+
+    def test_jira_kinds_exist(self):
+        assert ActivityKind.JIRA_TICKET_CREATED == "jira_ticket_created"
+        assert ActivityKind.JIRA_TICKET_UPDATED == "jira_ticket_updated"
+        assert ActivityKind.JIRA_TICKET_COMMENTED == "jira_ticket_commented"
+
+    def test_existing_kinds_unchanged(self):
+        """기존 Kind 값 변경 없음."""
+        assert ActivityKind.PR_AUTHORED == "pr_authored"
+        assert ActivityKind.PR_REVIEWED == "pr_reviewed"
+        assert ActivityKind.PR_COMMENTED == "pr_commented"
+        assert ActivityKind.COMMIT == "commit"
+        assert ActivityKind.ISSUE_AUTHORED == "issue_authored"
+        assert ActivityKind.ISSUE_COMMENTED == "issue_commented"
+
+
+# ── SP-4: DailyStats 소스별 분리 ──
+
+
+class TestGitHubStats:
+    """GitHubStats 독립 생성/직렬화 테스트."""
+
+    def test_defaults(self):
+        gs = GitHubStats()
+        assert gs.authored_count == 0
+        assert gs.reviewed_count == 0
+        assert gs.repos_touched == []
+
+    def test_from_dict(self):
+        d = {"authored_count": 3, "reviewed_count": 2, "commit_count": 5}
+        gs = github_stats_from_dict(d)
+        assert gs.authored_count == 3
+        assert gs.reviewed_count == 2
+        assert gs.commit_count == 5
+        assert gs.commented_count == 0  # default
+
+    def test_from_dict_empty(self):
+        gs = github_stats_from_dict({})
+        assert gs.authored_count == 0
+
+
+class TestConfluenceStats:
+    """ConfluenceStats 독립 생성/직렬화 테스트."""
+
+    def test_defaults(self):
+        cs = ConfluenceStats()
+        assert cs.pages_created == 0
+        assert cs.pages_edited == 0
+        assert cs.comments_added == 0
+
+    def test_from_dict(self):
+        d = {"pages_created": 2, "pages_edited": 1}
+        cs = confluence_stats_from_dict(d)
+        assert cs.pages_created == 2
+        assert cs.pages_edited == 1
+        assert cs.comments_added == 0
+
+
+class TestJiraStats:
+    """JiraStats 독립 생성/직렬화 테스트."""
+
+    def test_defaults(self):
+        js = JiraStats()
+        assert js.tickets_created == 0
+        assert js.tickets_updated == 0
+        assert js.tickets_commented == 0
+
+    def test_from_dict(self):
+        d = {"tickets_created": 3, "tickets_updated": 1, "tickets_commented": 2}
+        js = jira_stats_from_dict(d)
+        assert js.tickets_created == 3
+        assert js.tickets_updated == 1
+        assert js.tickets_commented == 2
+
+
+class TestDailyStatsNested:
+    """DailyStats 중첩 구조 테스트."""
+
+    def test_new_format_roundtrip(self, tmp_path):
+        """신규 중첩 포맷 직렬화/역직렬화."""
+        stats = DailyStats(
+            date="2025-02-16",
+            github=GitHubStats(authored_count=3, reviewed_count=1, commit_count=2),
+        )
+        path = tmp_path / "stats.json"
+        save_json(stats, path)
+        loaded = load_json(path)
+        restored = daily_stats_from_dict(loaded)
+        assert restored.github.authored_count == 3
+        assert restored.github.reviewed_count == 1
+        assert restored.github.commit_count == 2
+        assert restored.confluence.pages_created == 0  # default
+        assert restored.jira.tickets_created == 0  # default
+
+    def test_flat_format_backward_compat(self):
+        """기존 flat 포맷 → 중첩 구조 마이그레이션."""
+        d = {
+            "date": "2025-02-16",
+            "authored_count": 2,
+            "reviewed_count": 1,
+            "commented_count": 3,
+            "total_additions": 100,
+            "total_deletions": 50,
+            "repos_touched": ["org/repo"],
+            "authored_prs": [{"url": "u", "title": "t", "repo": "r"}],
+            "reviewed_prs": [],
+            "commit_count": 4,
+            "issue_authored_count": 1,
+            "issue_commented_count": 0,
+            "commits": [{"url": "u", "title": "t", "repo": "r", "sha": "abc"}],
+            "authored_issues": [{"url": "u", "title": "t", "repo": "r"}],
+        }
+        stats = daily_stats_from_dict(d)
+        assert stats.github.authored_count == 2
+        assert stats.github.reviewed_count == 1
+        assert stats.github.commented_count == 3
+        assert stats.github.total_additions == 100
+        assert stats.github.total_deletions == 50
+        assert stats.github.repos_touched == ["org/repo"]
+        assert stats.github.commit_count == 4
+        assert stats.github.issue_authored_count == 1
+        assert stats.github.authored_issues == [{"url": "u", "title": "t", "repo": "r"}]
+        # confluence/jira는 기본값
+        assert stats.confluence.pages_created == 0
+        assert stats.jira.tickets_created == 0
+
+    def test_nested_format_with_all_sources(self):
+        """모든 소스가 있는 중첩 포맷."""
+        d = {
+            "date": "2025-02-16",
+            "github": {"authored_count": 1, "reviewed_count": 0},
+            "confluence": {"pages_created": 2},
+            "jira": {"tickets_created": 3},
+        }
+        stats = daily_stats_from_dict(d)
+        assert stats.github.authored_count == 1
+        assert stats.confluence.pages_created == 2
+        assert stats.jira.tickets_created == 3

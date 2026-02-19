@@ -12,6 +12,7 @@ from workrecap.models import (
     Activity,
     ActivityKind,
     DailyStats,
+    GitHubStats,
     save_json,
     save_jsonl,
 )
@@ -51,7 +52,7 @@ def _save_normalized(test_config, target_date=DATE):
             ts=f"{target_date}T09:00:00Z",
             kind=ActivityKind.PR_AUTHORED,
             repo="org/repo",
-            pr_number=1,
+            external_id=1,
             title="Add feature",
             url="https://ghes/org/repo/pull/1",
             summary="pr_authored: Add feature (org/repo) +10/-3",
@@ -62,13 +63,15 @@ def _save_normalized(test_config, target_date=DATE):
     ]
     stats = DailyStats(
         date=target_date,
-        authored_count=1,
-        reviewed_count=0,
-        commented_count=0,
-        total_additions=10,
-        total_deletions=3,
-        repos_touched=["org/repo"],
-        authored_prs=[{"url": "u", "title": "Add feature", "repo": "org/repo"}],
+        github=GitHubStats(
+            authored_count=1,
+            reviewed_count=0,
+            commented_count=0,
+            total_additions=10,
+            total_deletions=3,
+            repos_touched=["org/repo"],
+            authored_prs=[{"url": "u", "title": "Add feature", "repo": "org/repo"}],
+        ),
     )
     norm_dir = test_config.date_normalized_dir(target_date)
     save_jsonl(activities, norm_dir / "activities.jsonl")
@@ -102,12 +105,14 @@ class TestRenderPrompt:
             "daily.md",
             date="2025-02-16",
             stats={
-                "authored_count": 3,
-                "reviewed_count": 1,
-                "commented_count": 0,
-                "total_additions": 100,
-                "total_deletions": 20,
-                "repos_touched": ["org/a", "org/b"],
+                "github": {
+                    "authored_count": 3,
+                    "reviewed_count": 1,
+                    "commented_count": 0,
+                    "total_additions": 100,
+                    "total_deletions": 20,
+                    "repos_touched": ["org/a", "org/b"],
+                },
             },
         )
         assert "2025-02-16" in result

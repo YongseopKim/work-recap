@@ -48,6 +48,11 @@ def main(
 
 VALID_TYPES = {"prs", "commits", "issues"}
 
+# 소스별 valid types
+SOURCE_TYPES: dict[str, set[str]] = {
+    "github": {"prs", "commits", "issues"},
+}
+
 
 def _get_config() -> AppConfig:
     return AppConfig()
@@ -227,6 +232,7 @@ def fetch(
         default=None, help="Target date (YYYY-MM-DD). Default: today or catch-up"
     ),
     type: str = typer.Option(None, "--type", "-t", help="prs, commits, or issues"),
+    source: str = typer.Option(None, "--source", "-s", help="Data source (default: all enabled)"),
     since: str = typer.Option(None, help="Range start (YYYY-MM-DD)"),
     until: str = typer.Option(None, help="Range end (YYYY-MM-DD)"),
     weekly: str = typer.Option(None, help="YEAR-WEEK, e.g. 2026-7"),
@@ -530,6 +536,7 @@ def run(
         default=None, help="Target date (YYYY-MM-DD). Default: today or catch-up"
     ),
     type: str = typer.Option(None, "--type", "-t", help="prs, commits, or issues"),
+    source: str = typer.Option(None, "--source", "-s", help="Data source (default: all enabled)"),
     since: str = typer.Option(None, help="Range start (YYYY-MM-DD)"),
     until: str = typer.Option(None, help="Range end (YYYY-MM-DD)"),
     weekly: str = typer.Option(None, help="YEAR-WEEK, e.g. 2026-7"),

@@ -23,6 +23,7 @@ from workrecap.models import (
     ActivityKind,
     CommitRaw,
     DailyStats,
+    GitHubStats,
     IssueRaw,
     PRRaw,
     commit_raw_from_dict,
@@ -47,6 +48,10 @@ class NormalizerService:
         self._username = config.username
         self._daily_state = daily_state
         self._llm = llm
+
+    @property
+    def source_name(self) -> str:
+        return "github"
 
     def normalize(
         self, target_date: str, progress: Callable[[str], None] | None = None
@@ -378,7 +383,7 @@ class NormalizerService:
                     ts=commit.committed_at,
                     kind=ActivityKind.COMMIT,
                     repo=commit.repo,
-                    pr_number=0,
+                    external_id=0,
                     title=title,
                     url=commit.url,
                     summary=f"commit: {title} ({commit.repo}) +{total_adds}/-{total_dels}",
@@ -407,7 +412,7 @@ class NormalizerService:
                         ts=issue.created_at,
                         kind=ActivityKind.ISSUE_AUTHORED,
                         repo=issue.repo,
-                        pr_number=issue.number,
+                        external_id=issue.number,
                         title=issue.title,
                         url=issue.url,
                         summary=f"issue_authored: {issue.title} ({issue.repo})",
@@ -430,7 +435,7 @@ class NormalizerService:
                         ts=earliest.created_at,
                         kind=ActivityKind.ISSUE_COMMENTED,
                         repo=issue.repo,
-                        pr_number=issue.number,
+                        external_id=issue.number,
                         title=issue.title,
                         url=issue.url,
                         summary=f"issue_commented: {issue.title} ({issue.repo})",
@@ -461,7 +466,7 @@ class NormalizerService:
             ts=ts,
             kind=kind,
             repo=pr.repo,
-            pr_number=pr.number,
+            external_id=pr.number,
             title=pr.title,
             url=pr.url,
             summary=self._auto_summary(pr, kind, total_adds, total_dels),
@@ -525,21 +530,23 @@ class NormalizerService:
 
         return DailyStats(
             date=target_date,
-            authored_count=len(authored),
-            reviewed_count=len(reviewed),
-            commented_count=len(commented),
-            total_additions=total_adds,
-            total_deletions=total_dels,
-            repos_touched=repos,
-            authored_prs=[{"url": a.url, "title": a.title, "repo": a.repo} for a in authored],
-            reviewed_prs=[{"url": a.url, "title": a.title, "repo": a.repo} for a in reviewed],
-            commit_count=len(commits),
-            issue_authored_count=len(issue_authored),
-            issue_commented_count=len(issue_commented),
-            commits=[
-                {"url": a.url, "title": a.title, "repo": a.repo, "sha": a.sha} for a in commits
-            ],
-            authored_issues=[
-                {"url": a.url, "title": a.title, "repo": a.repo} for a in issue_authored
-            ],
+            github=GitHubStats(
+                authored_count=len(authored),
+                reviewed_count=len(reviewed),
+                commented_count=len(commented),
+                total_additions=total_adds,
+                total_deletions=total_dels,
+                repos_touched=repos,
+                authored_prs=[{"url": a.url, "title": a.title, "repo": a.repo} for a in authored],
+                reviewed_prs=[{"url": a.url, "title": a.title, "repo": a.repo} for a in reviewed],
+                commit_count=len(commits),
+                issue_authored_count=len(issue_authored),
+                issue_commented_count=len(issue_commented),
+                commits=[
+                    {"url": a.url, "title": a.title, "repo": a.repo, "sha": a.sha} for a in commits
+                ],
+                authored_issues=[
+                    {"url": a.url, "title": a.title, "repo": a.repo} for a in issue_authored
+                ],
+            ),
         )

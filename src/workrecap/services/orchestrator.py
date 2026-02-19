@@ -1,9 +1,12 @@
 """Fetcher → Normalizer → Summarizer 파이프라인 오케스트레이션."""
 
+from __future__ import annotations
+
 import logging
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from workrecap.config import AppConfig
 from workrecap.exceptions import (
@@ -16,20 +19,35 @@ from workrecap.services.fetcher import FetcherService
 from workrecap.services.normalizer import NormalizerService
 from workrecap.services.summarizer import SummarizerService
 
+if TYPE_CHECKING:
+    from workrecap.services.protocols import DataSourceFetcher, DataSourceNormalizer
+
 logger = logging.getLogger(__name__)
 
 
 class OrchestratorService:
     def __init__(
         self,
-        fetcher: FetcherService,
-        normalizer: NormalizerService,
+        fetcher: FetcherService | dict[str, DataSourceFetcher],
+        normalizer: NormalizerService | dict[str, DataSourceNormalizer],
         summarizer: SummarizerService,
         *,
         config: AppConfig | None = None,
     ) -> None:
-        self._fetcher = fetcher
-        self._normalizer = normalizer
+        # 하위호환: 단일 fetcher/normalizer → dict 래핑
+        if isinstance(fetcher, dict):
+            self._fetchers = fetcher
+        else:
+            self._fetchers = {"github": fetcher}
+        if isinstance(normalizer, dict):
+            self._normalizers = normalizer
+        else:
+            self._normalizers = {"github": normalizer}
+        # 기본 소스 (단일 소스 호환용)
+        self._fetcher = fetcher if not isinstance(fetcher, dict) else next(iter(fetcher.values()))
+        self._normalizer = (
+            normalizer if not isinstance(normalizer, dict) else next(iter(normalizer.values()))
+        )
         self._summarizer = summarizer
         self._config = config
 
