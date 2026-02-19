@@ -12,9 +12,12 @@ LLM 기반으로 일/주/월/년 단위 업무 요약을 자동 생성하는 개
 - **범위 최적화** — 다중 날짜 fetch 시 월 단위 range 검색으로 API 호출 30배 절감
 - **병렬 실행** — `--workers` 옵션으로 fetch enrichment 및 LLM 호출 병렬화
 - **재개 가능** — fetch_range 중단 시 chunk 캐시에서 이어서 실행
-- **Batch API** — `--batch` 옵션으로 대량 LLM 호출을 일괄 처리 (50% 비용 절감)
+- **Batch API** — `--batch` 옵션으로 대량 LLM 호출을 일괄 처리 (50% 비용 절감), 동적 타임아웃 (batch 크기 비례)
 - **Prompt Caching** — Anthropic `cache_control: ephemeral`로 system prompt 캐싱 (반복 호출 시 input 비용 90% 절감)
 - **Cache-aware 비용 추적** — provider별 cache 할인 반영한 실시간 비용 계산
+- **Rate Limit 복원력** — GitHub API rate limit 시 7회 재시도, 3단계 대기 전략 (Retry-After → X-RateLimit-Reset → 지수 백오프), jitter로 thundering herd 방지
+- **실패 날짜 자동 재시도** — 일시적 오류(timeout/429/5xx)는 다음 실행 시 자동 재시도 (최대 5회), 영구 오류(404/403/422)는 즉시 제외
+- **동적 Batch 타임아웃** — batch 크기에 비례하는 타임아웃 (10건→10분, 100건→55분, 500건+→4시간) + 적응형 폴링
 
 ## 요구사항
 
@@ -297,6 +300,7 @@ work-recap/
 │   │   ├── source_registry.py  # SourceRegistry (멀티 소스 팩토리 레지스트리)
 │   │   ├── daily_state.py      # DailyStateStore (날짜별 cascade staleness 추적)
 │   │   ├── batch_state.py      # BatchStateStore (batch job 상태 persist/crash recovery)
+│   │   ├── failed_dates.py     # FailedDateStore (실패 날짜 자동 재시도 추적)
 │   │   ├── checkpoint.py       # 스레드 안전 체크포인트 업데이트
 │   │   └── fetch_progress.py   # FetchProgressStore (fetch 재개용 chunk 캐시)
 │   ├── cli/
@@ -404,6 +408,9 @@ coverage run -m pytest && coverage report
 | D-12: max_tokens per task | config.toml `max_tokens`로 태스크별 출력 제한 설정. output format에 바인딩 — escalation 시에도 동일 값 유지. 해상도: explicit kwarg > config.toml > None |
 | D-13: Batch API | `--batch` 옵션으로 50% 비용 절감 (기본 off). BatchCapable mixin으로 provider 수준 지원 (Anthropic/OpenAI/Gemini). base_model만 사용 (escalation 없음). crash recovery용 BatchStateStore |
 | D-14: Cache-aware pricing | `pricing.toml`에서 코드 변경 없이 가격 업데이트. provider별 cache discount factor 적용 (Anthropic 90% read / 25% write, OpenAI 50% read, Gemini 75% read) |
+| D-15: Rate limit resilience | GitHub 문서 기반: rate limit(429/403)과 server error(5xx) 재시도 카운터 분리 (7회/3회). 3단계 대기: Retry-After → X-RateLimit-Reset → 지수 백오프(2^n, 5분 cap). ±25% jitter로 thundering herd 방지. "반복 요청 시 integration 밴 가능" 경고 준수 |
+| D-16: Failed date auto-retry | `FailedDateStore`로 실패 날짜 영속화. 영구 오류(404/403 non-rate-limit/422) 즉시 제외, 일시적 오류 max_fetch_retries까지 재시도. 10년 히스토리 실행 시 간헐적 실패에서 자동 복구 |
+| D-17: Dynamic batch timeout | `min(300 + 30*N, 14400)` 공식으로 batch 크기 비례 타임아웃. 10건→10분(빠른 피드백), 4000건→4시간(10년 히스토리). 적응형 폴링(5s→60s 선형 증가)으로 불필요한 API 호출 절감 |
 
 ## 라이선스
 

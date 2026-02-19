@@ -324,7 +324,11 @@ class NormalizerService:
         try:
             logger.info("Submitting batch enrichment for %d dates", len(batch_requests))
             batch_id = self._llm.submit_batch(batch_requests, task="enrich")
-            results = self._llm.wait_for_batch(batch_id, task="enrich")
+            results = self._llm.wait_for_batch(
+                batch_id,
+                task="enrich",
+                batch_size=len(batch_requests),
+            )
 
             # Build result map: custom_id → content
             result_map: dict[str, str] = {}

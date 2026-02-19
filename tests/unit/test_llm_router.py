@@ -7,7 +7,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from workrecap.infra.llm_router import LLMRouter
+from workrecap.infra.llm_router import (
+    BATCH_POLL_INTERVAL_MAX,
+    BATCH_POLL_INTERVAL_MIN,
+    BATCH_TIMEOUT_BASE,
+    BATCH_TIMEOUT_MAX,
+    BATCH_TIMEOUT_PER_REQUEST,
+    LLMRouter,
+    _adaptive_poll_interval,
+    _compute_batch_timeout,
+)
 from workrecap.infra.provider_config import ProviderConfig
 from workrecap.infra.usage_tracker import UsageTracker
 from workrecap.infra.pricing import PricingTable
@@ -515,3 +524,180 @@ class TestRouterErrorHandling:
         router = LLMRouter(fallback_config)
         with pytest.raises(SummarizeError, match="API down"):
             router.chat("s", "u", task="daily")
+
+
+class TestComputeBatchTimeout:
+    """Tests for _compute_batch_timeout: scales with batch size.
+
+    Formula: base (300s) + per_request (30s) * batch_size, capped at max (14400s).
+    Effective ranges:
+      - 10 requests: 600s (10 min) — quick feedback for small batches
+      - 100 requests: 3,300s (55 min) — close to original 1-hour default
+      - 500+ requests: 14,400s (4 hours) — handles full-year historical runs
+    """
+
+    def test_small_batch(self):
+        """10 requests → 600s (10 min)."""
+        assert _compute_batch_timeout(10) == BATCH_TIMEOUT_BASE + BATCH_TIMEOUT_PER_REQUEST * 10
+
+    def test_medium_batch(self):
+        """100 requests → 3,300s (~55 min)."""
+        assert _compute_batch_timeout(100) == BATCH_TIMEOUT_BASE + BATCH_TIMEOUT_PER_REQUEST * 100
+
+    def test_large_batch_capped(self):
+        """500+ requests capped at BATCH_TIMEOUT_MAX (14,400s = 4 hours)."""
+        assert _compute_batch_timeout(500) == BATCH_TIMEOUT_MAX
+        assert _compute_batch_timeout(1000) == BATCH_TIMEOUT_MAX
+
+    def test_zero_batch_returns_base(self):
+        """Edge case: 0 requests → base timeout."""
+        assert _compute_batch_timeout(0) == BATCH_TIMEOUT_BASE
+
+
+class TestAdaptivePollInterval:
+    """Tests for _adaptive_poll_interval: starts fast, slows as time passes.
+
+    Early polling (first 10%) at BATCH_POLL_INTERVAL_MIN (5s) catches quick batches.
+    Gradually increases to BATCH_POLL_INTERVAL_MAX (60s) for long-running batches.
+    Prevents wasted API calls during 4-hour waits while staying responsive early.
+    """
+
+    def test_initial_poll_is_minimum(self):
+        """At 0% elapsed → poll at minimum interval."""
+        assert _adaptive_poll_interval(0, 3600) == BATCH_POLL_INTERVAL_MIN
+
+    def test_midpoint_interpolation(self):
+        """At 50% elapsed → poll at midpoint between min and max."""
+        result = _adaptive_poll_interval(1800, 3600)
+        expected = BATCH_POLL_INTERVAL_MIN + 0.5 * (
+            BATCH_POLL_INTERVAL_MAX - BATCH_POLL_INTERVAL_MIN
+        )
+        assert result == pytest.approx(expected)
+
+    def test_near_deadline_is_maximum(self):
+        """At 100% elapsed → poll at maximum interval."""
+        assert _adaptive_poll_interval(3600, 3600) == BATCH_POLL_INTERVAL_MAX
+
+    def test_over_deadline_capped_at_max(self):
+        """Past deadline → still returns max (shouldn't happen but safety)."""
+        assert _adaptive_poll_interval(5000, 3600) == BATCH_POLL_INTERVAL_MAX
+
+
+class TestWaitForBatchDynamic:
+    """Tests for wait_for_batch with dynamic timeout and adaptive polling."""
+
+    def _make_router_with_batch(self, provider_mock, config_toml_path):
+        """Create a router with a batch-capable mock provider."""
+        config = ProviderConfig(config_toml_path)
+        router = LLMRouter(config)
+        # Inject the mock provider directly
+        router._providers["openai"] = provider_mock
+        return router
+
+    def test_auto_timeout_from_batch_size(self, tmp_path, monkeypatch):
+        """When timeout=None, it's computed from batch_size."""
+        monkeypatch.setattr("workrecap.infra.llm_router.time.sleep", lambda _: None)
+        monkeypatch.setattr("workrecap.infra.llm_router.time.monotonic", lambda: 0.0)
+
+        from workrecap.infra.providers.batch_mixin import BatchCapable, BatchResult, BatchStatus
+
+        mock_provider = MagicMock(spec=BatchCapable)
+        mock_provider.get_batch_status.return_value = BatchStatus.COMPLETED
+        mock_provider.get_batch_results.return_value = [
+            BatchResult(custom_id="test-1", content="ok", usage=None)
+        ]
+
+        config_content = textwrap.dedent("""\
+            [strategy]
+            mode = "fixed"
+
+            [providers.openai]
+            api_key = "test"
+            models = ["gpt-4o"]
+
+            [tasks.daily]
+            provider = "openai"
+            model = "gpt-4o"
+        """)
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(config_content)
+
+        router = self._make_router_with_batch(mock_provider, config_path)
+        results = router.wait_for_batch("batch-1", task="daily", batch_size=10)
+        assert len(results) == 1
+
+    def test_explicit_timeout_overrides_auto(self, tmp_path, monkeypatch):
+        """Explicit timeout parameter takes precedence over batch_size-based auto."""
+        sleep_called = []
+        clock = [0.0]
+
+        def fake_sleep(v):
+            sleep_called.append(v)
+            clock[0] += v
+
+        monkeypatch.setattr("workrecap.infra.llm_router.time.sleep", fake_sleep)
+        monkeypatch.setattr("workrecap.infra.llm_router.time.monotonic", lambda: clock[0])
+
+        from workrecap.infra.providers.batch_mixin import BatchCapable, BatchStatus
+
+        mock_provider = MagicMock(spec=BatchCapable)
+        mock_provider.get_batch_status.return_value = BatchStatus.PROCESSING
+
+        config_content = textwrap.dedent("""\
+            [strategy]
+            mode = "fixed"
+
+            [providers.openai]
+            api_key = "test"
+            models = ["gpt-4o"]
+
+            [tasks.daily]
+            provider = "openai"
+            model = "gpt-4o"
+        """)
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(config_content)
+
+        router = self._make_router_with_batch(mock_provider, config_path)
+        with pytest.raises(TimeoutError, match="timed out after 5"):
+            router.wait_for_batch("batch-1", task="daily", timeout=5, batch_size=1000)
+
+    def test_progress_callback_called(self, tmp_path, monkeypatch):
+        """Progress callback receives status updates during polling."""
+        monkeypatch.setattr("workrecap.infra.llm_router.time.sleep", lambda _: None)
+        clock = [0.0]
+        monkeypatch.setattr("workrecap.infra.llm_router.time.monotonic", lambda: clock[0])
+
+        from workrecap.infra.providers.batch_mixin import BatchCapable, BatchResult, BatchStatus
+
+        mock_provider = MagicMock(spec=BatchCapable)
+        mock_provider.get_batch_status.side_effect = [
+            BatchStatus.PROCESSING,
+            BatchStatus.COMPLETED,
+        ]
+        mock_provider.get_batch_results.return_value = [
+            BatchResult(custom_id="test-1", content="ok", usage=None)
+        ]
+
+        config_content = textwrap.dedent("""\
+            [strategy]
+            mode = "fixed"
+
+            [providers.openai]
+            api_key = "test"
+            models = ["gpt-4o"]
+
+            [tasks.daily]
+            provider = "openai"
+            model = "gpt-4o"
+        """)
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(config_content)
+
+        progress_msgs = []
+        router = self._make_router_with_batch(mock_provider, config_path)
+        results = router.wait_for_batch(
+            "batch-1", task="daily", batch_size=5, progress=lambda msg: progress_msgs.append(msg)
+        )
+        assert len(results) == 1
+        assert len(progress_msgs) > 0  # At least one progress message

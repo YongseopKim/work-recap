@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from workrecap.infra.client_pool import GHESClientPool
     from workrecap.services.daily_state import DailyStateStore
+    from workrecap.services.failed_dates import FailedDateStore
     from workrecap.services.fetch_progress import FetchProgressStore
 
 from workrecap.config import AppConfig
@@ -48,6 +49,7 @@ class FetcherService:
         max_workers: int = 1,
         client_pool: "GHESClientPool | None" = None,
         progress_store: "FetchProgressStore | None" = None,
+        failed_date_store: "FailedDateStore | None" = None,
     ) -> None:
         self._config = config
         self._client = ghes_client
@@ -56,6 +58,7 @@ class FetcherService:
         self._max_workers = max_workers
         self._client_pool = client_pool
         self._progress_store = progress_store
+        self._failed_date_store = failed_date_store
 
     @property
     def source_name(self) -> str:
@@ -129,9 +132,22 @@ class FetcherService:
         results: list[dict] = []
         processed: set[str] = set()
 
-        # Determine stale dates for range narrowing
+        # Determine stale dates for range narrowing.
+        # When FailedDateStore is available, also include retryable failed dates
+        # so that transient failures from previous runs get automatically retried.
         if not force and self._daily_state is not None:
             stale = set(self._daily_state.stale_dates("fetch", all_dates))
+            # Merge retryable failed dates — these should be retried even if
+            # DailyStateStore considers them non-stale (e.g., data exists but is bad)
+            if self._failed_date_store is not None:
+                retryable = set(self._failed_date_store.retryable_dates(all_dates))
+                if retryable:
+                    logger.info(
+                        "Retryable failed dates: %d (merging with %d stale)",
+                        len(retryable),
+                        len(stale),
+                    )
+                stale = stale | retryable
             logger.info("Stale dates: %d/%d", len(stale), len(all_dates))
             if not stale:
                 return [{"date": d, "status": "skipped"} for d in all_dates]
@@ -192,13 +208,19 @@ class FetcherService:
                         continue
                     processed.add(d)
                     if not force:
-                        if stale is not None:
-                            if d not in stale:
+                        # Check if this date has a retryable failure record
+                        # — if so, always include it for retry regardless of stale/fetched state
+                        is_retryable = self._failed_date_store is not None and bool(
+                            self._failed_date_store.retryable_dates([d])
+                        )
+                        if not is_retryable:
+                            if stale is not None:
+                                if d not in stale:
+                                    results.append({"date": d, "status": "skipped"})
+                                    continue
+                            elif self._is_date_fetched(d):
                                 results.append({"date": d, "status": "skipped"})
                                 continue
-                        elif self._is_date_fetched(d):
-                            results.append({"date": d, "status": "skipped"})
-                            continue
                     dates_to_process.append(d)
 
                 if use_parallel and len(dates_to_process) > 1:
@@ -238,9 +260,17 @@ class FetcherService:
                 bucket = buckets.get(d, {"prs": {}, "commits": [], "issues": {}})
                 self._save_date_from_bucket(d, bucket, active)
                 self._update_checkpoint(d)
+                if self._failed_date_store is not None:
+                    self._failed_date_store.record_success(d, "fetch")
                 results.append({"date": d, "status": "success"})
             except Exception as e:
                 logger.warning("Failed to process date %s: %s", d, e)
+                if self._failed_date_store is not None:
+                    from workrecap.services.failed_dates import _is_permanent_error
+
+                    self._failed_date_store.record_failure(
+                        d, "fetch", str(e), permanent=_is_permanent_error(str(e))
+                    )
                 results.append({"date": d, "status": "failed", "error": str(e)})
         return results
 
@@ -257,9 +287,17 @@ class FetcherService:
                 bucket = buckets.get(d, {"prs": {}, "commits": [], "issues": {}})
                 self._save_date_from_bucket(d, bucket, active)
                 self._update_checkpoint(d)
+                if self._failed_date_store is not None:
+                    self._failed_date_store.record_success(d, "fetch")
                 return {"date": d, "status": "success"}
             except Exception as e:
                 logger.warning("Failed to process date %s: %s", d, e)
+                if self._failed_date_store is not None:
+                    from workrecap.services.failed_dates import _is_permanent_error
+
+                    self._failed_date_store.record_failure(
+                        d, "fetch", str(e), permanent=_is_permanent_error(str(e))
+                    )
                 return {"date": d, "status": "failed", "error": str(e)}
 
         with ThreadPoolExecutor(max_workers=self._max_workers) as executor:

@@ -2034,3 +2034,52 @@ class TestBatchOption:
         assert result.exit_code == 0
         _, kwargs = mock_orch.return_value.run_range.call_args
         assert kwargs.get("batch", False) is False
+
+
+class TestFetchFailedDateStore:
+    """CLI injects FailedDateStore into FetcherService and reports exhausted dates."""
+
+    @patch("workrecap.cli.main.FetcherService")
+    def test_failed_date_store_injected(self, mock_cls):
+        """FailedDateStore is passed to FetcherService constructor."""
+        mock_cls.return_value.fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+        ]
+        result = runner.invoke(
+            app,
+            ["fetch", "--since", "2025-02-14", "--until", "2025-02-14"],
+        )
+        assert result.exit_code == 0
+        _, kwargs = mock_cls.call_args
+        assert "failed_date_store" in kwargs
+
+    @patch("workrecap.cli.main.FailedDateStore")
+    @patch("workrecap.cli.main.FetcherService")
+    def test_exhausted_dates_reported(self, mock_fetch_cls, mock_store_cls):
+        """Exhausted dates (max retries reached) are reported in output."""
+        mock_fetch_cls.return_value.fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "failed", "error": "Rate limit"},
+            {"date": "2025-02-15", "status": "success"},
+        ]
+        mock_store_cls.return_value.exhausted_dates.return_value = ["2025-02-14"]
+        result = runner.invoke(
+            app,
+            ["fetch", "--since", "2025-02-14", "--until", "2025-02-15"],
+        )
+        # Should mention exhausted dates
+        assert "exhausted" in result.output.lower()
+
+    @patch("workrecap.cli.main.FailedDateStore")
+    @patch("workrecap.cli.main.FetcherService")
+    def test_no_exhausted_message_when_none(self, mock_fetch_cls, mock_store_cls):
+        """No exhausted message when all dates succeed."""
+        mock_fetch_cls.return_value.fetch_range.return_value = [
+            {"date": "2025-02-14", "status": "success"},
+            {"date": "2025-02-15", "status": "success"},
+        ]
+        mock_store_cls.return_value.exhausted_dates.return_value = []
+        result = runner.invoke(
+            app,
+            ["fetch", "--since", "2025-02-14", "--until", "2025-02-15"],
+        )
+        assert "exhausted" not in result.output.lower()

@@ -234,7 +234,11 @@ class SummarizerService:
         try:
             logger.info("Submitting batch summarization for %d dates", len(batch_requests))
             batch_id = self._llm.submit_batch(batch_requests, task="daily")
-            batch_results = self._llm.wait_for_batch(batch_id, task="daily")
+            batch_results = self._llm.wait_for_batch(
+                batch_id,
+                task="daily",
+                batch_size=len(batch_requests),
+            )
 
             result_map: dict[str, BatchResult] = {r.custom_id: r for r in batch_results}
 

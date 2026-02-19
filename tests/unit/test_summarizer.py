@@ -796,6 +796,13 @@ class TestCacheSystemPrompt:
         batch_requests = mock_llm.submit_batch.call_args[0][0]
         assert batch_requests[0]["cache_system_prompt"] is True
 
+    def test_daily_batch_passes_batch_size(self, summarizer, mock_llm, test_config):
+        """_daily_range_batch passes batch_size to wait_for_batch for dynamic timeout."""
+        _save_normalized(test_config)
+        summarizer._daily_range_batch([DATE], force=True, progress=None)
+        wait_kwargs = mock_llm.wait_for_batch.call_args.kwargs
+        assert wait_kwargs.get("batch_size") == 1  # 1 date → 1 batch request
+
 
 # ── _is_date_summarized 테스트 ──
 
