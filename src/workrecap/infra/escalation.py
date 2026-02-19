@@ -81,6 +81,8 @@ class EscalationHandler:
                 decision["confidence"],
                 decision.get("reason", ""),
             )
+            # max_tokens is forwarded as-is — it's bound to the task's output
+            # format (e.g. enrich=1024 for JSON), not the model capability.
             esc_text, esc_usage = self._escalation_provider.chat(
                 self._escalation_model,
                 system_prompt,

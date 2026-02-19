@@ -64,7 +64,7 @@ class LLMRouter:
         task: str = "default",
         json_mode: bool = False,
         max_tokens: int | None = None,
-        cache_system_prompt: bool = False,
+        cache_system_prompt: bool = True,
     ) -> str:
         """Send a chat completion, routing to the correct provider/model for the task.
 
@@ -74,7 +74,12 @@ class LLMRouter:
             task: Task name for routing (enrich, daily, weekly, monthly, yearly, query).
             json_mode: If True, constrain output to valid JSON.
             max_tokens: Max output tokens (overrides task config if set).
+                Resolution order: explicit kwarg > task config (config.toml) > None.
+                Bound to output format, not model — same value is used on escalation
+                because the task's expected output structure doesn't change.
             cache_system_prompt: If True, enable prompt caching for system prompt.
+                Defaults to True. Anthropic: wraps system with cache_control ephemeral.
+                OpenAI/Gemini: ignored (both use automatic implicit caching).
 
         Returns:
             LLM response text.
