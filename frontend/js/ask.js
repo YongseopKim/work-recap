@@ -1,6 +1,6 @@
 // ask.js — Ask tab Alpine component with chat history
 
-import { api, pollJob, copyToClipboard } from "./api.js";
+import { api, pollJob, copyToClipboard, escapeHtml } from "./api.js";
 
 const QUICK_QUESTIONS = [
   "What were my key achievements this week?",
@@ -56,10 +56,11 @@ export function askComponent() {
               this.busy = false;
               this.$nextTick(() => this.scrollToBottom());
             } else if (job.status === "failed") {
+              const safeError = escapeHtml(job.error || "Unknown error");
               this.messages[assistantIdx] = {
                 role: "assistant",
                 text: `Error: ${job.error || "Unknown error"}`,
-                html: `<span class="status-failed">Error: ${job.error || "Unknown error"}</span>`,
+                html: `<span class="status-failed">Error: ${safeError}</span>`,
                 copyOk: false,
                 loading: false,
               };
@@ -69,10 +70,11 @@ export function askComponent() {
           });
         })
         .catch((e) => {
+          const safeError = escapeHtml(e.message);
           this.messages[assistantIdx] = {
             role: "assistant",
             text: `Error: ${e.message}`,
-            html: `<span class="status-failed">Error: ${e.message}</span>`,
+            html: `<span class="status-failed">Error: ${safeError}</span>`,
             copyOk: false,
             loading: false,
           };

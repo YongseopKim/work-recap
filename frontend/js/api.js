@@ -27,16 +27,22 @@ export async function api(method, path, body = null) {
  * @param {string} jobId
  * @param {function} onUpdate - called with job object on each poll
  */
-export function pollJob(jobId, onUpdate) {
+export function pollJob(jobId, onUpdate, maxErrors = 30) {
+  let errorCount = 0;
   const poll = async () => {
     try {
       const resp = await api("GET", `/pipeline/jobs/${jobId}`);
       const job = await resp.json();
+      errorCount = 0;
       onUpdate(job);
       if (job.status === "completed" || job.status === "failed") return;
       setTimeout(poll, 1000);
     } catch {
-      // On poll error, retry after delay
+      errorCount++;
+      if (errorCount >= maxErrors) {
+        onUpdate({ status: "failed", error: "Lost connection to server." });
+        return;
+      }
       setTimeout(poll, 2000);
     }
   };
