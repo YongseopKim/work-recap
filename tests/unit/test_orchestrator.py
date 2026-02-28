@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import Mock, call
+from unittest.mock import MagicMock, Mock, call
 
 import pytest
 
@@ -7,6 +7,7 @@ from workrecap.exceptions import (
     FetchError,
     NormalizeError,
     StepFailedError,
+    StorageError,
     SummarizeError,
 )
 from workrecap.services.fetcher import FetcherService
@@ -29,6 +30,8 @@ def mocks():
     normalizer.normalize.return_value = (
         Path("/data/normalized/2025/02/16/activities.jsonl"),
         Path("/data/normalized/2025/02/16/stats.json"),
+        [],
+        None,
     )
     summarizer.daily.return_value = Path("/data/summaries/2025/daily/02-16.md")
 
@@ -705,3 +708,73 @@ class TestRunRangeBatch:
 
         _, kwargs = mocks["summarizer"].daily_range.call_args
         assert kwargs.get("batch", False) is False
+
+
+# ── Storage 통합 테스트 ──
+
+
+class TestStorageIntegration:
+    @pytest.fixture
+    def mock_storage(self):
+        storage = MagicMock()
+        storage.save_activities_sync = MagicMock()
+        storage.save_summary_sync = MagicMock()
+        return storage
+
+    def test_run_daily_calls_storage(self, mocks, mock_config, mock_storage):
+        """run_daily가 storage에 activities+summary를 저장."""
+        summary_path = Path("/data/summaries/2025/daily/02-16.md")
+        mocks["summarizer"].daily.return_value = summary_path
+
+        orchestrator = OrchestratorService(
+            mocks["fetcher"],
+            mocks["normalizer"],
+            mocks["summarizer"],
+            config=mock_config,
+            storage=mock_storage,
+        )
+
+        import unittest.mock
+
+        with (
+            unittest.mock.patch.object(Path, "exists", return_value=True),
+            unittest.mock.patch.object(Path, "read_text", return_value="# Summary"),
+        ):
+            orchestrator.run_daily("2025-02-16")
+
+        mock_storage.save_activities_sync.assert_called_once()
+        mock_storage.save_summary_sync.assert_called_once()
+
+    def test_run_daily_storage_failure_continues(self, mocks, mock_config, mock_storage):
+        """storage 실패 시 파이프라인은 계속 진행."""
+        mock_storage.save_activities_sync.side_effect = StorageError("DB down")
+
+        orchestrator = OrchestratorService(
+            mocks["fetcher"],
+            mocks["normalizer"],
+            mocks["summarizer"],
+            config=mock_config,
+            storage=mock_storage,
+        )
+
+        import unittest.mock
+
+        with (
+            unittest.mock.patch.object(Path, "exists", return_value=True),
+            unittest.mock.patch.object(Path, "read_text", return_value="# Summary"),
+        ):
+            result = orchestrator.run_daily("2025-02-16")
+
+        # 파이프라인 정상 완료
+        assert result == Path("/data/summaries/2025/daily/02-16.md")
+
+    def test_run_daily_without_storage_works(self, mocks, mock_config):
+        """storage 없이도 정상 동작 (하위 호환)."""
+        orchestrator = OrchestratorService(
+            mocks["fetcher"],
+            mocks["normalizer"],
+            mocks["summarizer"],
+            config=mock_config,
+        )
+        result = orchestrator.run_daily("2025-02-16")
+        assert result == Path("/data/summaries/2025/daily/02-16.md")

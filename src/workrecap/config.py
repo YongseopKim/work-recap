@@ -36,6 +36,17 @@ class AppConfig(BaseSettings):
     # 멀티소스
     enabled_sources: list[str] = ["github"]
 
+    # 데이터베이스 (PostgreSQL)
+    postgres_url: str = "postgresql+asyncpg://pkb_test:pkb_test@192.168.0.2:5433/work_recap"
+
+    # 벡터 데이터베이스 (ChromaDB)
+    chroma_host: str = "192.168.0.2"
+    chroma_port: int = 9000
+    chroma_collection: str = "work_recap_summaries"
+
+    # 임베딩 (TEI — Text Embeddings Inference, BGE-M3)
+    tei_url: str = "http://192.168.0.2:8090"
+
     # ── 파생 경로 ──
 
     @property

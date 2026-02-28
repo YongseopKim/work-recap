@@ -5,6 +5,7 @@ from workrecap.exceptions import (
     WorkRecapError,
     NormalizeError,
     StepFailedError,
+    StorageError,
     SummarizeError,
 )
 
@@ -16,12 +17,14 @@ class TestExceptionHierarchy:
         assert issubclass(NormalizeError, WorkRecapError)
         assert issubclass(SummarizeError, WorkRecapError)
         assert issubclass(StepFailedError, WorkRecapError)
+        assert issubclass(StorageError, WorkRecapError)
 
     def test_step_attribute(self):
-        """FetchError, NormalizeError, SummarizeError에 step 속성이 있다."""
+        """FetchError, NormalizeError, SummarizeError, StorageError에 step 속성이 있다."""
         assert FetchError.step == "fetch"
         assert NormalizeError.step == "normalize"
         assert SummarizeError.step == "summarize"
+        assert StorageError.step == "storage"
 
     def test_step_failed_error_wraps_cause(self):
         """StepFailedError가 원인 예외를 보존한다."""

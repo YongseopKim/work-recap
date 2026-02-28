@@ -42,7 +42,7 @@ class TestOrchestratorMultiSource:
         fetcher = MagicMock()
         fetcher.fetch.return_value = {}
         normalizer = MagicMock()
-        normalizer.normalize.return_value = ("a", "b")
+        normalizer.normalize.return_value = ("a", "b", [], None)
         summarizer = MagicMock()
         summarizer.daily.return_value = "/path/summary.md"
 

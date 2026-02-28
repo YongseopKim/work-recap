@@ -55,7 +55,7 @@ class NormalizerService:
 
     def normalize(
         self, target_date: str, progress: Callable[[str], None] | None = None
-    ) -> tuple[Path, Path]:
+    ) -> tuple[Path, Path, list[Activity], DailyStats]:
         """
         Raw PR 데이터를 Activity 목록과 통계로 변환.
 
@@ -64,7 +64,7 @@ class NormalizerService:
             progress: 진행 상황 콜백.
 
         Returns:
-            (activities_path, stats_path)
+            (activities_path, stats_path, activities, stats)
 
         Raises:
             NormalizeError: 입력 파일 없음 또는 파싱 실패
@@ -129,7 +129,7 @@ class NormalizerService:
         )
 
         self._update_checkpoint(target_date)
-        return activities_path, stats_path
+        return activities_path, stats_path, activities, stats
 
     def normalize_range(
         self,

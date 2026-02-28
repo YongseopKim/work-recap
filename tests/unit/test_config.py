@@ -71,3 +71,15 @@ class TestAppConfig:
         """max_fetch_retries can be overridden (e.g., higher for very long runs)."""
         config = AppConfig(ghes_url="u", ghes_token="t", username="u", max_fetch_retries=10)
         assert config.max_fetch_retries == 10
+
+    def test_storage_defaults(self):
+        """Storage 관련 필드 기본값 확인."""
+        config = AppConfig(ghes_url="u", ghes_token="t", username="u")
+        assert config.postgres_url == (
+            "postgresql+asyncpg://pkb_test:pkb_test@192.168.0.2:5433/work_recap"
+        )
+        assert config.chroma_host == "192.168.0.2"
+        assert config.chroma_port == 9000
+        assert config.chroma_collection == "work_recap_summaries"
+        assert config.tei_url == "http://192.168.0.2:8090"
+        assert not hasattr(config, "embedding_model")

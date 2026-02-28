@@ -581,7 +581,7 @@ class TestNormalize:
         ]
         _save_raw(test_config, prs)
 
-        act_path, stats_path = normalizer.normalize(DATE)
+        act_path, stats_path, _, _ = normalizer.normalize(DATE)
 
         assert act_path.exists()
         assert stats_path.exists()
@@ -610,10 +610,10 @@ class TestNormalize:
         prs = [_make_pr(author="testuser")]
         _save_raw(test_config, prs)
 
-        act1, stats1 = normalizer.normalize(DATE)
+        act1, stats1, _, _ = normalizer.normalize(DATE)
         data1 = load_jsonl(act1)
 
-        act2, stats2 = normalizer.normalize(DATE)
+        act2, stats2, _, _ = normalizer.normalize(DATE)
         data2 = load_jsonl(act2)
 
         assert data1 == data2
@@ -621,7 +621,7 @@ class TestNormalize:
     def test_empty_prs(self, normalizer, test_config):
         _save_raw(test_config, [])
 
-        act_path, stats_path = normalizer.normalize(DATE)
+        act_path, stats_path, _, _ = normalizer.normalize(DATE)
         activities = load_jsonl(act_path)
         stats = load_json(stats_path)
 
@@ -971,7 +971,7 @@ class TestNormalizeWithCommitsAndIssues:
         _save_raw(test_config, [_make_pr(author="testuser")])
         _save_raw_commits(test_config, [_make_commit()])
 
-        act_path, stats_path = normalizer.normalize(DATE)
+        act_path, stats_path, _, _ = normalizer.normalize(DATE)
         activities = load_jsonl(act_path)
         stats = load_json(stats_path)
 
@@ -984,7 +984,7 @@ class TestNormalizeWithCommitsAndIssues:
         _save_raw(test_config, [])
         _save_raw_issues(test_config, [_make_issue(author="testuser")])
 
-        act_path, stats_path = normalizer.normalize(DATE)
+        act_path, stats_path, _, _ = normalizer.normalize(DATE)
         activities = load_jsonl(act_path)
         stats = load_json(stats_path)
 
@@ -996,7 +996,7 @@ class TestNormalizeWithCommitsAndIssues:
         _save_raw(test_config, [_make_pr(author="testuser")])
         # commits.json, issues.json 없음
 
-        act_path, stats_path = normalizer.normalize(DATE)
+        act_path, stats_path, _, _ = normalizer.normalize(DATE)
         activities = load_jsonl(act_path)
         stats = load_json(stats_path)
 
@@ -1018,7 +1018,7 @@ class TestNormalizeWithCommitsAndIssues:
             ],
         )
 
-        act_path, _ = normalizer.normalize(DATE)
+        act_path, _, _, _ = normalizer.normalize(DATE)
         activities = load_jsonl(act_path)
 
         timestamps = [a["ts"] for a in activities]
@@ -1383,7 +1383,7 @@ class TestLLMEnrichment:
 
         _save_raw(test_config, [_make_pr(author="testuser")])
         normalizer = NormalizerService(test_config, llm=mock_llm)
-        act_path, _ = normalizer.normalize(DATE)
+        act_path, _, _, _ = normalizer.normalize(DATE)
 
         activities = load_jsonl(act_path)
         assert activities[0]["change_summary"] == "기능 추가"

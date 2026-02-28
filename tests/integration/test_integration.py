@@ -47,7 +47,7 @@ class TestIntegrationPipeline:
     def test_02_normalize(self, real_config, test_date):
         """Step 2: raw 데이터를 Activity + DailyStats로 정규화."""
         normalizer = NormalizerService(real_config)
-        activities_path, stats_path = normalizer.normalize(test_date)
+        activities_path, stats_path, _, _ = normalizer.normalize(test_date)
 
         assert activities_path.exists(), "activities.jsonl not created"
         assert stats_path.exists(), "stats.json not created"

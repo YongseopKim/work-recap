@@ -21,6 +21,7 @@ from workrecap.services.summarizer import SummarizerService
 
 if TYPE_CHECKING:
     from workrecap.services.protocols import DataSourceFetcher, DataSourceNormalizer
+    from workrecap.services.storage import StorageService
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class OrchestratorService:
         summarizer: SummarizerService,
         *,
         config: AppConfig | None = None,
+        storage: StorageService | None = None,
     ) -> None:
         # 하위호환: 단일 fetcher/normalizer → dict 래핑
         if isinstance(fetcher, dict):
@@ -50,6 +52,7 @@ class OrchestratorService:
         )
         self._summarizer = summarizer
         self._config = config
+        self._storage = storage
 
     def run_daily(
         self,
@@ -59,12 +62,6 @@ class OrchestratorService:
     ) -> Path:
         """
         단일 날짜 전체 파이프라인: fetch → normalize → summarize(daily).
-
-        Returns:
-            daily summary 파일 경로
-
-        Raises:
-            StepFailedError: 어느 단계에서든 실패 시
         """
         logger.info("Pipeline start: %s (types=%s)", target_date, types)
         if progress:
@@ -74,14 +71,26 @@ class OrchestratorService:
             self._fetcher.fetch(target_date, types=types, progress=progress)
         except FetchError as e:
             raise StepFailedError("fetch", e) from e
+
         logger.info("Phase complete: fetch → normalize (%s)", target_date)
         if progress:
             progress(f"Pipeline: normalize {target_date}")
 
         try:
-            self._normalizer.normalize(target_date, progress=progress)
+            _, _, activities, stats = self._normalizer.normalize(target_date, progress=progress)
         except NormalizeError as e:
             raise StepFailedError("normalize", e) from e
+
+        # Storage: activities + stats
+        if self._storage and activities is not None:
+            self._safe_storage_call(
+                "save_activities",
+                self._storage.save_activities_sync,
+                target_date,
+                [self._activity_to_dict(a) for a in activities],
+                self._stats_to_dict(stats) if stats else {},
+            )
+
         logger.info("Phase complete: normalize → summarize (%s)", target_date)
         if progress:
             progress(f"Pipeline: summarize {target_date}")
@@ -91,8 +100,41 @@ class OrchestratorService:
         except SummarizeError as e:
             raise StepFailedError("summarize", e) from e
 
+        # Storage: summary
+        if self._storage and summary_path.exists():
+            content = summary_path.read_text(encoding="utf-8")
+            self._safe_storage_call(
+                "save_summary",
+                self._storage.save_summary_sync,
+                "daily",
+                target_date,
+                content,
+            )
+
         logger.info("Pipeline completed for %s → %s", target_date, summary_path)
         return summary_path
+
+    @staticmethod
+    def _safe_storage_call(label: str, fn: Callable, *args) -> None:
+        """Storage 호출을 try/except로 감싸서 실패 시 로깅만."""
+        try:
+            fn(*args)
+        except Exception as e:
+            logger.warning("Storage %s failed: %s", label, e)
+
+    @staticmethod
+    def _activity_to_dict(activity) -> dict:
+        """Activity dataclass → dict 변환."""
+        from dataclasses import asdict
+
+        return asdict(activity)
+
+    @staticmethod
+    def _stats_to_dict(stats) -> dict:
+        """DailyStats dataclass → dict 변환."""
+        from dataclasses import asdict
+
+        return asdict(stats)
 
     def run_range(
         self,
@@ -106,15 +148,6 @@ class OrchestratorService:
     ) -> list[dict]:
         """
         기간 범위 backfill using bulk operations.
-
-        Uses fetch_range → normalize_range → daily_range for significantly
-        fewer API calls compared to per-date run_daily.
-
-        Args:
-            batch: If True, use batch API for LLM calls in normalize and summarize.
-
-        Returns:
-            [{date, status, path?, error?}] 날짜별 결과
         """
         logger.info(
             "Pipeline range: %s..%s (force=%s, types=%s, workers=%d, batch=%s)",
@@ -135,12 +168,15 @@ class OrchestratorService:
         fetch_results = self._fetcher.fetch_range(
             since, until, types=types, force=force, progress=progress
         )
+
         logger.info("Phase complete: fetch → normalize (%s..%s)", since, until)
         if progress:
             progress(f"Phase 2/3: Normalizing {since}..{until}")
+
         normalize_results = self._normalizer.normalize_range(
             since, until, force=force, progress=progress, max_workers=max_workers, batch=batch
         )
+
         logger.info("Phase complete: normalize → summarize (%s..%s)", since, until)
         if progress:
             progress(f"Phase 3/3: Summarizing {since}..{until}")
@@ -159,6 +195,18 @@ class OrchestratorService:
             until,
         )
         return results
+
+    def run_weekly(self, year: int, week: int, force: bool = False) -> Path:
+        """Weekly summary 생성."""
+        return self._summarizer.weekly(year, week, force)
+
+    def run_monthly(self, year: int, month: int, force: bool = False) -> Path:
+        """Monthly summary 생성."""
+        return self._summarizer.monthly(year, month, force)
+
+    def run_yearly(self, year: int, force: bool = False) -> Path:
+        """Yearly summary 생성."""
+        return self._summarizer.yearly(year, force)
 
     def _merge_results(
         self,

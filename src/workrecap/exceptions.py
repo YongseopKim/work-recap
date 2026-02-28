@@ -5,6 +5,7 @@
     ├── FetchError          (Fetcher: GHES API 실패)
     ├── NormalizeError      (Normalizer: 변환 실패)
     ├── SummarizeError      (Summarizer: LLM 호출 실패)
+    ├── StorageError        (Storage: DB/Vector 저장 실패)
     └── StepFailedError     (Orchestrator: 파이프라인 단계 실패)
 """
 
@@ -29,6 +30,12 @@ class SummarizeError(WorkRecapError):
     """LLM 호출 또는 summary 생성 실패."""
 
     step = "summarize"
+
+
+class StorageError(WorkRecapError):
+    """DB 또는 Vector 저장소 접근 실패."""
+
+    step = "storage"
 
 
 class StepFailedError(WorkRecapError):

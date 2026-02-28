@@ -4,6 +4,7 @@ import calendar
 import json
 import logging
 from datetime import date
+from pathlib import Path
 
 import typer
 
@@ -24,7 +25,9 @@ _file_logger = logging.getLogger("workrecap.cli.output")
 
 app = typer.Typer(help="GHES activity summarizer with LLM")
 summarize_app = typer.Typer(help="Generate summaries")
+storage_app = typer.Typer(help="Manage database and vector storage")
 app.add_typer(summarize_app, name="summarize")
+app.add_typer(storage_app, name="storage")
 
 
 def _echo(msg: str = "", err: bool = False) -> None:
@@ -42,8 +45,6 @@ def main(
     """GHES activity summarizer with LLM."""
     level = logging.DEBUG if verbose else logging.INFO
     setup_logging(level)
-    from pathlib import Path
-
     setup_file_logging(Path(".log"))
 
 
@@ -418,7 +419,7 @@ def normalize(
             )
             _print_range_results("Normalized", range_results)
         else:
-            act_path, stats_path = service.normalize(dates[0])
+            act_path, stats_path, _, _ = service.normalize(dates[0])
             _echo("Normalized 1 day(s)")
             _echo(f"  {dates[0]}: {act_path}, {stats_path}")
         if llm:
@@ -610,6 +611,7 @@ def run(
     config = _get_config()
     max_workers = workers if workers is not None else config.max_workers
     pool = None
+    storage = None
 
     try:
         from workrecap.services.fetch_progress import FetchProgressStore
@@ -622,6 +624,7 @@ def run(
             config.state_dir / "failed_dates.json",
             max_retries=config.max_fetch_retries,
         )
+
         fetch_kwargs: dict = {
             "daily_state": ds,
             "progress_store": progress_store,
@@ -633,10 +636,21 @@ def run(
             pool = GHESClientPool(config.ghes_url, config.ghes_token, size=max_workers)
             fetch_kwargs["max_workers"] = max_workers
             fetch_kwargs["client_pool"] = pool
+
         fetcher = FetcherService(config, ghes, **fetch_kwargs)
         normalizer = NormalizerService(config, daily_state=ds, llm=llm if enrich else None)
         summarizer = SummarizerService(config, llm, daily_state=ds)
-        orchestrator = OrchestratorService(fetcher, normalizer, summarizer, config=config)
+
+        # Storage (graceful degradation — 실패해도 파이프라인 계속)
+        storage = None
+        try:
+            storage = _get_storage_service(config)
+        except Exception as e:
+            logger.warning("Storage init failed, continuing without DB: %s", e)
+
+        orchestrator = OrchestratorService(
+            fetcher, normalizer, summarizer, config=config, storage=storage
+        )
 
         range_ep = endpoints or catchup_endpoints
         if range_ep:
@@ -654,7 +668,9 @@ def run(
             failed = sum(1 for r in results if r["status"] == "failed")
             _echo(f"Range complete: {succeeded} succeeded, {skipped} skipped, {failed} failed")
             for r in results:
-                mark = {"success": "✓", "skipped": "—", "failed": "✗"}.get(r["status"], "?")
+                mark = {"success": "\u2713", "skipped": "\u2014", "failed": "\u2717"}.get(
+                    r["status"], "?"
+                )
                 msg = r.get("path", r.get("error", ""))
                 _echo(f"  {mark} {r['date']}: {msg}")
             ghes.close()
@@ -704,11 +720,17 @@ def run(
             ghes.close()
             _echo(f"Pipeline complete → {path}")
             _print_usage_report(llm)
+
     except WorkRecapError as e:
         _handle_error(e)
     finally:
         if pool is not None:
             pool.close()
+        if storage is not None:
+            try:
+                storage.close_sync()
+            except Exception:
+                pass
 
 
 # ── 자유 질문 ──
@@ -761,3 +783,144 @@ def models() -> None:
             current_provider = m.provider
             _echo(f"\n[{current_provider}]")
         _echo(f"  {m.id:40s}  {m.name}")
+
+
+# ── Storage 관리 ──
+
+
+def _get_storage_service(config: AppConfig):
+    from workrecap.infra.postgres_client import PostgresClient
+    from workrecap.infra.vector_client import VectorDBClient
+    from workrecap.infra.embedding_client import EmbeddingClient
+    from workrecap.services.storage import StorageService
+
+    pg = PostgresClient(config)
+    vdb = VectorDBClient(config)
+    emb = EmbeddingClient(config)
+    return StorageService(pg, vdb, emb)
+
+
+@storage_app.command("init-db")
+def storage_init_db() -> None:
+    """Initialize PostgreSQL tables."""
+    config = _get_config()
+    storage = _get_storage_service(config)
+    storage.init_db_sync()
+    storage.close_sync()
+    _echo("Database initialized.")
+
+
+@storage_app.command("sync")
+def storage_sync(
+    since: str = typer.Option(None, help="Start date (YYYY-MM-DD)"),
+    until: str = typer.Option(None, help="End date (YYYY-MM-DD)"),
+) -> None:
+    """Sync existing file data to PostgreSQL and ChromaDB."""
+    from workrecap.models import load_json, load_jsonl
+
+    config = _get_config()
+    storage = _get_storage_service(config)
+    storage.init_db_sync()
+
+    _echo("Starting sync from files to database...")
+
+    # 1. Activities & Stats
+    norm_root = config.normalized_dir
+    if norm_root.exists():
+        for year_dir in sorted(norm_root.iterdir()):
+            if not year_dir.is_dir() or not year_dir.name.isdigit():
+                continue
+            for month_dir in sorted(year_dir.iterdir()):
+                if not month_dir.is_dir() or not month_dir.name.isdigit():
+                    continue
+                for day_dir in sorted(month_dir.iterdir()):
+                    if not day_dir.is_dir() or not day_dir.name.isdigit():
+                        continue
+
+                    date_str = f"{year_dir.name}-{month_dir.name}-{day_dir.name}"
+                    if since and date_str < since:
+                        continue
+                    if until and date_str > until:
+                        continue
+
+                    _echo(f"  Syncing activities {date_str}...")
+                    try:
+                        acts = load_jsonl(day_dir / "activities.jsonl")
+                        stats = load_json(day_dir / "stats.json")
+                        storage.save_activities_sync(date_str, acts, stats)
+                    except Exception as e:
+                        _echo(f"  Failed {date_str}: {e}", err=True)
+
+    # 2. Summaries
+    summ_root = config.summaries_dir
+    if summ_root.exists():
+        for year_dir in sorted(summ_root.iterdir()):
+            if not year_dir.is_dir() or not year_dir.name.isdigit():
+                continue
+
+            # Daily
+            daily_dir = year_dir / "daily"
+            if daily_dir.exists():
+                for f in sorted(daily_dir.glob("*.md")):
+                    date_key = f"{year_dir.name}-{f.stem}"
+                    if since and date_key < since:
+                        continue
+                    if until and date_key > until:
+                        continue
+                    _echo(f"  Syncing daily summary {date_key}...")
+                    content = f.read_text(encoding="utf-8")
+                    storage.save_summary_sync("daily", date_key, content)
+
+            # Weekly
+            weekly_dir = year_dir / "weekly"
+            if weekly_dir.exists():
+                for f in sorted(weekly_dir.glob("*.md")):
+                    date_key = f"{year_dir.name}-{f.stem}"
+                    _echo(f"  Syncing weekly summary {date_key}...")
+                    content = f.read_text(encoding="utf-8")
+                    storage.save_summary_sync("weekly", date_key, content)
+
+            # Monthly
+            monthly_dir = year_dir / "monthly"
+            if monthly_dir.exists():
+                for f in sorted(monthly_dir.glob("*.md")):
+                    date_key = f"{year_dir.name}-{f.stem}"
+                    _echo(f"  Syncing monthly summary {date_key}...")
+                    content = f.read_text(encoding="utf-8")
+                    storage.save_summary_sync("monthly", date_key, content)
+
+            # Yearly
+            yearly_file = year_dir / "yearly.md"
+            if yearly_file.exists():
+                _echo(f"  Syncing yearly summary {year_dir.name}...")
+                content = yearly_file.read_text(encoding="utf-8")
+                storage.save_summary_sync("yearly", year_dir.name, content)
+
+    storage.close_sync()
+    _echo("Sync complete.")
+
+
+@storage_app.command("search")
+def storage_search(
+    query: str = typer.Argument(help="Search query"),
+    n: int = typer.Option(5, "--results", "-n", help="Number of results"),
+) -> None:
+    """Search summaries using semantic search."""
+    config = _get_config()
+    storage = _get_storage_service(config)
+    results = storage.search_summaries_sync(query, n_results=n)
+
+    if not results:
+        _echo("No results found.")
+    else:
+        for i, res in enumerate(results, 1):
+            dist = res.get("distance")
+            dist_str = f" (Distance: {dist:.4f})" if dist is not None else ""
+            _echo(f"\n[{i}] {res['id']}{dist_str}")
+            _echo("-" * 40)
+            content = res["content"]
+            if len(content) > 300:
+                content = content[:300] + "..."
+            _echo(content)
+
+    storage.close_sync()

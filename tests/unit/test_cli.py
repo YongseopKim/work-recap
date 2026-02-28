@@ -443,6 +443,8 @@ class TestNormalize:
         mock_cls.return_value.normalize.return_value = (
             Path("/data/activities.jsonl"),
             Path("/data/stats.json"),
+            [],
+            None,
         )
         result = runner.invoke(app, ["normalize", "2025-02-16"])
         assert result.exit_code == 0
@@ -1007,6 +1009,8 @@ class TestNormalizeCatchUp:
         mock_cls.return_value.normalize.return_value = (
             Path("/data/activities.jsonl"),
             Path("/data/stats.json"),
+            [],
+            None,
         )
         result = runner.invoke(app, ["normalize"])
         assert result.exit_code == 0
@@ -1526,6 +1530,8 @@ class TestEnrichDefault:
         mock_cls.return_value.normalize.return_value = (
             Path("/data/activities.jsonl"),
             Path("/data/stats.json"),
+            [],
+            None,
         )
         result = runner.invoke(app, ["normalize", "2025-02-16"])
         assert result.exit_code == 0
@@ -1539,6 +1545,8 @@ class TestEnrichDefault:
         mock_cls.return_value.normalize.return_value = (
             Path("/data/activities.jsonl"),
             Path("/data/stats.json"),
+            [],
+            None,
         )
         result = runner.invoke(app, ["normalize", "--no-enrich", "2025-02-16"])
         assert result.exit_code == 0
@@ -2083,3 +2091,89 @@ class TestFetchFailedDateStore:
             ["fetch", "--since", "2025-02-14", "--until", "2025-02-15"],
         )
         assert "exhausted" not in result.output.lower()
+
+
+# ── Storage 서브커맨드 테스트 ──
+
+
+class TestStorageInitDB:
+    @patch("workrecap.cli.main._get_config", return_value=_mock_config())
+    @patch("workrecap.cli.main._get_storage_service")
+    def test_init_db(self, mock_get_storage, mock_conf):
+        """storage init-db가 init_db_sync를 호출."""
+        result = runner.invoke(app, ["storage", "init-db"])
+        assert result.exit_code == 0
+        mock_get_storage.return_value.init_db_sync.assert_called_once()
+        assert "initialized" in result.output.lower()
+
+
+class TestStorageSearch:
+    @patch("workrecap.cli.main._get_config", return_value=_mock_config())
+    @patch("workrecap.cli.main._get_storage_service")
+    def test_search_no_results(self, mock_get_storage, mock_conf):
+        """storage search: 결과 없을 때."""
+        mock_get_storage.return_value.search_summaries_sync.return_value = []
+        result = runner.invoke(app, ["storage", "search", "authentication"])
+        assert result.exit_code == 0
+        assert "No results" in result.output
+
+    @patch("workrecap.cli.main._get_config", return_value=_mock_config())
+    @patch("workrecap.cli.main._get_storage_service")
+    def test_search_with_results(self, mock_get_storage, mock_conf):
+        """storage search: 결과 있을 때 출력."""
+        mock_get_storage.return_value.search_summaries_sync.return_value = [
+            {"id": "daily_2025-02-16", "content": "Auth changes", "distance": 0.1, "metadata": {}}
+        ]
+        result = runner.invoke(app, ["storage", "search", "authentication"])
+        assert result.exit_code == 0
+        assert "daily_2025-02-16" in result.output
+
+
+class TestRunWithStorage:
+    """run 명령이 storage를 orchestrator에 주입하는지 테스트."""
+
+    @patch("workrecap.cli.main._get_storage_service")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
+    def test_run_passes_storage_to_orchestrator(
+        self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_get_storage
+    ):
+        """run 시 storage를 생성하여 orchestrator에 전달."""
+        mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
+        result = runner.invoke(app, ["run", "2025-02-16"])
+        assert result.exit_code == 0
+        # OrchestratorService 생성 시 storage= 키워드가 전달되었는지 확인
+        call_kwargs = mock_orch.call_args
+        assert call_kwargs.kwargs.get("storage") is mock_get_storage.return_value
+
+    @patch("workrecap.cli.main._get_storage_service")
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
+    def test_run_closes_storage(
+        self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_get_storage
+    ):
+        """run 종료 시 storage.close_sync()가 호출된다."""
+        mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
+        runner.invoke(app, ["run", "2025-02-16"])
+        mock_get_storage.return_value.close_sync.assert_called_once()
+
+    @patch("workrecap.cli.main._get_storage_service", side_effect=Exception("no DB"))
+    @patch("workrecap.cli.main.OrchestratorService")
+    @patch("workrecap.cli.main.SummarizerService")
+    @patch("workrecap.cli.main.NormalizerService")
+    @patch("workrecap.cli.main.FetcherService")
+    def test_run_storage_init_failure_continues(
+        self, mock_fetch, mock_norm, mock_summ, mock_orch, mock_get_storage
+    ):
+        """storage 생성 실패해도 파이프라인은 정상 동작 (storage=None)."""
+        mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
+        result = runner.invoke(app, ["run", "2025-02-16"])
+        assert result.exit_code == 0
+        assert "Pipeline complete" in result.output
+        # storage=None으로 orchestrator가 생성됨
+        call_kwargs = mock_orch.call_args
+        assert call_kwargs.kwargs.get("storage") is None
