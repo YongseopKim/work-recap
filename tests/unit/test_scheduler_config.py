@@ -93,3 +93,23 @@ class TestScheduleConfig:
         cfg = ScheduleConfig.from_toml(schedule_toml)
         assert cfg.daily.hour == 2
         assert cfg.daily.minute == 0
+
+
+class TestTelegramConfig:
+    def test_default_telegram_config(self):
+        config = ScheduleConfig()
+        assert config.telegram.enabled is False
+
+    def test_from_toml_with_telegram(self, tmp_path):
+        toml_file = tmp_path / "schedule.toml"
+        toml_file.write_text(
+            "[scheduler]\nenabled = true\n\n[scheduler.telegram]\nenabled = true\n"
+        )
+        config = ScheduleConfig.from_toml(toml_file)
+        assert config.telegram.enabled is True
+
+    def test_from_toml_without_telegram(self, tmp_path):
+        toml_file = tmp_path / "schedule.toml"
+        toml_file.write_text("[scheduler]\nenabled = true\n")
+        config = ScheduleConfig.from_toml(toml_file)
+        assert config.telegram.enabled is False
