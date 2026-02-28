@@ -17,6 +17,7 @@ dependencies = [
     "sqlmodel>=0.0.22",
     "asyncpg>=0.30.0",
     "chromadb>=0.6.3",
+    "apscheduler>=3.10,<4.0",
 ]
 
 [project.optional-dependencies]
