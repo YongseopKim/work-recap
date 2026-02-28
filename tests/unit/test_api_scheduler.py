@@ -1,6 +1,7 @@
 """Scheduler API 엔드포인트 테스트."""
 
 import textwrap
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,7 +14,7 @@ from workrecap.config import AppConfig
 from workrecap.scheduler.config import ScheduleConfig
 from workrecap.scheduler.core import SchedulerService
 from workrecap.scheduler.history import SchedulerHistory
-from workrecap.scheduler.notifier import LogNotifier
+from workrecap.scheduler.notifier import CompositeNotifier, LogNotifier
 
 
 @pytest.fixture()
@@ -206,3 +207,73 @@ class TestSchedulerPauseResume:
         client.put("/api/scheduler/resume")
         resp = client.get("/api/scheduler/status")
         assert resp.json()["state"] == "running"
+
+
+class TestSchedulerLifespanTelegram:
+    def test_lifespan_creates_composite_notifier_when_telegram_enabled(self, tmp_path):
+        """Telegram enabled + token set -> CompositeNotifier used."""
+        mock_config = MagicMock()
+        mock_config.schedule_config_path = Path("/nonexistent")
+        mock_config.state_dir = tmp_path / "test_state"
+        mock_config.telegram_bot_token = "fake-token"
+        mock_config.telegram_chat_id = "12345"
+
+        sched_config = MagicMock()
+        sched_config.telegram.enabled = True
+        sched_config.enabled = False
+
+        with patch("workrecap.api.app.get_config", return_value=mock_config):
+            with patch(
+                "workrecap.scheduler.config.ScheduleConfig.from_toml",
+                return_value=sched_config,
+            ):
+                app = create_app()
+                with TestClient(app):
+                    scheduler = app.state.scheduler
+                    assert isinstance(scheduler._notifier, CompositeNotifier)
+
+    def test_lifespan_skips_telegram_when_no_token(self, tmp_path):
+        """Telegram enabled but no token -> LogNotifier only, no CompositeNotifier."""
+        mock_config = MagicMock()
+        mock_config.schedule_config_path = Path("/nonexistent")
+        mock_config.state_dir = tmp_path / "test_state"
+        mock_config.telegram_bot_token = ""
+        mock_config.telegram_chat_id = ""
+
+        sched_config = MagicMock()
+        sched_config.telegram.enabled = True
+        sched_config.enabled = False
+
+        with patch("workrecap.api.app.get_config", return_value=mock_config):
+            with patch(
+                "workrecap.scheduler.config.ScheduleConfig.from_toml",
+                return_value=sched_config,
+            ):
+                app = create_app()
+                with TestClient(app):
+                    scheduler = app.state.scheduler
+                    assert isinstance(scheduler._notifier, LogNotifier)
+                    assert not isinstance(scheduler._notifier, CompositeNotifier)
+
+    def test_lifespan_uses_log_notifier_when_telegram_disabled(self, tmp_path):
+        """Telegram disabled -> LogNotifier only."""
+        mock_config = MagicMock()
+        mock_config.schedule_config_path = Path("/nonexistent")
+        mock_config.state_dir = tmp_path / "test_state"
+        mock_config.telegram_bot_token = "fake-token"
+        mock_config.telegram_chat_id = "12345"
+
+        sched_config = MagicMock()
+        sched_config.telegram.enabled = False
+        sched_config.enabled = False
+
+        with patch("workrecap.api.app.get_config", return_value=mock_config):
+            with patch(
+                "workrecap.scheduler.config.ScheduleConfig.from_toml",
+                return_value=sched_config,
+            ):
+                app = create_app()
+                with TestClient(app):
+                    scheduler = app.state.scheduler
+                    assert isinstance(scheduler._notifier, LogNotifier)
+                    assert not isinstance(scheduler._notifier, CompositeNotifier)
