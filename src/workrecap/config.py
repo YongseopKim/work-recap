@@ -47,6 +47,10 @@ class AppConfig(BaseSettings):
     # 임베딩 (TEI — Text Embeddings Inference, BGE-M3)
     tei_url: str = "http://192.168.0.2:8090"
 
+    # Telegram 알림
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
     # ── 파생 경로 ──
 
     @property
