@@ -1,137 +1,319 @@
 <!DOCTYPE html>
-<html lang="ko" data-theme="light">
+<html lang="ko">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>work-recap</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <link rel="stylesheet" href="/style.css">
+  <!-- Prevent dark-mode flash: apply saved theme before first paint -->
+  <script>
+    document.documentElement.setAttribute('data-theme',
+      localStorage.getItem('darkMode') === 'true' ? 'dark' : 'light');
+  </script>
 </head>
-<body>
+<body x-data>
+
   <header class="container">
-    <h1>work-recap</h1>
     <nav>
       <ul>
-        <li><a href="#" class="tab-link active" data-tab="pipeline">Pipeline</a></li>
-        <li><a href="#" class="tab-link" data-tab="summaries">Summaries</a></li>
-        <li><a href="#" class="tab-link" data-tab="ask">Ask</a></li>
+        <li><strong>work-recap</strong></li>
+      </ul>
+      <ul>
+        <li>
+          <a href="#"
+             :class="$store.app.tab === 'pipeline' && 'active'"
+             @click.prevent="$store.app.tab = 'pipeline'">Pipeline</a>
+        </li>
+        <li>
+          <a href="#"
+             :class="$store.app.tab === 'summaries' && 'active'"
+             @click.prevent="$store.app.tab = 'summaries'">Summaries</a>
+        </li>
+        <li>
+          <a href="#"
+             :class="$store.app.tab === 'ask' && 'active'"
+             @click.prevent="$store.app.tab = 'ask'">Ask</a>
+        </li>
+      </ul>
+      <ul>
+        <li>
+          <a href="#" role="button" class="outline theme-toggle"
+             @click.prevent="$store.app.toggleTheme()"
+             x-text="$store.app.darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19'"
+             :aria-label="$store.app.darkMode ? 'Switch to light mode' : 'Switch to dark mode'">
+          </a>
+        </li>
       </ul>
     </nav>
   </header>
 
   <main class="container">
 
-    <!-- Pipeline Tab -->
-    <section id="tab-pipeline" class="tab-content active">
+    <!-- ===== Pipeline Tab ===== -->
+    <section x-show="$store.app.tab === 'pipeline'"
+             x-data="pipeline"
+             @view-summary.window="$store.app.tab = 'summaries'"
+             x-cloak>
+
       <h2>Pipeline</h2>
 
+      <!-- Single Date -->
       <article>
         <h3>Single Date</h3>
         <div class="grid">
           <label>
             Date
-            <input type="date" id="pipeline-date">
+            <input type="date" x-model="singleDate">
           </label>
           <label>
             &nbsp;
-            <button id="btn-run" class="primary">Run</button>
+            <button class="primary" @click="runSingle()" :aria-busy="busy" :disabled="busy">
+              Run
+            </button>
           </label>
         </div>
       </article>
 
+      <!-- Date Range -->
       <article>
         <h3>Date Range</h3>
         <div class="grid">
           <label>
             Since
-            <input type="date" id="pipeline-since">
+            <input type="date" x-model="rangeFrom">
           </label>
           <label>
             Until
-            <input type="date" id="pipeline-until">
+            <input type="date" x-model="rangeTo">
           </label>
           <label>
             &nbsp;
-            <button id="btn-run-range" class="primary">Run Range</button>
+            <button class="primary" @click="runRange()" :aria-busy="rangeBusy" :disabled="rangeBusy">
+              Run Range
+            </button>
           </label>
         </div>
+
+        <!-- Range Options -->
+        <details class="range-options">
+          <summary>Options</summary>
+          <div class="grid options-grid">
+            <label>
+              <input type="checkbox" x-model="force" role="switch"> Force reprocess
+            </label>
+            <label>
+              <input type="checkbox" x-model="enrich" role="switch"> LLM enrich
+            </label>
+            <label>
+              <input type="checkbox" x-model="batch" role="switch"> Batch mode
+            </label>
+          </div>
+          <div class="grid options-grid">
+            <label>
+              Workers
+              <input type="number" x-model.number="workers" min="1" max="20" style="width:5rem">
+            </label>
+            <label>
+              <input type="checkbox" x-model="weeklySum" role="switch"> Weekly summary
+            </label>
+            <label>
+              <input type="checkbox" x-model="monthlySum" role="switch"> Monthly summary
+            </label>
+            <label>
+              <input type="checkbox" x-model="yearlySum" role="switch"> Yearly summary
+            </label>
+          </div>
+        </details>
       </article>
 
-      <article id="pipeline-status" class="hidden">
+      <!-- Status -->
+      <article x-show="showStatus" x-cloak>
         <h3>Status</h3>
-        <div id="pipeline-status-content"></div>
+        <div x-html="statusHtml"></div>
+        <template x-if="completedDate">
+          <p style="margin-top:0.5rem">
+            <a href="#" @click.prevent="viewCompletedSummary()">View Summary &rarr;</a>
+          </p>
+        </template>
       </article>
     </section>
 
-    <!-- Summaries Tab -->
-    <section id="tab-summaries" class="tab-content">
+    <!-- ===== Summaries Tab ===== -->
+    <section x-show="$store.app.tab === 'summaries'"
+             x-data="summaries"
+             @view-summary.window="if($event.detail && $event.detail.date) {
+               const d = new Date($event.detail.date + 'T00:00:00');
+               calYear = d.getFullYear();
+               calMonth = d.getMonth() + 1;
+               loadAvailable().then(() => loadDailySummary($event.detail.date));
+             }"
+             x-cloak>
+
       <h2>Summaries</h2>
 
+      <!-- Calendar -->
       <article>
-        <div class="grid">
-          <label>
-            Type
-            <select id="summary-type">
-              <option value="daily">Daily</option>
-              <option value="weekly">Weekly</option>
-              <option value="monthly">Monthly</option>
-              <option value="yearly">Yearly</option>
-            </select>
-          </label>
+        <div class="calendar-header">
+          <button class="outline cal-nav" @click="prevMonth()" aria-label="Previous month">&laquo;</button>
+          <strong x-text="`${monthName} ${calYear}`"></strong>
+          <button class="outline cal-nav" @click="nextMonth()" aria-label="Next month">&raquo;</button>
+        </div>
 
-          <div id="summary-inputs">
-            <!-- 동적으로 채워짐 -->
-          </div>
+        <div class="calendar-grid" :class="loading && 'loading'">
+          <!-- Day-of-week headers -->
+          <template x-for="dow in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']" :key="dow">
+            <div class="cal-dow" x-text="dow"></div>
+          </template>
 
-          <label>
-            &nbsp;
-            <button id="btn-view-summary" class="primary">View</button>
-          </label>
+          <!-- Day cells -->
+          <template x-for="(week, wi) in weeks" :key="wi">
+            <template x-for="(cell, ci) in week" :key="`${wi}-${ci}`">
+              <div class="cal-day"
+                   :class="{
+                     'outside': cell.outside,
+                     'available': cell.available,
+                     'today': cell.date === new Date().toISOString().slice(0,10)
+                   }"
+                   @click="onDayClick(cell)"
+                   :role="cell.available ? 'button' : undefined"
+                   :tabindex="cell.available ? 0 : undefined">
+                <span x-text="cell.day"></span>
+                <span class="cal-dot" x-show="cell.available"></span>
+              </div>
+            </template>
+          </template>
         </div>
       </article>
 
-      <article id="summary-viewer" class="hidden">
-        <div id="summary-content" class="markdown-body"></div>
+      <!-- Available weekly/monthly/yearly links -->
+      <article x-show="availableWeekly.length || availableMonthly.length || hasYearly" x-cloak>
+        <div class="summary-links">
+          <template x-if="availableWeekly.length">
+            <div>
+              <strong>Weekly:</strong>
+              <template x-for="w in availableWeekly" :key="w">
+                <a href="#" class="summary-link" @click.prevent="loadWeeklySummary(w)" x-text="w"></a>
+              </template>
+            </div>
+          </template>
+          <template x-if="availableMonthly.length">
+            <div>
+              <strong>Monthly:</strong>
+              <template x-for="m in availableMonthly" :key="m">
+                <a href="#" class="summary-link"
+                   @click.prevent="loadMonthlySummary(m)"
+                   x-text="`${calYear}-${m}`"></a>
+              </template>
+            </div>
+          </template>
+          <template x-if="hasYearly">
+            <div>
+              <strong>Yearly:</strong>
+              <a href="#" class="summary-link"
+                 @click.prevent="loadYearlySummary()"
+                 x-text="calYear"></a>
+            </div>
+          </template>
+        </div>
       </article>
 
-      <div id="summary-error" class="hidden notice error"></div>
+      <!-- Error -->
+      <div class="notice error" x-show="summaryError" x-text="summaryError" x-cloak></div>
+
+      <!-- Summary viewer -->
+      <article x-show="showSummary" x-cloak>
+        <div class="summary-viewer-header">
+          <strong x-text="summaryLabel"></strong>
+          <button class="outline copy-btn" @click="copySummary()"
+                  :aria-label="copyOk ? 'Copied!' : 'Copy to clipboard'">
+            <span x-text="copyOk ? 'Copied!' : 'Copy'"></span>
+          </button>
+        </div>
+        <div class="markdown-body" x-html="summaryContent"></div>
+
+        <!-- Hierarchy navigation (only for daily summaries) -->
+        <template x-if="_currentDate">
+          <div class="summary-nav">
+            <template x-if="currentWeekStr">
+              <a href="#" @click.prevent="viewWeekFromDaily()">
+                View <span x-text="currentWeekStr"></span> &rarr;
+              </a>
+            </template>
+            <template x-if="currentMonthStr">
+              <a href="#" @click.prevent="viewMonthFromDaily()">
+                View <span x-text="`${calYear}-${currentMonthStr}`"></span> &rarr;
+              </a>
+            </template>
+          </div>
+        </template>
+      </article>
     </section>
 
-    <!-- Ask Tab -->
-    <section id="tab-ask" class="tab-content">
+    <!-- ===== Ask Tab ===== -->
+    <section x-show="$store.app.tab === 'ask'"
+             x-data="ask"
+             x-cloak>
+
       <h2>Ask</h2>
 
-      <article>
-        <label>
-          Question
-          <input type="text" id="ask-question" placeholder="e.g. What were my key achievements this month?">
-        </label>
-        <div class="grid">
-          <label>
-            Months of context
-            <input type="number" id="ask-months" value="3" min="1" max="24">
-          </label>
-          <label>
-            &nbsp;
-            <button id="btn-ask" class="primary">Ask</button>
-          </label>
+      <!-- Quick questions -->
+      <div class="quick-questions">
+        <template x-for="(q, qi) in quickQuestions" :key="qi">
+          <button class="outline quick-btn" @click="askQuestion(q)" :disabled="busy" x-text="q"></button>
+        </template>
+      </div>
+
+      <!-- Chat history -->
+      <div class="chat-container" x-ref="chatContainer">
+        <template x-for="(msg, mi) in messages" :key="mi">
+          <div class="chat-msg" :class="'chat-' + msg.role">
+            <div class="chat-bubble">
+              <template x-if="msg.role === 'user'">
+                <p x-text="msg.text"></p>
+              </template>
+              <template x-if="msg.role === 'assistant'">
+                <div class="markdown-body" x-html="msg.html"></div>
+              </template>
+              <button class="copy-btn-sm"
+                      x-show="msg.text && !msg.loading"
+                      @click="copyMessage(mi)"
+                      :aria-label="msg.copyOk ? 'Copied!' : 'Copy'"
+                      x-text="msg.copyOk ? 'Copied!' : 'Copy'">
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <!-- Empty state -->
+        <div class="chat-empty" x-show="messages.length === 0">
+          <p>Ask questions about your work activity. Answers are based on your generated summaries.</p>
         </div>
-      </article>
+      </div>
 
-      <article id="ask-status" class="hidden">
-        <h3>Status</h3>
-        <div id="ask-status-content"></div>
-      </article>
-
-      <article id="ask-result" class="hidden">
-        <h3>Answer</h3>
-        <div id="ask-result-content" class="markdown-body"></div>
-      </article>
+      <!-- Input area -->
+      <div class="chat-input-area">
+        <div class="grid chat-input-grid">
+          <input type="text"
+                 x-model="question"
+                 @keydown="onKeydown($event)"
+                 placeholder="Ask about your work..."
+                 :disabled="busy">
+          <label class="months-label">
+            Months
+            <input type="number" x-model.number="months" min="1" max="24" style="width:4.5rem">
+          </label>
+          <button class="primary" @click="askQuestion()" :aria-busy="busy" :disabled="busy || !question.trim()">
+            Ask
+          </button>
+        </div>
+      </div>
     </section>
 
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="/app.js"></script>
+  <script type="module" src="/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
 </body>
 </html>

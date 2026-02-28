@@ -1323,7 +1323,7 @@ class TestStaticFiles:
         assert "text/css" in resp.headers["content-type"]
 
     def test_serves_js(self, client):
-        """GET /app.js → JS 파일 반환."""
-        resp = client.get("/app.js")
+        """GET /js/app.js → JS 파일 반환."""
+        resp = client.get("/js/app.js")
         assert resp.status_code == 200
         assert "javascript" in resp.headers["content-type"]
