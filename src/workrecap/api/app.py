@@ -42,9 +42,7 @@ def create_app() -> FastAPI:
         tags=["summarize"],
     )
     app.include_router(summary.router, prefix="/api/summary", tags=["summary"])
-    app.include_router(
-        summaries_available.router, prefix="/api/summaries", tags=["summaries"]
-    )
+    app.include_router(summaries_available.router, prefix="/api/summaries", tags=["summaries"])
     app.include_router(query.router, prefix="/api", tags=["query"])
 
     @app.exception_handler(WorkRecapError)
