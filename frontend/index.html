@@ -35,6 +35,11 @@
              :class="$store.app.tab === 'ask' && 'active'"
              @click.prevent="$store.app.tab = 'ask'">Ask</a>
         </li>
+        <li>
+          <a href="#"
+             :class="$store.app.tab === 'scheduler' && 'active'"
+             @click.prevent="$store.app.tab = 'scheduler'">Scheduler</a>
+        </li>
       </ul>
       <ul>
         <li>
@@ -308,6 +313,76 @@
           </button>
         </div>
       </div>
+    </section>
+
+    <!-- ===== Scheduler Tab ===== -->
+    <section x-show="$store.app.tab === 'scheduler'"
+             x-data="scheduler"
+             x-cloak>
+
+      <h2>Scheduler</h2>
+
+      <!-- Status -->
+      <article>
+        <div class="scheduler-header">
+          <h3>Status</h3>
+          <span class="scheduler-state" :class="'state-' + state" x-text="state"></span>
+          <div style="margin-left:auto;display:flex;gap:0.5rem">
+            <button class="outline" style="padding:0.25rem 0.75rem"
+                    @click="togglePause()"
+                    x-show="state === 'running' || state === 'paused'"
+                    x-text="state === 'paused' ? 'Resume' : 'Pause'">
+            </button>
+            <button class="outline" style="padding:0.25rem 0.75rem" @click="refresh()">Refresh</button>
+          </div>
+        </div>
+      </article>
+
+      <!-- Scheduled Jobs -->
+      <article x-show="jobs.length">
+        <h3>Scheduled Jobs</h3>
+        <table>
+          <thead><tr><th>Job</th><th>Next Run</th><th></th></tr></thead>
+          <tbody>
+            <template x-for="job in jobs" :key="job.id">
+              <tr>
+                <td x-text="job.id"></td>
+                <td x-text="formatTime(job.next_run)"></td>
+                <td>
+                  <button class="outline" style="padding:0.25rem 0.5rem;font-size:0.85rem"
+                          @click="triggerJob(job.id)"
+                          :disabled="triggerBusy">Run Now</button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <small x-show="triggerResult" x-text="triggerResult" style="color:var(--pico-primary)"></small>
+      </article>
+
+      <!-- History -->
+      <article>
+        <h3>Recent History</h3>
+        <template x-if="history.length === 0">
+          <p>No executions yet.</p>
+        </template>
+        <table x-show="history.length">
+          <thead><tr><th>Job</th><th>Target</th><th>Status</th><th>Time</th><th>Error</th></tr></thead>
+          <tbody>
+            <template x-for="(h, i) in history" :key="i">
+              <tr>
+                <td x-text="h.job"></td>
+                <td x-text="h.target"></td>
+                <td>
+                  <span class="history-badge" :class="'badge-' + h.status" x-text="h.status"></span>
+                </td>
+                <td x-text="formatTime(h.triggered_at)"></td>
+                <td x-text="h.error || '-'" style="max-width:200px;overflow:hidden;text-overflow:ellipsis"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </article>
     </section>
 
   </main>

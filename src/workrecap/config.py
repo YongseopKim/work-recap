@@ -107,3 +107,7 @@ class AppConfig(BaseSettings):
     @property
     def provider_config_path(self) -> Path:
         return Path(".provider/config.toml")
+
+    @property
+    def schedule_config_path(self) -> Path:
+        return Path("schedule.toml")

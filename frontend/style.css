@@ -402,6 +402,69 @@ button[aria-busy="true"] {
   margin-bottom: 0;
 }
 
+/* ── Scheduler ── */
+.scheduler-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.scheduler-state {
+  font-weight: bold;
+  text-transform: uppercase;
+  font-size: 0.9rem;
+}
+
+.state-running {
+  color: var(--pico-color-green-500, #22c55e);
+}
+
+.state-paused {
+  color: var(--pico-color-yellow-500, #eab308);
+}
+
+.state-disabled {
+  color: var(--pico-muted-color);
+}
+
+.state-stopped {
+  color: var(--pico-del-color, #e53e3e);
+}
+
+.state-error {
+  color: var(--pico-del-color, #e53e3e);
+}
+
+.state-loading {
+  color: var(--pico-muted-color);
+}
+
+.history-badge {
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.badge-success {
+  background: var(--pico-color-green-100, #dcfce7);
+  color: var(--pico-color-green-700, #15803d);
+}
+
+.badge-failed {
+  background: var(--pico-del-color, #fecaca);
+  color: #991b1b;
+}
+
+[data-theme="dark"] .badge-success {
+  background: #14532d;
+  color: #86efac;
+}
+
+[data-theme="dark"] .badge-failed {
+  background: #7f1d1d;
+  color: #fca5a5;
+}
+
 /* ── Responsive tweaks ── */
 @media (max-width: 768px) {
   .chat-bubble {
