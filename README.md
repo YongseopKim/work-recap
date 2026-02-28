@@ -5,7 +5,7 @@ LLM 기반으로 일/주/월/년 단위 업무 요약을 자동 생성하는 개
 
 ## 핵심 원칙
 
-- **파일 기반 저장** — DB 없이 모든 중간 산출물이 파일로 남아 재실행/디버깅 가능
+- **파일 우선 저장** — 모든 중간 산출물이 파일로 남아 재실행/디버깅 가능. PostgreSQL+ChromaDB 선택적 저장 레이어로 구조화 조회 및 시맨틱 검색 지원 (실패 시 graceful degradation)
 - **수치는 스크립트, 서술은 LLM** — PR 수, line count 등은 코드가 계산하고 LLM은 서술만 담당
 - **계층적 요약** — daily → weekly → monthly → yearly로 하위 요약을 input으로 사용하여 토큰 관리
 - **멱등 파이프라인** — 동일 날짜 재실행 시 파일을 덮어씀
@@ -261,6 +261,8 @@ data/
 └── state/
     ├── checkpoints.json                    # 3개 서비스 마지막 성공 날짜 (fetch/normalize/summarize)
     ├── daily_state.json                    # 날짜별 fetch/normalize/summarize 타임스탬프
+    ├── failed_dates.json                   # 실패 날짜 자동 재시도 추적
+    ├── batch_jobs.json                     # Batch API job 상태 (crash recovery)
     ├── fetch_progress/                     # fetch_range 재개용 chunk 캐시
     └── jobs/{job_id}.json                  # Async job 상태
 ```
@@ -333,7 +335,7 @@ work-recap/
 ├── pricing.toml                # LLM 가격표 (USD/1M tokens, 코드 변경 없이 업데이트)
 ├── designs/                    # 모듈별 상세 설계 문서
 ├── tests/
-│   ├── unit/                   # 914개 단위 테스트 (36개 파일)
+│   ├── unit/                   # 1011개 단위 테스트 (42개 파일)
 │   └── integration/            # 통합 테스트 (실제 API 호출, -m integration)
 ├── pyproject.toml
 └── .env.example
@@ -342,7 +344,7 @@ work-recap/
 ## 테스트
 
 ```bash
-# 전체 단위 테스트 (914개)
+# 전체 단위 테스트 (1011개)
 pytest
 
 # 통합 테스트 (실제 GHES + LLM API 호출, .env 필요)
