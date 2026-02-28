@@ -3,12 +3,14 @@
 import { pipelineComponent } from "./pipeline.js";
 import { summariesComponent } from "./summaries.js";
 import { askComponent } from "./ask.js";
+import { schedulerComponent } from "./scheduler.js";
 
 // Register Alpine components before Alpine auto-starts
 document.addEventListener("alpine:init", () => {
   Alpine.data("pipeline", pipelineComponent);
   Alpine.data("summaries", summariesComponent);
   Alpine.data("ask", askComponent);
+  Alpine.data("scheduler", schedulerComponent);
 
   // Global app store for tab + dark mode
   Alpine.store("app", {
