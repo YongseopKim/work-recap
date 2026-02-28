@@ -35,12 +35,22 @@ async def lifespan(app: FastAPI):
         from workrecap.scheduler.config import ScheduleConfig
         from workrecap.scheduler.core import SchedulerService
         from workrecap.scheduler.history import SchedulerHistory
-        from workrecap.scheduler.notifier import LogNotifier
+        from workrecap.scheduler.notifier import CompositeNotifier, LogNotifier, TelegramNotifier
 
         config = get_config()
         schedule_config = ScheduleConfig.from_toml(config.schedule_config_path)
         history = SchedulerHistory(config.state_dir / "scheduler_history.json")
-        notifier = LogNotifier()
+
+        notifiers: list = [LogNotifier()]
+        if schedule_config.telegram.enabled:
+            if config.telegram_bot_token:
+                notifiers.append(
+                    TelegramNotifier(config.telegram_bot_token, config.telegram_chat_id, config)
+                )
+            else:
+                logger.warning("Telegram enabled but TELEGRAM_BOT_TOKEN is empty — skipping")
+        notifier = CompositeNotifier(notifiers) if len(notifiers) > 1 else notifiers[0]
+
         scheduler = SchedulerService(schedule_config, history, notifier)
         scheduler.start()
         app.state.scheduler = scheduler

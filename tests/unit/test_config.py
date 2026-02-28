@@ -83,3 +83,9 @@ class TestAppConfig:
         assert config.chroma_collection == "work_recap_summaries"
         assert config.tei_url == "http://192.168.0.2:8090"
         assert not hasattr(config, "embedding_model")
+
+
+class TestAppConfigTelegram:
+    def test_default_telegram_fields(self, test_config):
+        assert test_config.telegram_bot_token == ""
+        assert test_config.telegram_chat_id == ""

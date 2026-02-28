@@ -71,6 +71,11 @@ class NotificationConfig:
 
 
 @dataclass
+class TelegramConfig:
+    enabled: bool = False
+
+
+@dataclass
 class ScheduleConfig:
     enabled: bool = False
     timezone: str = "Asia/Seoul"
@@ -79,6 +84,7 @@ class ScheduleConfig:
     monthly: MonthlySchedule = field(default_factory=MonthlySchedule)
     yearly: YearlySchedule = field(default_factory=YearlySchedule)
     notification: NotificationConfig = field(default_factory=NotificationConfig)
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
 
     @classmethod
     def from_toml(cls, path: Path) -> "ScheduleConfig":
@@ -95,4 +101,5 @@ class ScheduleConfig:
             monthly=MonthlySchedule(**sched.get("monthly", {})),
             yearly=YearlySchedule(**sched.get("yearly", {})),
             notification=NotificationConfig(**sched.get("notification", {})),
+            telegram=TelegramConfig(**sched.get("telegram", {})),
         )
