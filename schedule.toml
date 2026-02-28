@@ -1,0 +1,26 @@
+[scheduler]
+enabled = true
+timezone = "Asia/Seoul"
+
+[scheduler.daily]
+time = "02:00"
+enrich = true
+batch = false
+workers = 5
+
+[scheduler.weekly]
+day = "mon"
+time = "03:00"
+
+[scheduler.monthly]
+day = 1
+time = "04:00"
+
+[scheduler.yearly]
+month = 1
+day = 1
+time = "05:00"
+
+[scheduler.notification]
+on_failure = true
+on_success = false
