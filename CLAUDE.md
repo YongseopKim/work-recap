@@ -98,7 +98,7 @@ Providers (OpenAI, Anthropic, Gemini, Custom/OpenAI-compatible)
 - `src/workrecap/services/orchestrator.py` — Chains Fetch→Normalize→Summarize. Constructor accepts single fetcher/normalizer (backward compat → wrapped as `{"github": ...}`) or `dict[str, DataSourceFetcher/Normalizer]` for multi-source. Optional `storage: StorageService` kwarg for DB+Vector integration. `run_daily(date, types=None)` for single date — when storage is provided, saves activities/stats/summary to DB after each pipeline step via `_safe_storage_call` (graceful degradation). `run_range(since, until, force=False, types=None, max_workers=1, batch=False)` uses bulk `fetch_range`→`normalize_range`→`daily_range` for significantly fewer API calls. Passes `force`, `types`, `max_workers`, and `batch` through to services. Accepts optional `config` kwarg for path derivation.
 - `src/workrecap/services/date_utils.py` — `date_range`, `weekly_range`, `monthly_range`, `yearly_range`, `catchup_range`, `monthly_chunks`.
 - `src/workrecap/cli/main.py` — Typer app. Subcommands: `fetch`, `normalize`, `summarize`, `run`, `ask`, `models`, `storage` (`init-db`, `sync`, `search`). `run` command creates optional `StorageService` via `_get_storage_service()` and passes it to orchestrator (graceful degradation on init failure). `storage init-db` initializes PostgreSQL tables. `storage sync` backfills existing file data to DB+Vector with `--since`/`--until` filters. `storage search` performs semantic search via ChromaDB. All user-facing output uses `_echo()` wrapper (calls `typer.echo` + logs to `workrecap.cli.output` file-only logger, avoiding stderr duplication). All four commands support checkpoint catch-up and `--weekly/--monthly/--yearly` options. All four commands support `--force/-f`. `summarize weekly/monthly/yearly` also support `--force/-f` (skip-if-exists). `fetch` and `run` support `--type/-t` for type filtering and `--source/-s` for source selection (default: all enabled). `SOURCE_TYPES` maps source → valid types. `fetch` and `run` support `--workers/-w` for parallel fetch (default: 1 for fetch, config.max_workers for run). `normalize`, `summarize daily`, `run` support `--workers/-w` for parallel LLM execution (default: `config.max_workers=5`). `normalize`, `summarize daily`, `run` support `--batch/--no-batch` (default: `False`) for batch API LLM calls. `normalize` and `run` support `--enrich/--no-enrich` (default: `True`). All inject `DailyStateStore` + `FetchProgressStore` into services. `run --weekly/--monthly/--yearly` triggers hierarchical summarization after the daily pipeline: `--weekly` generates weekly summary, `--monthly` cascades weekly→monthly, `--yearly` cascades weekly→monthly→yearly. Skipped when daily pipeline has failures. `SummarizeError` from intermediate steps is handled gracefully.
-- `src/workrecap/api/app.py` — FastAPI app. Routes in `api/routes/`. `StaticFiles` mount for `frontend/`. Registers routers: pipeline, fetch, normalize, summarize_pipeline, summary, query. CORS middleware.
+- `src/workrecap/api/app.py` — FastAPI app. Routes in `api/routes/`. `StaticFiles` mount for `frontend/`. Registers routers: pipeline, fetch, normalize, summarize_pipeline, summary, summaries_available, query. CORS middleware.
 - `src/workrecap/api/deps.py` — FastAPI dependency injection: `get_config()` (lru_cache), `get_job_store()`, `get_llm_router(config)` (creates `ProviderConfig` + `UsageTracker` + `LLMRouter`).
 - `src/workrecap/api/job_store.py` — `JobStore`: async job CRUD via `data/state/jobs/{job_id}.json`. `create()`, `get(job_id)`, `update(job_id, status, result, error)`.
 - `src/workrecap/api/routes/pipeline.py` — Full pipeline endpoints. `POST /api/pipeline/run/{date}` (optional body: force, types, enrich), `POST /api/pipeline/run/range` (body: since, until, force, types, max_workers, enrich, batch, summarize_weekly/monthly/yearly). `GET /api/pipeline/jobs/{id}`. All async via BackgroundTasks (202 + job_id). Hierarchical summarization via `_run_hierarchical` helper when `summarize_weekly/monthly/yearly` set. Injects `FetchProgressStore`, `DailyStateStore`, `GHESClientPool` (when workers>1). `ghes.close()` and `pool.close()` in finally.
@@ -106,7 +106,26 @@ Providers (OpenAI, Anthropic, Gemini, Custom/OpenAI-compatible)
 - `src/workrecap/api/routes/normalize.py` — Individual normalize endpoints. `POST /api/pipeline/normalize/{date}` (optional body: enrich, force), `POST /api/pipeline/normalize/range` (body: since, until, force, enrich, max_workers, batch). `enrich=False` skips LLM creation.
 - `src/workrecap/api/routes/summarize_pipeline.py` — Summarize trigger endpoints. `POST /api/pipeline/summarize/daily/{date}`, `POST /api/pipeline/summarize/daily/range` (body: since, until, force, max_workers, batch), `POST /api/pipeline/summarize/weekly` (body: year, week, force), `POST /api/pipeline/summarize/monthly` (body: year, month, force), `POST /api/pipeline/summarize/yearly` (body: year, force).
 - `src/workrecap/api/routes/summary.py` — Read-only summary endpoints. `GET /api/summary/daily/{date}`, `GET /api/summary/weekly/{year}/{week}`, `GET /api/summary/monthly/{year}/{month}`, `GET /api/summary/yearly/{year}`.
+- `src/workrecap/api/routes/summaries_available.py` — Summary availability endpoint. `GET /api/summaries/available?year=&month=` returns `{daily: [dd,...], weekly: [ww,...], monthly: [mm,...], yearly: bool}` by scanning `data/summaries/` directory tree.
 - `src/workrecap/api/routes/query.py` — Free-form query endpoint. `POST /api/query` (body: question, months).
+
+### Frontend (Alpine.js)
+
+Web UI in `frontend/` served via FastAPI `StaticFiles`. Alpine.js + Pico CSS + marked.js, all CDN-loaded. No build tools.
+
+```
+frontend/
+├── index.html          ← Alpine.js + marked.js CDN, ES module entry
+├── style.css           ← Pico CSS extensions (calendar, chat, dark mode)
+└── js/
+    ├── app.js          ← Alpine init (alpine:init), component registration, dark mode store
+    ├── api.js          ← fetch helpers: api(), pollJob(maxErrors=30), escapeHtml(), copyToClipboard()
+    ├── pipeline.js     ← Pipeline tab: single/range run, options (force/batch/workers/enrich/hierarchical)
+    ├── summaries.js    ← Summaries tab: calendar view, hierarchy navigation (daily→weekly→monthly→yearly)
+    └── ask.js          ← Ask tab: chat history, quick questions, markdown rendering
+```
+
+**3 tabs:** Pipeline, Summaries (calendar view), Ask (chat history). Dark mode toggle via `data-theme` + `localStorage`.
 
 ### Data directory layout
 
