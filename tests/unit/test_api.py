@@ -670,6 +670,67 @@ class TestJobStatus:
         resp = client.get("/api/pipeline/jobs/nonexistent")
         assert resp.status_code == 404
 
+    def test_get_job_status_includes_progress(self, client, store):
+        """GET /api/pipeline/jobs/{id} includes progress field."""
+        job = store.create()
+        store.update(job.job_id, JobStatus.RUNNING)
+        store.update_progress(job.job_id, "5/10")
+        resp = client.get(f"/api/pipeline/jobs/{job.job_id}")
+        assert resp.status_code == 200
+        assert resp.json()["progress"] == "5/10"
+
+
+# ── TestRangeProgress ──
+
+
+class TestRangeProgress:
+    @patch("workrecap.api.routes.pipeline.OrchestratorService")
+    @patch("workrecap.api.routes.pipeline.SummarizerService")
+    @patch("workrecap.api.routes.pipeline.NormalizerService")
+    @patch("workrecap.api.routes.pipeline.FetcherService")
+    @patch("workrecap.api.routes.pipeline.FetchProgressStore")
+    @patch("workrecap.api.routes.pipeline.DailyStateStore")
+    @patch("workrecap.api.routes.pipeline.get_llm_router")
+    @patch("workrecap.api.routes.pipeline.GHESClient")
+    def test_range_task_updates_progress(
+        self,
+        mock_ghes,
+        mock_llm,
+        mock_ds,
+        mock_ps,
+        mock_fetch,
+        mock_norm,
+        mock_summ,
+        mock_orch,
+        store,
+    ):
+        """_run_range_task calls update_progress during execution."""
+        mock_orch.return_value.run_range.return_value = [
+            {"date": "2025-02-10", "status": "success"},
+            {"date": "2025-02-11", "status": "success"},
+        ]
+        from workrecap.api.routes.pipeline import _run_range_task
+        from workrecap.config import AppConfig
+
+        config = AppConfig(
+            ghes_url="https://gh.example.com",
+            ghes_token="tok",
+            username="u",
+            data_dir=store._jobs_dir.parent.parent,
+            prompts_dir=store._jobs_dir.parent.parent / "prompts",
+        )
+        job = store.create()
+        _run_range_task(
+            job.job_id,
+            "2025-02-10",
+            "2025-02-11",
+            config,
+            store,
+        )
+        final = store.get(job.job_id)
+        assert final.status == JobStatus.COMPLETED
+        assert final.progress is not None
+
 
 # ── TestJobStream ──
 

@@ -199,6 +199,11 @@ def _run_range_task(
             batch=batch,
         )
 
+        # Report progress per date
+        total = len(results)
+        for i, r in enumerate(results, 1):
+            store.update_progress(job_id, f"{i}/{total}")
+
         succeeded = sum(1 for r in results if r["status"] == "success")
         failed = sum(1 for r in results if r["status"] == "failed")
         result_msg = f"{succeeded}/{len(results)} succeeded"
@@ -342,4 +347,5 @@ def get_job_status(
         "updated_at": job.updated_at,
         "result": job.result,
         "error": job.error,
+        "progress": job.progress,
     }
