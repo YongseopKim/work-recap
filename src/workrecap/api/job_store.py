@@ -39,6 +39,7 @@ class JobStore:
             updated_at=data["updated_at"],
             result=data.get("result"),
             error=data.get("error"),
+            progress=data.get("progress"),
         )
 
     def update(
@@ -56,5 +57,15 @@ class JobStore:
         job.updated_at = datetime.now(timezone.utc).isoformat()
         job.result = result
         job.error = error
+        save_json(job, self._job_path(job_id))
+        return job
+
+    def update_progress(self, job_id: str, progress: str) -> Job:
+        """Job progress만 업데이트 (status 유지)."""
+        job = self.get(job_id)
+        if job is None:
+            raise ValueError(f"Job not found: {job_id}")
+        job.progress = progress
+        job.updated_at = datetime.now(timezone.utc).isoformat()
         save_json(job, self._job_path(job_id))
         return job

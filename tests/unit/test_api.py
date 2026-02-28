@@ -88,6 +88,11 @@ class TestJobStore:
         assert job.result is None
         assert job.error is None
 
+    def test_create_job_has_progress(self, store):
+        """Job 생성 시 progress=None."""
+        job = store.create()
+        assert job.progress is None
+
     def test_get_job(self, store):
         """생성된 Job 조회."""
         created = store.create()
@@ -119,6 +124,20 @@ class TestJobStore:
         updated = store.get(job.job_id)
         assert updated.status == JobStatus.FAILED
         assert updated.error == "GHES timeout"
+
+    def test_update_progress(self, store):
+        """update_progress는 progress와 updated_at만 변경."""
+        job = store.create()
+        store.update(job.job_id, JobStatus.RUNNING)
+        store.update_progress(job.job_id, "3/15")
+        updated = store.get(job.job_id)
+        assert updated.progress == "3/15"
+        assert updated.status == JobStatus.RUNNING
+
+    def test_update_progress_nonexistent(self, store):
+        """없는 job_id → ValueError."""
+        with pytest.raises(ValueError):
+            store.update_progress("nonexistent", "1/5")
 
 
 # ── TestApp ──

@@ -217,6 +217,7 @@ class Job:
     updated_at: str  # ISO 8601
     result: str | None = None
     error: str | None = None
+    progress: str | None = None
 
 
 # ── LLM 토큰 사용량 ──
