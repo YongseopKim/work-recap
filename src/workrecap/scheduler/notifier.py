@@ -38,3 +38,22 @@ class LogNotifier(Notifier):
                 event.status,
                 event.target,
             )
+
+
+class CompositeNotifier(Notifier):
+    """여러 Notifier를 묶어 순차 실행. 개별 실패 무시."""
+
+    def __init__(self, notifiers: list[Notifier]) -> None:
+        self._notifiers = notifiers
+
+    async def notify(self, event: SchedulerEvent) -> None:
+        for n in self._notifiers:
+            try:
+                await n.notify(event)
+            except Exception:
+                logger.warning(
+                    "Notifier %s failed for job '%s'",
+                    type(n).__name__,
+                    event.job,
+                    exc_info=True,
+                )
