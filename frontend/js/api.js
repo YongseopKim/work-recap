@@ -50,6 +50,29 @@ export function pollJob(jobId, onUpdate, maxErrors = 30) {
 }
 
 /**
+ * Stream job status via SSE until terminal state.
+ * Same callback signature as pollJob for easy migration.
+ * @param {string} jobId
+ * @param {function} onUpdate - called with job object on each event
+ * @returns {EventSource} - caller can close if needed
+ */
+export function streamJob(jobId, onUpdate) {
+  const es = new EventSource(`/api/pipeline/jobs/${jobId}/stream`);
+  es.onmessage = (e) => {
+    const job = JSON.parse(e.data);
+    onUpdate(job);
+    if (job.status === "completed" || job.status === "failed" || job.error) {
+      es.close();
+    }
+  };
+  es.onerror = () => {
+    es.close();
+    onUpdate({ status: "failed", error: "Lost connection to server." });
+  };
+  return es;
+}
+
+/**
  * Escape HTML special characters.
  * @param {string} str
  * @returns {string}
@@ -107,7 +130,9 @@ export function renderJobStatus(job) {
   html += `<span class="status-${job.status}">`;
 
   if (job.status === "accepted" || job.status === "running") {
-    html += `Running... <small>(job: ${job.job_id})</small>`;
+    html += "Running...";
+    if (job.progress) html += ` <strong>${escapeHtml(job.progress)}</strong>`;
+    html += ` <small>(job: ${job.job_id})</small>`;
   } else if (job.status === "completed") {
     html += "Completed";
     if (job.result) html += ` &mdash; ${escapeHtml(job.result)}`;
@@ -126,4 +151,29 @@ export function renderJobStatus(job) {
  */
 export function todayStr() {
   return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Get ISO week number for a date string (YYYY-MM-DD).
+ * @param {string} dateStr
+ * @returns {number}
+ */
+export function getISOWeek(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  const yearStart = new Date(d.getFullYear(), 0, 4);
+  yearStart.setDate(yearStart.getDate() + 3 - ((yearStart.getDay() + 6) % 7));
+  return Math.round((d - yearStart) / 86400000 / 7) + 1;
+}
+
+/**
+ * Get ISO week-numbering year for a date string (YYYY-MM-DD).
+ * The ISO year may differ from calendar year near year boundaries.
+ * @param {string} dateStr
+ * @returns {number}
+ */
+export function getISOWeekYear(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  return d.getFullYear();
 }

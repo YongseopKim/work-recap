@@ -1,6 +1,6 @@
 // ask.js — Ask tab Alpine component with chat history
 
-import { api, pollJob, copyToClipboard, escapeHtml } from "./api.js";
+import { api, streamJob, copyToClipboard, escapeHtml } from "./api.js";
 
 const QUICK_QUESTIONS = [
   "What were my key achievements this week?",
@@ -44,7 +44,7 @@ export function askComponent() {
       api("POST", "/query", { question: text, months: this.months })
         .then((resp) => resp.json())
         .then(({ job_id }) => {
-          pollJob(job_id, (job) => {
+          streamJob(job_id, (job) => {
             if (job.status === "completed" && job.result) {
               this.messages[assistantIdx] = {
                 role: "assistant",

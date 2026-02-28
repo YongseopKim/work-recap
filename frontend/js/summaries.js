@@ -1,6 +1,6 @@
 // summaries.js — Summaries tab Alpine component with calendar view
 
-import { api, copyToClipboard } from "./api.js";
+import { api, copyToClipboard, getISOWeek } from "./api.js";
 
 /**
  * Build calendar grid weeks for a given year/month.
@@ -64,17 +64,6 @@ function buildCalendarDays(year, month) {
     weeks.push(cells.slice(i, i + 7));
   }
   return weeks;
-}
-
-/**
- * Get ISO week number for a date string (YYYY-MM-DD).
- */
-function getISOWeek(dateStr) {
-  const d = new Date(dateStr + "T00:00:00");
-  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
-  const yearStart = new Date(d.getFullYear(), 0, 4);
-  yearStart.setDate(yearStart.getDate() + 3 - ((yearStart.getDay() + 6) % 7));
-  return Math.round((d - yearStart) / 86400000 / 7) + 1;
 }
 
 const MONTH_NAMES = [

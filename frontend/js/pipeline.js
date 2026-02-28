@@ -1,6 +1,6 @@
 // pipeline.js — Pipeline tab Alpine component
 
-import { api, pollJob, escapeHtml, renderJobStatus, todayStr } from "./api.js";
+import { api, streamJob, escapeHtml, renderJobStatus, todayStr, getISOWeek, getISOWeekYear } from "./api.js";
 
 export function pipelineComponent() {
   return {
@@ -40,7 +40,7 @@ export function pipelineComponent() {
       })
         .then((resp) => resp.json())
         .then(({ job_id }) => {
-          pollJob(job_id, (job) => {
+          streamJob(job_id, (job) => {
             this.statusHtml = renderJobStatus(job);
             if (job.status === "completed") {
               this.completedDate = this.singleDate;
@@ -66,6 +66,11 @@ export function pipelineComponent() {
       this.completedDate = null;
       this.statusHtml = renderJobStatus({ status: "accepted", job_id: "..." });
 
+      // Derive hierarchical summarization values from until date
+      const untilDate = new Date(this.rangeTo + "T00:00:00");
+      const isoWeek = getISOWeek(this.rangeTo);
+      const isoWeekYear = getISOWeekYear(this.rangeTo);
+
       api("POST", "/pipeline/run/range", {
         since: this.rangeFrom,
         until: this.rangeTo,
@@ -73,13 +78,19 @@ export function pipelineComponent() {
         max_workers: this.workers,
         enrich: this.enrich,
         batch: this.batch,
-        summarize_weekly: this.weeklySum,
-        summarize_monthly: this.monthlySum,
-        summarize_yearly: this.yearlySum,
+        summarize_weekly: this.weeklySum
+          ? `${isoWeekYear}-${isoWeek}`
+          : null,
+        summarize_monthly: this.monthlySum
+          ? `${untilDate.getFullYear()}-${untilDate.getMonth() + 1}`
+          : null,
+        summarize_yearly: this.yearlySum
+          ? untilDate.getFullYear()
+          : null,
       })
         .then((resp) => resp.json())
         .then(({ job_id }) => {
-          pollJob(job_id, (job) => {
+          streamJob(job_id, (job) => {
             this.statusHtml = renderJobStatus(job);
             if (job.status === "completed" || job.status === "failed") {
               this.rangeBusy = false;
