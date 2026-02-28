@@ -24,3 +24,6 @@ time = "05:00"
 [scheduler.notification]
 on_failure = true
 on_success = false
+
+[scheduler.telegram]
+enabled = false
