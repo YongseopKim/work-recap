@@ -671,6 +671,60 @@ class TestJobStatus:
         assert resp.status_code == 404
 
 
+# ── TestJobStream ──
+
+
+class TestJobStream:
+    def test_stream_completed_job(self, client, store):
+        """SSE stream — completed job emits one event then closes."""
+        job = store.create()
+        store.update(job.job_id, JobStatus.COMPLETED, result="done")
+
+        with client.stream("GET", f"/api/pipeline/jobs/{job.job_id}/stream") as resp:
+            assert resp.status_code == 200
+            assert "text/event-stream" in resp.headers["content-type"]
+            lines = []
+            for line in resp.iter_lines():
+                lines.append(line)
+        data_lines = [ln for ln in lines if ln.startswith("data:")]
+        assert len(data_lines) >= 1
+        import json
+
+        event = json.loads(data_lines[0].removeprefix("data: "))
+        assert event["status"] == "completed"
+        assert event["result"] == "done"
+
+    def test_stream_not_found(self, client):
+        """SSE stream — nonexistent job emits error event."""
+        with client.stream("GET", "/api/pipeline/jobs/nonexistent/stream") as resp:
+            lines = []
+            for line in resp.iter_lines():
+                lines.append(line)
+        data_lines = [ln for ln in lines if ln.startswith("data:")]
+        assert len(data_lines) >= 1
+        import json
+
+        event = json.loads(data_lines[0].removeprefix("data: "))
+        assert "error" in event
+
+    def test_stream_includes_progress(self, client, store):
+        """SSE stream — progress field included when present."""
+        job = store.create()
+        store.update(job.job_id, JobStatus.RUNNING)
+        store.update_progress(job.job_id, "5/10")
+        store.update(job.job_id, JobStatus.COMPLETED, result="10/10 succeeded")
+
+        with client.stream("GET", f"/api/pipeline/jobs/{job.job_id}/stream") as resp:
+            lines = []
+            for line in resp.iter_lines():
+                lines.append(line)
+        data_lines = [ln for ln in lines if ln.startswith("data:")]
+        import json
+
+        last_event = json.loads(data_lines[-1].removeprefix("data: "))
+        assert last_event["status"] == "completed"
+
+
 # ── TestFetchEndpoints ──
 
 

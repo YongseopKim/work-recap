@@ -1,10 +1,13 @@
-"""Pipeline 엔드포인트 — run, run/range, job status."""
+"""Pipeline 엔드포인트 — run, run/range, job status, SSE stream."""
 
+import asyncio
 import calendar
+import json
 import logging
 from datetime import date
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from workrecap.api.deps import get_config, get_job_store
@@ -281,6 +284,46 @@ def run_pipeline(
         enrich=body.enrich,
     )
     return {"job_id": job.job_id, "status": job.status.value}
+
+
+@router.get("/jobs/{job_id}/stream")
+async def stream_job_status(
+    job_id: str,
+    store: JobStore = Depends(get_job_store),
+):
+    """SSE stream으로 job 상태를 실시간 전송."""
+
+    async def event_generator():
+        prev_updated = None
+        while True:
+            job = store.get(job_id)
+            if job is None:
+                yield f"data: {json.dumps({'error': 'Job not found'})}\n\n"
+                return
+
+            if job.updated_at != prev_updated:
+                prev_updated = job.updated_at
+                payload = {
+                    "job_id": job.job_id,
+                    "status": job.status.value,
+                    "created_at": job.created_at,
+                    "updated_at": job.updated_at,
+                    "result": job.result,
+                    "error": job.error,
+                    "progress": job.progress,
+                }
+                yield f"data: {json.dumps(payload)}\n\n"
+
+            if job.status in (JobStatus.COMPLETED, JobStatus.FAILED):
+                return
+
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/jobs/{job_id}")
