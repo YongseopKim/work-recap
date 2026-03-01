@@ -24,7 +24,7 @@ venv/
 ENV/
 
 # Project Specific
-data/
+data
 .env
 .provider/
 .log/
