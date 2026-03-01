@@ -47,12 +47,24 @@ async def lifespan(app: FastAPI):
                 notifiers.append(
                     TelegramNotifier(config.telegram_bot_token, config.telegram_chat_id, config)
                 )
+                logger.info("TelegramNotifier enabled (chat_id=%s)", config.telegram_chat_id)
             else:
                 logger.warning("Telegram enabled but TELEGRAM_BOT_TOKEN is empty — skipping")
+        else:
+            logger.info("TelegramNotifier disabled (scheduler.telegram.enabled=false)")
+
+        notifier_names = [type(n).__name__ for n in notifiers]
         notifier = CompositeNotifier(notifiers) if len(notifiers) > 1 else notifiers[0]
+        logger.info("Notifier initialized: %s", ", ".join(notifier_names))
 
         scheduler = SchedulerService(schedule_config, history, notifier)
         scheduler.start()
+        logger.info(
+            "Scheduler started (tz=%s, notification: on_success=%s, on_failure=%s)",
+            schedule_config.timezone,
+            schedule_config.notification.on_success,
+            schedule_config.notification.on_failure,
+        )
         app.state.scheduler = scheduler
         app.state.scheduler_history = history
     except Exception:
