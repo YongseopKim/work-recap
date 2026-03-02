@@ -108,6 +108,19 @@ class AppConfig(BaseSettings):
         """data/summaries/2025/yearly.md"""
         return self.summaries_dir / str(year) / "yearly.md"
 
+    def daily_telegram_path(self, date: str) -> Path:
+        y, m, d = date.split("-")
+        return self.summaries_dir / y / "daily" / f"{m}-{d}.telegram.txt"
+
+    def weekly_telegram_path(self, year: int, week: int) -> Path:
+        return self.summaries_dir / str(year) / "weekly" / f"W{week:02d}.telegram.txt"
+
+    def monthly_telegram_path(self, year: int, month: int) -> Path:
+        return self.summaries_dir / str(year) / "monthly" / f"{month:02d}.telegram.txt"
+
+    def yearly_telegram_path(self, year: int) -> Path:
+        return self.summaries_dir / str(year) / "yearly.telegram.txt"
+
     @property
     def provider_config_path(self) -> Path:
         return Path(".provider/config.toml")

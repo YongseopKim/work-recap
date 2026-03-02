@@ -1271,3 +1271,130 @@ class TestParallelDailyRange:
         results = summarizer.daily_range("2025-02-14", "2025-02-16", max_workers=3)
         result_dates = [r["date"] for r in results]
         assert result_dates == dates
+
+
+class TestTelegramSummary:
+    """SummarizerService.telegram_summary() 테스트."""
+
+    def test_generates_telegram_file_from_daily_md(self, test_config, mock_llm, prompts_dir):
+        md_path = test_config.daily_summary_path("2026-03-01")
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text("# Daily Summary: 2026-03-01\n\n## 개요\n내용")
+
+        mock_llm.chat.return_value = "📋 개요\n텔레그램용 요약"
+
+        summarizer = SummarizerService(test_config, mock_llm)
+        result = summarizer.telegram_summary("daily", "2026-03-01")
+
+        assert result == test_config.daily_telegram_path("2026-03-01")
+        assert result.exists()
+        assert result.read_text() == "📋 개요\n텔레그램용 요약"
+        mock_llm.chat.assert_called_once()
+        _, kwargs = mock_llm.chat.call_args
+        assert kwargs.get("task") == "telegram"
+
+    def test_generates_telegram_file_from_weekly_md(self, test_config, mock_llm, prompts_dir):
+        md_path = test_config.weekly_summary_path(2026, 9)
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text("# Weekly Summary: 2026-W09\n\ncontent")
+
+        mock_llm.chat.return_value = "📋 주간 개요\n주간 텔레그램 요약"
+
+        summarizer = SummarizerService(test_config, mock_llm)
+        result = summarizer.telegram_summary("weekly", "2026-W09")
+
+        assert result == test_config.weekly_telegram_path(2026, 9)
+        assert result.exists()
+
+    def test_generates_telegram_file_from_monthly_md(self, test_config, mock_llm, prompts_dir):
+        md_path = test_config.monthly_summary_path(2026, 2)
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text("# Monthly Summary\n\ncontent")
+
+        mock_llm.chat.return_value = "월간 텔레그램 요약"
+
+        summarizer = SummarizerService(test_config, mock_llm)
+        result = summarizer.telegram_summary("monthly", "2026-02")
+
+        assert result == test_config.monthly_telegram_path(2026, 2)
+        assert result.exists()
+
+    def test_generates_telegram_file_from_yearly_md(self, test_config, mock_llm, prompts_dir):
+        md_path = test_config.yearly_summary_path(2026)
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text("# Yearly Summary\n\ncontent")
+
+        mock_llm.chat.return_value = "연간 텔레그램 요약"
+
+        summarizer = SummarizerService(test_config, mock_llm)
+        result = summarizer.telegram_summary("yearly", "2026")
+
+        assert result == test_config.yearly_telegram_path(2026)
+        assert result.exists()
+
+    def test_raises_when_md_not_found(self, test_config, mock_llm, prompts_dir):
+        summarizer = SummarizerService(test_config, mock_llm)
+        with pytest.raises(SummarizeError, match="Summary file not found"):
+            summarizer.telegram_summary("daily", "2099-01-01")
+
+    def test_skips_when_not_stale(self, test_config, mock_llm, prompts_dir):
+        import os
+        import time
+
+        md_path = test_config.daily_summary_path("2026-03-01")
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text("# Daily\n\ncontent")
+
+        tg_path = test_config.daily_telegram_path("2026-03-01")
+        tg_path.write_text("기존 텔레그램 요약")
+
+        # .telegram.txt mtime을 .md보다 새롭게 설정
+        future = time.time() + 10
+        os.utime(tg_path, (future, future))
+
+        summarizer = SummarizerService(test_config, mock_llm)
+        result = summarizer.telegram_summary("daily", "2026-03-01")
+
+        assert result == tg_path
+        mock_llm.chat.assert_not_called()
+
+    def test_regenerates_when_stale(self, test_config, mock_llm, prompts_dir):
+        import os
+        import time
+
+        md_path = test_config.daily_summary_path("2026-03-01")
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text("# Daily\n\ncontent")
+
+        tg_path = test_config.daily_telegram_path("2026-03-01")
+        tg_path.write_text("old telegram")
+
+        # .md mtime을 .telegram.txt보다 새롭게 설정
+        future = time.time() + 10
+        os.utime(md_path, (future, future))
+
+        mock_llm.chat.return_value = "new telegram"
+
+        summarizer = SummarizerService(test_config, mock_llm)
+        result = summarizer.telegram_summary("daily", "2026-03-01")
+
+        mock_llm.chat.assert_called_once()
+        assert result.read_text() == "new telegram"
+
+    def test_hard_trims_over_4096(self, test_config, mock_llm, prompts_dir):
+        md_path = test_config.daily_summary_path("2026-03-01")
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text("# Daily\n\ncontent")
+
+        mock_llm.chat.return_value = "가" * 5000
+
+        summarizer = SummarizerService(test_config, mock_llm)
+        result = summarizer.telegram_summary("daily", "2026-03-01")
+
+        content = result.read_text()
+        assert len(content) <= 4096
+
+    def test_raises_for_invalid_level(self, test_config, mock_llm, prompts_dir):
+        summarizer = SummarizerService(test_config, mock_llm)
+        with pytest.raises(SummarizeError, match="Unknown summary level"):
+            summarizer.telegram_summary("invalid", "2026-03-01")

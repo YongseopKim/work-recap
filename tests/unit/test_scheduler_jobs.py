@@ -37,6 +37,7 @@ class TestRunDailyJob:
         with (
             patch(_PATCH_CONFIG, return_value=MagicMock()),
             patch("workrecap.scheduler.jobs._build_orchestrator", return_value=mock_orch),
+            patch("workrecap.scheduler.jobs._build_summarizer", return_value=MagicMock()),
         ):
             asyncio.run(run_daily_job(schedule_config, history, notifier))
 
@@ -61,6 +62,39 @@ class TestRunDailyJob:
         assert entries[0]["status"] == "failed"
         assert "boom" in entries[0]["error"]
 
+    def test_calls_telegram_summary_on_success(self, tmp_path, history, notifier, schedule_config):
+        mock_orch = MagicMock()
+        mock_orch.run_daily.return_value = tmp_path / "summary.md"
+        mock_summarizer = MagicMock()
+
+        with (
+            patch(_PATCH_CONFIG, return_value=MagicMock()),
+            patch("workrecap.scheduler.jobs._build_orchestrator", return_value=mock_orch),
+            patch("workrecap.scheduler.jobs._build_summarizer", return_value=mock_summarizer),
+        ):
+            asyncio.run(run_daily_job(schedule_config, history, notifier))
+
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        mock_summarizer.telegram_summary.assert_called_once_with("daily", yesterday)
+
+    def test_telegram_summary_failure_does_not_break_job(
+        self, tmp_path, history, notifier, schedule_config
+    ):
+        mock_orch = MagicMock()
+        mock_orch.run_daily.return_value = tmp_path / "summary.md"
+        mock_summarizer = MagicMock()
+        mock_summarizer.telegram_summary.side_effect = Exception("LLM down")
+
+        with (
+            patch(_PATCH_CONFIG, return_value=MagicMock()),
+            patch("workrecap.scheduler.jobs._build_orchestrator", return_value=mock_orch),
+            patch("workrecap.scheduler.jobs._build_summarizer", return_value=mock_summarizer),
+        ):
+            asyncio.run(run_daily_job(schedule_config, history, notifier))
+
+        entries = history.list()
+        assert entries[0]["status"] == "success"
+
 
 class TestRunWeeklyJob:
     def test_runs_last_week_summary(self, tmp_path, history, notifier, schedule_config):
@@ -77,6 +111,21 @@ class TestRunWeeklyJob:
         entries = history.list()
         assert entries[0]["status"] == "success"
         assert entries[0]["job"] == "weekly"
+
+    def test_calls_telegram_summary_on_success(self, tmp_path, history, notifier, schedule_config):
+        mock_summarizer = MagicMock()
+        mock_summarizer.weekly.return_value = tmp_path / "W08.md"
+
+        with (
+            patch(_PATCH_CONFIG, return_value=MagicMock()),
+            patch("workrecap.scheduler.jobs._build_summarizer", return_value=mock_summarizer),
+        ):
+            asyncio.run(run_weekly_job(schedule_config, history, notifier))
+
+        last_week = date.today() - timedelta(weeks=1)
+        iso_year, iso_week, _ = last_week.isocalendar()
+        target = f"{iso_year}-W{iso_week:02d}"
+        mock_summarizer.telegram_summary.assert_called_once_with("weekly", target)
 
 
 class TestRunMonthlyJob:
@@ -96,6 +145,21 @@ class TestRunMonthlyJob:
         assert entries[0]["status"] == "success"
         assert entries[0]["job"] == "monthly"
 
+    def test_calls_telegram_summary_on_success(self, tmp_path, history, notifier, schedule_config):
+        mock_summarizer = MagicMock()
+        mock_summarizer.monthly.return_value = tmp_path / "02.md"
+        mock_summarizer.weekly.return_value = tmp_path / "W.md"
+
+        with (
+            patch(_PATCH_CONFIG, return_value=MagicMock()),
+            patch("workrecap.scheduler.jobs._build_summarizer", return_value=mock_summarizer),
+        ):
+            asyncio.run(run_monthly_job(schedule_config, history, notifier))
+
+        mock_summarizer.telegram_summary.assert_called_once()
+        call_args = mock_summarizer.telegram_summary.call_args[0]
+        assert call_args[0] == "monthly"
+
 
 class TestRunYearlyJob:
     def test_runs_last_year_summary(self, tmp_path, history, notifier, schedule_config):
@@ -114,3 +178,19 @@ class TestRunYearlyJob:
         entries = history.list()
         assert entries[0]["status"] == "success"
         assert entries[0]["job"] == "yearly"
+
+    def test_calls_telegram_summary_on_success(self, tmp_path, history, notifier, schedule_config):
+        mock_summarizer = MagicMock()
+        mock_summarizer.yearly.return_value = tmp_path / "yearly.md"
+        mock_summarizer.weekly.return_value = tmp_path / "W.md"
+        mock_summarizer.monthly.return_value = tmp_path / "M.md"
+
+        with (
+            patch(_PATCH_CONFIG, return_value=MagicMock()),
+            patch("workrecap.scheduler.jobs._build_summarizer", return_value=mock_summarizer),
+        ):
+            asyncio.run(run_yearly_job(schedule_config, history, notifier))
+
+        mock_summarizer.telegram_summary.assert_called_once()
+        call_args = mock_summarizer.telegram_summary.call_args[0]
+        assert call_args[0] == "yearly"

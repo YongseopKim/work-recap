@@ -46,6 +46,18 @@ class TestAppConfig:
             "/tmp/data/summaries/2025/monthly/02.md"
         )
         assert config.yearly_summary_path(2025) == Path("/tmp/data/summaries/2025/yearly.md")
+        assert config.daily_telegram_path("2025-02-16") == Path(
+            "/tmp/data/summaries/2025/daily/02-16.telegram.txt"
+        )
+        assert config.weekly_telegram_path(2025, 7) == Path(
+            "/tmp/data/summaries/2025/weekly/W07.telegram.txt"
+        )
+        assert config.monthly_telegram_path(2025, 2) == Path(
+            "/tmp/data/summaries/2025/monthly/02.telegram.txt"
+        )
+        assert config.yearly_telegram_path(2025) == Path(
+            "/tmp/data/summaries/2025/yearly.telegram.txt"
+        )
 
     def test_required_fields_missing(self):
         """필수 필드 누락 시 ValidationError."""

@@ -23,6 +23,8 @@ from workrecap.services.date_utils import date_range
 
 logger = logging.getLogger(__name__)
 
+TELEGRAM_MAX_LENGTH = 4096
+
 
 class SummarizerService:
     def __init__(
@@ -355,6 +357,67 @@ class SummarizerService:
         user_content = f"## Context\n\n{context}\n\n## 질문\n\n{question}"
 
         return self._llm.chat(system_prompt, user_content, task="query", cache_system_prompt=True)
+
+    def telegram_summary(self, level: str, target: str) -> Path:
+        """기존 .md summary를 LLM으로 텔레그램용 .telegram.txt로 변환."""
+        md_path = self._resolve_md_path(level, target)
+        if not md_path.exists():
+            raise SummarizeError(f"Summary file not found: {md_path}")
+
+        tg_path = self._resolve_telegram_path(level, target)
+
+        # Staleness 체크: .telegram.txt가 .md보다 새로우면 스킵
+        if tg_path.exists() and tg_path.stat().st_mtime > md_path.stat().st_mtime:
+            logger.info("Telegram summary up-to-date, skipping: %s", tg_path)
+            return tg_path
+
+        md_content = md_path.read_text(encoding="utf-8")
+
+        system_prompt, dynamic = self._render_split_prompt(
+            "telegram.md", level=level, target=target
+        )
+        user_content = dynamic + "\n\n" + md_content
+
+        response = self._llm.chat(
+            system_prompt, user_content, task="telegram", cache_system_prompt=True
+        )
+
+        # 4096자 hard trim 안전장치
+        if len(response) > TELEGRAM_MAX_LENGTH:
+            response = response[: TELEGRAM_MAX_LENGTH - 10] + "\n...계속"
+
+        tg_path.parent.mkdir(parents=True, exist_ok=True)
+        tg_path.write_text(response, encoding="utf-8")
+        logger.info("Generated telegram summary: %s", tg_path)
+        return tg_path
+
+    def _resolve_md_path(self, level: str, target: str) -> Path:
+        """level + target → .md 파일 경로."""
+        if level == "daily":
+            return self._config.daily_summary_path(target)
+        elif level == "weekly":
+            parts = target.split("-W")
+            return self._config.weekly_summary_path(int(parts[0]), int(parts[1]))
+        elif level == "monthly":
+            parts = target.split("-")
+            return self._config.monthly_summary_path(int(parts[0]), int(parts[1]))
+        elif level == "yearly":
+            return self._config.yearly_summary_path(int(target))
+        raise SummarizeError(f"Unknown summary level: {level}")
+
+    def _resolve_telegram_path(self, level: str, target: str) -> Path:
+        """level + target → .telegram.txt 파일 경로."""
+        if level == "daily":
+            return self._config.daily_telegram_path(target)
+        elif level == "weekly":
+            parts = target.split("-W")
+            return self._config.weekly_telegram_path(int(parts[0]), int(parts[1]))
+        elif level == "monthly":
+            parts = target.split("-")
+            return self._config.monthly_telegram_path(int(parts[0]), int(parts[1]))
+        elif level == "yearly":
+            return self._config.yearly_telegram_path(int(target))
+        raise SummarizeError(f"Unknown summary level: {level}")
 
     # ── Staleness 체크 ──
 

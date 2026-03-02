@@ -91,6 +91,11 @@ async def run_daily_job(
         config = AppConfig()
         orch = _build_orchestrator(config, schedule_config)
         orch.run_daily(yesterday, types=None)
+        try:
+            summarizer = _build_summarizer(config)
+            summarizer.telegram_summary("daily", yesterday)
+        except Exception:
+            logger.warning("Telegram summary generation failed for %s", yesterday, exc_info=True)
         event = SchedulerEvent(
             job="daily",
             status="success",
@@ -126,6 +131,10 @@ async def run_weekly_job(
         config = AppConfig()
         summarizer = _build_summarizer(config)
         summarizer.weekly(iso_year, iso_week, force=False)
+        try:
+            summarizer.telegram_summary("weekly", target)
+        except Exception:
+            logger.warning("Telegram summary generation failed for %s", target, exc_info=True)
         event = SchedulerEvent(
             job="weekly",
             status="success",
@@ -169,6 +178,10 @@ async def run_monthly_job(
             except SummarizeError:
                 pass
         summarizer.monthly(last_year, last_month, force=False)
+        try:
+            summarizer.telegram_summary("monthly", target)
+        except Exception:
+            logger.warning("Telegram summary generation failed for %s", target, exc_info=True)
         event = SchedulerEvent(
             job="monthly",
             status="success",
@@ -213,6 +226,10 @@ async def run_yearly_job(
             except SummarizeError:
                 pass
         summarizer.yearly(last_year, force=False)
+        try:
+            summarizer.telegram_summary("yearly", target)
+        except Exception:
+            logger.warning("Telegram summary generation failed for %s", target, exc_info=True)
         event = SchedulerEvent(
             job="yearly",
             status="success",
