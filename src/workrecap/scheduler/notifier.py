@@ -131,6 +131,7 @@ class TelegramNotifier(Notifier):
         - ``##``/``###``/``####`` 마커 제거, 알려진 헤딩에 이모지 추가
         - ``---`` 수평선 제거
         - ``- [link](url): desc **type**`` → ``type: desc``
+        - ``- **[link](url)** (type): desc`` → ``type: desc``
         - 나머지 ``**bold**``, ``[text](url)`` 등 마크다운 문법 정리
         """
         lines: list[str] = []
@@ -153,7 +154,15 @@ class TelegramNotifier(Notifier):
                 lines.append(f"{emoji} {heading_text}" if emoji else heading_text)
                 continue
 
-            # 리스트: - [text](url): description **type**
+            # 리스트: - **[text](url)** (type): description (새 포맷)
+            im_new = re.match(
+                r"^-\s+\*\*\[.*?\]\(.*?\)\*\*\s*\(([\w/]+)\):\s*(.*)", line
+            )
+            if im_new:
+                lines.append(f"{im_new.group(1)}: {im_new.group(2)}")
+                continue
+
+            # 리스트: - [text](url): description **type** (기존 포맷)
             im = re.match(r"^-\s+\[.*?\]\(.*?\):\s*(.*?)\s*\*\*([\w/]+)\*\*\s*$", line)
             if im:
                 lines.append(f"{im.group(2)}: {im.group(1)}")

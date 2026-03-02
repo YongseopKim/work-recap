@@ -155,6 +155,16 @@ class TestFormatForTelegram:
         result = TelegramNotifier._format_for_telegram(md)
         assert result == "chore/setup: macOS 환경 설정 일괄 저장."
 
+    def test_transforms_new_format_bold_link_with_type(self):
+        from workrecap.scheduler.notifier import TelegramNotifier
+
+        md = (
+            "- **[First commit](https://github.com/user/repo/commit/abc)** "
+            "(feat/chore): macOS 환경 설정 일괄 저장."
+        )
+        result = TelegramNotifier._format_for_telegram(md)
+        assert result == "feat/chore: macOS 환경 설정 일괄 저장."
+
     def test_transforms_list_item_without_type_tag(self):
         from workrecap.scheduler.notifier import TelegramNotifier
 
