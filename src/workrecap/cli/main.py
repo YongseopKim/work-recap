@@ -551,6 +551,58 @@ def summarize_yearly(
         _handle_error(e)
 
 
+@summarize_app.command("telegram")
+def summarize_telegram(
+    level: str = typer.Argument(help="Summary level: daily, weekly, monthly, yearly"),
+    target: str = typer.Argument(
+        help="Target: YYYY-MM-DD (daily), YYYY-WNN (weekly), YYYY-MM (monthly), YYYY (yearly)"
+    ),
+    send: bool = typer.Option(False, "--send", "-s", help="Send via Telegram after generation"),
+) -> None:
+    """Generate .telegram.txt from existing .md summary, optionally send via Telegram."""
+    logger.info("Command: summarize telegram level=%s target=%s send=%s", level, target, send)
+    config = _get_config()
+
+    if level not in ("daily", "weekly", "monthly", "yearly"):
+        _echo(f"Invalid level: {level}. Must be daily, weekly, monthly, or yearly.")
+        raise typer.Exit(1)
+
+    try:
+        llm = _get_llm_router(config)
+        service = SummarizerService(config, llm)
+        path = service.telegram_summary(level, target)
+        _echo(f"Telegram summary → {path}")
+        _print_usage_report(llm)
+
+        if send:
+            import asyncio
+
+            from workrecap.scheduler.notifier import SchedulerEvent, TelegramNotifier
+
+            if not config.telegram_bot_token or not config.telegram_chat_id:
+                _echo("Telegram not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing).")
+                raise typer.Exit(1)
+
+            notifier = TelegramNotifier(config.telegram_bot_token, config.telegram_chat_id, config)
+            job_map = {
+                "daily": "daily",
+                "weekly": "weekly",
+                "monthly": "monthly",
+                "yearly": "yearly",
+            }
+            event = SchedulerEvent(
+                job=job_map[level],
+                status="success",
+                triggered_at="manual",
+                target=target,
+                completed_at="manual",
+            )
+            asyncio.run(notifier.notify(event))
+            _echo("Sent to Telegram!")
+    except WorkRecapError as e:
+        _handle_error(e)
+
+
 # ── 파이프라인 ──
 
 
