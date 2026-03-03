@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from workrecap.config import AppConfig
 from workrecap.exceptions import SummarizeError
-from workrecap.scheduler.config import ScheduleConfig
+from workrecap.scheduler.config import NotificationConfig, ScheduleConfig
 from workrecap.scheduler.history import SchedulerHistory
 from workrecap.scheduler.notifier import Notifier, SchedulerEvent
 
@@ -65,6 +65,15 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _should_notify(notification: NotificationConfig, status: str) -> bool:
+    """on_success/on_failure 설정에 따라 알림 전송 여부 결정."""
+    if status == "success":
+        return notification.on_success
+    if status == "failed":
+        return notification.on_failure
+    return True
+
+
 def _weeks_in_month(year: int, month: int) -> list[tuple[int, int]]:
     """Return all ISO (year, week) tuples that overlap with the given month."""
     seen: set[tuple[int, int]] = set()
@@ -114,7 +123,8 @@ async def run_daily_job(
             error=str(e),
         )
     history.record(event)
-    await notifier.notify(event)
+    if _should_notify(schedule_config.notification, event.status):
+        await notifier.notify(event)
 
 
 async def run_weekly_job(
@@ -153,7 +163,8 @@ async def run_weekly_job(
             error=str(e),
         )
     history.record(event)
-    await notifier.notify(event)
+    if _should_notify(schedule_config.notification, event.status):
+        await notifier.notify(event)
 
 
 async def run_monthly_job(
@@ -200,7 +211,8 @@ async def run_monthly_job(
             error=str(e),
         )
     history.record(event)
-    await notifier.notify(event)
+    if _should_notify(schedule_config.notification, event.status):
+        await notifier.notify(event)
 
 
 async def run_yearly_job(
@@ -248,4 +260,5 @@ async def run_yearly_job(
             error=str(e),
         )
     history.record(event)
-    await notifier.notify(event)
+    if _should_notify(schedule_config.notification, event.status):
+        await notifier.notify(event)

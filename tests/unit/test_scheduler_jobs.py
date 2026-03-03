@@ -2,11 +2,11 @@
 
 import asyncio
 from datetime import date, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from workrecap.scheduler.config import ScheduleConfig
+from workrecap.scheduler.config import NotificationConfig, ScheduleConfig
 from workrecap.scheduler.history import SchedulerHistory
 from workrecap.scheduler.jobs import run_daily_job, run_monthly_job, run_weekly_job, run_yearly_job
 from workrecap.scheduler.notifier import LogNotifier
@@ -194,3 +194,113 @@ class TestRunYearlyJob:
         mock_summarizer.telegram_summary.assert_called_once()
         call_args = mock_summarizer.telegram_summary.call_args[0]
         assert call_args[0] == "yearly"
+
+
+class TestNotificationFiltering:
+    """on_success / on_failure 설정에 따른 알림 필터링 테스트."""
+
+    def test_skips_notification_on_success_when_on_success_false(self, tmp_path, history):
+        """on_success=False이면 성공 시 notifier.notify를 호출하지 않는다."""
+        config = ScheduleConfig(
+            enabled=True,
+            notification=NotificationConfig(on_success=False, on_failure=True),
+        )
+        mock_notifier = AsyncMock()
+        mock_orch = MagicMock()
+        mock_orch.run_daily.return_value = tmp_path / "summary.md"
+
+        with (
+            patch(_PATCH_CONFIG, return_value=MagicMock()),
+            patch("workrecap.scheduler.jobs._build_orchestrator", return_value=mock_orch),
+            patch("workrecap.scheduler.jobs._build_summarizer", return_value=MagicMock()),
+        ):
+            asyncio.run(run_daily_job(config, history, mock_notifier))
+
+        mock_notifier.notify.assert_not_called()
+        # history는 항상 기록
+        entries = history.list()
+        assert len(entries) == 1
+        assert entries[0]["status"] == "success"
+
+    def test_sends_notification_on_success_when_on_success_true(self, tmp_path, history):
+        """on_success=True이면 성공 시 notifier.notify를 호출한다."""
+        config = ScheduleConfig(
+            enabled=True,
+            notification=NotificationConfig(on_success=True, on_failure=True),
+        )
+        mock_notifier = AsyncMock()
+        mock_orch = MagicMock()
+        mock_orch.run_daily.return_value = tmp_path / "summary.md"
+
+        with (
+            patch(_PATCH_CONFIG, return_value=MagicMock()),
+            patch("workrecap.scheduler.jobs._build_orchestrator", return_value=mock_orch),
+            patch("workrecap.scheduler.jobs._build_summarizer", return_value=MagicMock()),
+        ):
+            asyncio.run(run_daily_job(config, history, mock_notifier))
+
+        mock_notifier.notify.assert_called_once()
+        event = mock_notifier.notify.call_args[0][0]
+        assert event.status == "success"
+
+    def test_skips_notification_on_failure_when_on_failure_false(self, history):
+        """on_failure=False이면 실패 시 notifier.notify를 호출하지 않는다."""
+        config = ScheduleConfig(
+            enabled=True,
+            notification=NotificationConfig(on_success=True, on_failure=False),
+        )
+        mock_notifier = AsyncMock()
+        mock_orch = MagicMock()
+        mock_orch.run_daily.side_effect = Exception("API error")
+
+        with (
+            patch(_PATCH_CONFIG, return_value=MagicMock()),
+            patch("workrecap.scheduler.jobs._build_orchestrator", return_value=mock_orch),
+        ):
+            asyncio.run(run_daily_job(config, history, mock_notifier))
+
+        mock_notifier.notify.assert_not_called()
+        entries = history.list()
+        assert entries[0]["status"] == "failed"
+
+    def test_sends_notification_on_failure_when_on_failure_true(self, history):
+        """on_failure=True이면 실패 시 notifier.notify를 호출한다."""
+        config = ScheduleConfig(
+            enabled=True,
+            notification=NotificationConfig(on_success=False, on_failure=True),
+        )
+        mock_notifier = AsyncMock()
+        mock_orch = MagicMock()
+        mock_orch.run_daily.side_effect = Exception("API error")
+
+        with (
+            patch(_PATCH_CONFIG, return_value=MagicMock()),
+            patch("workrecap.scheduler.jobs._build_orchestrator", return_value=mock_orch),
+        ):
+            asyncio.run(run_daily_job(config, history, mock_notifier))
+
+        mock_notifier.notify.assert_called_once()
+        event = mock_notifier.notify.call_args[0][0]
+        assert event.status == "failed"
+
+    def test_filtering_applies_to_all_job_types(self, tmp_path, history):
+        """on_success=False가 weekly/monthly/yearly에도 동일하게 적용된다."""
+        config = ScheduleConfig(
+            enabled=True,
+            notification=NotificationConfig(on_success=False, on_failure=True),
+        )
+
+        for run_fn in [run_weekly_job, run_monthly_job, run_yearly_job]:
+            mock_notifier = AsyncMock()
+            mock_summarizer = MagicMock()
+
+            with (
+                patch(_PATCH_CONFIG, return_value=MagicMock()),
+                patch(
+                    "workrecap.scheduler.jobs._build_summarizer",
+                    return_value=mock_summarizer,
+                ),
+            ):
+                asyncio.run(run_fn(config, history, mock_notifier))
+
+            mock_notifier.notify.assert_not_called()
