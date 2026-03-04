@@ -31,9 +31,6 @@ class TestTOMLParsing:
             [providers.anthropic]
             api_key = "sk-ant"
 
-            [providers.gemini]
-            api_key = "AIza"
-
             [providers.custom]
             api_key = ""
             base_url = "http://localhost:11434/v1"

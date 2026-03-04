@@ -23,7 +23,7 @@ LLM 기반으로 일/주/월/년 단위 업무 요약을 자동 생성하는 개
 
 - Python 3.12+
 - GHES 인스턴스 + Personal Access Token
-- LLM API 키 (OpenAI, Anthropic, Gemini, 또는 OpenAI-compatible 서버)
+- LLM API 키 (OpenAI, Anthropic, 또는 OpenAI-compatible 서버)
 
 ## 설치
 
@@ -65,9 +65,6 @@ api_key = "sk-..."
 
 [providers.anthropic]
 api_key = "sk-ant-..."
-
-[providers.gemini]
-api_key = "AIza..."
 
 [providers.custom]
 api_key = ""
@@ -293,7 +290,6 @@ work-recap/
 │   │       ├── batch_mixin.py  # BatchCapable ABC + BatchRequest/Result/Status
 │   │       ├── openai_provider.py   # (+ BatchCapable)
 │   │       ├── anthropic_provider.py  # (+ BatchCapable, prompt caching)
-│   │       ├── gemini_provider.py   # (+ BatchCapable, cache metrics)
 │   │       └── custom_provider.py  # OpenAI-compatible (Ollama, vLLM 등)
 │   ├── services/
 │   │   ├── date_utils.py       # 날짜 범위 유틸리티 (weekly, monthly, yearly, catch-up)
@@ -384,7 +380,7 @@ coverage run -m pytest && coverage report
                                │
                   ┌────────────┼────────────┐
                   ▼            ▼            ▼
-             OpenAI      Anthropic     Gemini/Custom
+             OpenAI      Anthropic     Custom
 ```
 
 - **Interface Layer** (CLI, API)는 Service Layer에 의존
@@ -409,10 +405,10 @@ coverage run -m pytest && coverage report
 | D-8: Multi-provider routing | 태스크별(enrich/daily/weekly/monthly/yearly/query) 다른 provider+model 배정. `.provider/config.toml`이 단일 설정 소스 |
 | D-9: Adaptive escalation | 경량 모델이 자체 판단(confidence 0.0-1.0)으로 고급 모델에 에스컬레이션. JSON envelope 파싱 실패 시 원본 응답 사용 (graceful fallback) |
 | D-10: Auto-logging | `.log/YYYYMMDD_HHMMSS.log`에 DEBUG 레벨 자동 기록. LLM usage report 포함 |
-| D-11: Prompt caching | `cache_system_prompt=True` 기본값. Anthropic `cache_control: ephemeral` (5분 TTL, input 90% 할인). OpenAI/Gemini는 자동 캐싱으로 플래그 무시. `<!-- SPLIT -->` 마커로 정적 instructions(캐시) / 동적 data(비캐시) 분리 |
+| D-11: Prompt caching | `cache_system_prompt=True` 기본값. Anthropic `cache_control: ephemeral` (5분 TTL, input 90% 할인). OpenAI는 자동 캐싱으로 플래그 무시. `<!-- SPLIT -->` 마커로 정적 instructions(캐시) / 동적 data(비캐시) 분리 |
 | D-12: max_tokens per task | config.toml `max_tokens`로 태스크별 출력 제한 설정. output format에 바인딩 — escalation 시에도 동일 값 유지. 해상도: explicit kwarg > config.toml > None |
-| D-13: Batch API | `--batch` 옵션으로 50% 비용 절감 (기본 off). BatchCapable mixin으로 provider 수준 지원 (Anthropic/OpenAI/Gemini). base_model만 사용 (escalation 없음). crash recovery용 BatchStateStore |
-| D-14: Cache-aware pricing | `pricing.toml`에서 코드 변경 없이 가격 업데이트. provider별 cache discount factor 적용 (Anthropic 90% read / 25% write, OpenAI 50% read, Gemini 75% read) |
+| D-13: Batch API | `--batch` 옵션으로 50% 비용 절감 (기본 off). BatchCapable mixin으로 provider 수준 지원 (Anthropic/OpenAI). base_model만 사용 (escalation 없음). crash recovery용 BatchStateStore |
+| D-14: Cache-aware pricing | `pricing.toml`에서 코드 변경 없이 가격 업데이트. provider별 cache discount factor 적용 (Anthropic 90% read / 25% write, OpenAI 50% read) |
 | D-15: Rate limit resilience | GitHub 문서 기반: rate limit(429/403)과 server error(5xx) 재시도 카운터 분리 (7회/3회). 3단계 대기: Retry-After → X-RateLimit-Reset → 지수 백오프(2^n, 5분 cap). ±25% jitter로 thundering herd 방지. "반복 요청 시 integration 밴 가능" 경고 준수 |
 | D-16: Failed date auto-retry | `FailedDateStore`로 실패 날짜 영속화. 영구 오류(404/403 non-rate-limit/422) 즉시 제외, 일시적 오류 max_fetch_retries까지 재시도. 10년 히스토리 실행 시 간헐적 실패에서 자동 복구 |
 | D-17: Dynamic batch timeout | `min(300 + 30*N, 14400)` 공식으로 batch 크기 비례 타임아웃. 10건→10분(빠른 피드백), 4000건→4시간(10년 히스토리). 적응형 폴링(5s→60s 선형 증가)으로 불필요한 API 호출 절감 |

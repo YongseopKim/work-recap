@@ -119,7 +119,7 @@ class LLMRouter:
                 because the task's expected output structure doesn't change.
             cache_system_prompt: If True, enable prompt caching for system prompt.
                 Defaults to True. Anthropic: wraps system with cache_control ephemeral.
-                OpenAI/Gemini: ignored (both use automatic implicit caching).
+                OpenAI: ignored (uses automatic implicit caching).
 
         Returns:
             LLM response text.
@@ -399,10 +399,6 @@ class LLMRouter:
             from workrecap.infra.providers.anthropic_provider import AnthropicProvider
 
             return AnthropicProvider(api_key=entry.api_key)
-        elif name == "gemini":
-            from workrecap.infra.providers.gemini_provider import GeminiProvider
-
-            return GeminiProvider(api_key=entry.api_key)
         elif name == "custom":
             from workrecap.infra.providers.custom_provider import CustomProvider
 

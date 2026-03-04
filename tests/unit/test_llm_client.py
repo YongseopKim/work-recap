@@ -44,7 +44,7 @@ class TestLLMClientInit:
 
     def test_unsupported_provider(self):
         with pytest.raises(SummarizeError, match="Unsupported LLM provider"):
-            LLMClient("gemini", "key", "model")
+            LLMClient("unsupported", "key", "model")
 
     @patch("workrecap.infra.llm_client.OpenAI")
     def test_initial_usage_is_zero(self, mock_openai_cls):

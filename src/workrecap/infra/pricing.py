@@ -74,7 +74,6 @@ class PricingTable:
         Cache discount rates by provider:
         - Anthropic: read=10% of input, write=125% of input
         - OpenAI: read=50% of input, write=100% of input (no penalty)
-        - Gemini: read=25% of input, write=100% of input
         - Others: no discount applied
         """
         rate = self.get_rate(provider, model)
@@ -100,5 +99,4 @@ class PricingTable:
 _CACHE_FACTORS: dict[str, tuple[float, float]] = {
     "anthropic": (0.1, 1.25),  # 90% discount read, 25% surcharge write
     "openai": (0.5, 1.0),  # 50% discount read, no surcharge write
-    "gemini": (0.25, 1.0),  # 75% discount read, no surcharge write
 }

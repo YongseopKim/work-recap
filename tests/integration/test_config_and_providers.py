@@ -88,30 +88,6 @@ class TestProviderConnectivity:
         assert text.strip(), "Empty response from Anthropic"
         assert usage.total_tokens > 0, f"Expected total_tokens > 0, got {usage.total_tokens}"
 
-    def test_gemini_connectivity(self, real_config):
-        """Gemini gemini-2.0-flash-lite로 간단한 chat 호출."""
-        pc = ProviderConfig(real_config.provider_config_path)
-        if "gemini" not in pc.providers:
-            pytest.skip("Gemini provider not configured")
-
-        from google.genai.errors import ClientError
-
-        from workrecap.infra.providers.gemini_provider import GeminiProvider
-
-        provider = GeminiProvider(api_key=pc.providers["gemini"].api_key)
-        try:
-            text, usage = provider.chat(
-                "gemini-2.0-flash-lite",
-                "You are a helpful assistant.",
-                "Say 'hello' and nothing else.",
-            )
-        except ClientError as e:
-            if e.code == 429:
-                pytest.skip(f"Gemini rate limit exceeded: {e}")
-            raise
-        assert text.strip(), "Empty response from Gemini"
-        assert usage.total_tokens > 0, f"Expected total_tokens > 0, got {usage.total_tokens}"
-
 
 class TestEnrichTask:
     """LLMRouter를 통한 enrich task JSON 응답 검증."""

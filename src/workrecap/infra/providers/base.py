@@ -18,7 +18,7 @@ class ModelInfo:
 class LLMProvider(ABC):
     """Abstract base class for LLM providers.
 
-    Each concrete provider wraps a specific SDK (OpenAI, Anthropic, Gemini, etc.)
+    Each concrete provider wraps a specific SDK (OpenAI, Anthropic, etc.)
     and exposes a uniform chat() interface returning (text, TokenUsage).
     """
 
@@ -42,7 +42,7 @@ class LLMProvider(ABC):
             json_mode: If True, constrain output to valid JSON.
             max_tokens: Maximum output tokens. None = provider default.
             cache_system_prompt: If True, enable prompt caching for system prompt.
-                Anthropic: uses cache_control blocks. OpenAI/Gemini: auto-cached (ignored).
+                Anthropic: uses cache_control blocks. OpenAI: auto-cached (ignored).
 
         Returns:
             (response_text, token_usage) tuple.

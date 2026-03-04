@@ -19,9 +19,6 @@ _TEST_TOML = """\
 "claude-sonnet-4-5" = { input = 3.00,  output = 15.00 }
 "claude-haiku-4-5"  = { input = 1.00,  output = 5.00 }
 
-[gemini]
-"gemini-3-pro"     = { input = 2.00, output = 12.00 }
-"gemini-2.0-flash" = { input = 0.10, output = 0.40 }
 """
 
 
@@ -66,13 +63,6 @@ class TestPricingTable:
             "claude-haiku-4-5-20251001",
             prompt_tokens=500_000,
             completion_tokens=100_000,
-        )
-        assert cost > 0
-
-    def test_gemini_model(self, pricing_toml: Path):
-        pt = PricingTable(path=pricing_toml)
-        cost = pt.estimate_cost(
-            "gemini", "gemini-2.0-flash", prompt_tokens=1_000_000, completion_tokens=500_000
         )
         assert cost > 0
 
@@ -124,12 +114,6 @@ class TestPricingTable:
         rate = pt.get_rate("openai", "gpt-5")
         assert rate is not None
         assert rate == (1.25, 10.00)
-
-    def test_gemini_3_pro_has_pricing(self, pricing_toml: Path):
-        pt = PricingTable(path=pricing_toml)
-        rate = pt.get_rate("gemini", "gemini-3-pro")
-        assert rate is not None
-        assert rate == (2.00, 12.00)
 
 
 class TestPricingTomlLoading:

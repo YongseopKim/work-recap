@@ -8,7 +8,6 @@ import pytest
 from workrecap.infra.providers.base import LLMProvider, ModelInfo
 from workrecap.infra.providers.openai_provider import OpenAIProvider
 from workrecap.infra.providers.anthropic_provider import AnthropicProvider
-from workrecap.infra.providers.gemini_provider import GeminiProvider
 from workrecap.infra.providers.custom_provider import CustomProvider
 from workrecap.models import TokenUsage
 
@@ -29,17 +28,6 @@ def _anthropic_response(text="hello", input_t=80, output_t=40):
     return SimpleNamespace(
         content=[SimpleNamespace(text=text)],
         usage=SimpleNamespace(input_tokens=input_t, output_tokens=output_t),
-    )
-
-
-def _gemini_response(text="hello", prompt=90, completion=45, total=135):
-    return SimpleNamespace(
-        text=text,
-        usage_metadata=SimpleNamespace(
-            prompt_token_count=prompt,
-            candidates_token_count=completion,
-            total_token_count=total,
-        ),
     )
 
 
@@ -413,127 +401,6 @@ class TestAnthropicProvider:
         assert len(models) == 2
         assert models[0].id == "claude-haiku-4-5-20251001"
         assert models[0].provider == "anthropic"
-
-
-# ── Gemini Provider ──
-
-
-class TestGeminiProvider:
-    @patch("workrecap.infra.providers.gemini_provider.genai")
-    def test_init_creates_client(self, mock_genai):
-        p = GeminiProvider(api_key="AIza-test")
-        assert p.provider_name == "gemini"
-        mock_genai.Client.assert_called_once_with(api_key="AIza-test")
-
-    @patch("workrecap.infra.providers.gemini_provider.genai")
-    def test_chat_returns_text_and_usage(self, mock_genai):
-        mock_client = MagicMock()
-        mock_client.models.generate_content.return_value = _gemini_response(
-            text="result", prompt=200, completion=100, total=300
-        )
-        mock_genai.Client.return_value = mock_client
-
-        p = GeminiProvider(api_key="AIza-test")
-        text, usage = p.chat("gemini-2.0-flash", "system", "user")
-
-        assert text == "result"
-        assert usage == TokenUsage(
-            prompt_tokens=200, completion_tokens=100, total_tokens=300, call_count=1
-        )
-        mock_client.models.generate_content.assert_called_once()
-
-    @patch("workrecap.infra.providers.gemini_provider.genai")
-    def test_chat_json_mode(self, mock_genai):
-        """json_mode=True sets response_mime_type in Gemini config."""
-        mock_client = MagicMock()
-        mock_client.models.generate_content.return_value = _gemini_response(text='[{"index": 0}]')
-        mock_genai.Client.return_value = mock_client
-
-        p = GeminiProvider(api_key="AIza-test")
-        text, usage = p.chat("gemini-2.0-flash", "system", "user", json_mode=True)
-
-        assert text == '[{"index": 0}]'
-        call_kwargs = mock_client.models.generate_content.call_args.kwargs
-        config = call_kwargs["config"]
-        assert config.response_mime_type == "application/json"
-
-    @patch("workrecap.infra.providers.gemini_provider.genai")
-    def test_chat_json_mode_false(self, mock_genai):
-        """json_mode=False does not set response_mime_type."""
-        mock_client = MagicMock()
-        mock_client.models.generate_content.return_value = _gemini_response()
-        mock_genai.Client.return_value = mock_client
-
-        p = GeminiProvider(api_key="AIza-test")
-        p.chat("gemini-2.0-flash", "system", "user")
-
-        call_kwargs = mock_client.models.generate_content.call_args.kwargs
-        config = call_kwargs["config"]
-        assert not hasattr(config, "response_mime_type") or config.response_mime_type is None
-
-    @patch("workrecap.infra.providers.gemini_provider.genai")
-    def test_chat_max_tokens(self, mock_genai):
-        """max_tokens sets max_output_tokens in Gemini config."""
-        mock_client = MagicMock()
-        mock_client.models.generate_content.return_value = _gemini_response()
-        mock_genai.Client.return_value = mock_client
-
-        p = GeminiProvider(api_key="AIza-test")
-        p.chat("gemini-2.0-flash", "system", "user", max_tokens=500)
-
-        call_kwargs = mock_client.models.generate_content.call_args.kwargs
-        config = call_kwargs["config"]
-        assert config.max_output_tokens == 500
-
-    @patch("workrecap.infra.providers.gemini_provider.genai")
-    def test_list_models(self, mock_genai):
-        mock_client = MagicMock()
-        mock_client.models.list.return_value = [
-            SimpleNamespace(name="models/gemini-2.0-flash", display_name="Gemini 2.0 Flash"),
-        ]
-        mock_genai.Client.return_value = mock_client
-
-        p = GeminiProvider(api_key="AIza-test")
-        models = p.list_models()
-        assert len(models) == 1
-        assert models[0].id == "models/gemini-2.0-flash"
-        assert models[0].provider == "gemini"
-
-    @patch("workrecap.infra.providers.gemini_provider.genai")
-    def test_chat_extracts_cache_read_tokens(self, mock_genai):
-        """cached_content_token_count → cache_read_tokens."""
-        mock_client = MagicMock()
-        mock_client.models.generate_content.return_value = SimpleNamespace(
-            text="cached result",
-            usage_metadata=SimpleNamespace(
-                prompt_token_count=200,
-                candidates_token_count=100,
-                total_token_count=300,
-                cached_content_token_count=150,
-            ),
-        )
-        mock_genai.Client.return_value = mock_client
-
-        p = GeminiProvider(api_key="AIza-test")
-        text, usage = p.chat("gemini-2.0-flash", "system", "user")
-
-        assert text == "cached result"
-        assert usage.cache_read_tokens == 150
-        assert usage.prompt_tokens == 200
-
-    @patch("workrecap.infra.providers.gemini_provider.genai")
-    def test_chat_no_cache_tokens_defaults_zero(self, mock_genai):
-        """No cached_content_token_count → cache_read_tokens=0."""
-        mock_client = MagicMock()
-        mock_client.models.generate_content.return_value = _gemini_response(
-            text="no cache", prompt=200, completion=100, total=300
-        )
-        mock_genai.Client.return_value = mock_client
-
-        p = GeminiProvider(api_key="AIza-test")
-        text, usage = p.chat("gemini-2.0-flash", "system", "user")
-
-        assert usage.cache_read_tokens == 0
 
 
 # ── Custom Provider (OpenAI-compatible) ──
