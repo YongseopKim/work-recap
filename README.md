@@ -69,7 +69,24 @@ api_key = "sk-ant-..."
 [providers.custom]
 api_key = ""
 base_url = "http://localhost:11434/v1"  # Ollama, vLLM 등
+```
 
+#### Proxy 모드 (선택)
+
+LLM Proxy Server를 통해 API 호출을 중계하면 API key 중앙 관리, rate limiting, 사용량 추적이 자동으로 적용된다.
+`base_url`을 설정하면 프록시가 key를 관리하므로 `api_key`는 아무 값이나 가능하다.
+
+```toml
+[providers.openai]
+api_key = "unused"
+base_url = "http://192.168.0.2:8081/openai/v1"
+
+[providers.anthropic]
+api_key = "unused"
+base_url = "http://192.168.0.2:8081/anthropic"
+```
+
+```toml
 [tasks.enrich]
 provider = "anthropic"
 model = "claude-haiku-4-5"
@@ -412,6 +429,7 @@ coverage run -m pytest && coverage report
 | D-15: Rate limit resilience | GitHub 문서 기반: rate limit(429/403)과 server error(5xx) 재시도 카운터 분리 (7회/3회). 3단계 대기: Retry-After → X-RateLimit-Reset → 지수 백오프(2^n, 5분 cap). ±25% jitter로 thundering herd 방지. "반복 요청 시 integration 밴 가능" 경고 준수 |
 | D-16: Failed date auto-retry | `FailedDateStore`로 실패 날짜 영속화. 영구 오류(404/403 non-rate-limit/422) 즉시 제외, 일시적 오류 max_fetch_retries까지 재시도. 10년 히스토리 실행 시 간헐적 실패에서 자동 복구 |
 | D-17: Dynamic batch timeout | `min(300 + 30*N, 14400)` 공식으로 batch 크기 비례 타임아웃. 10건→10분(빠른 피드백), 4000건→4시간(10년 히스토리). 적응형 폴링(5s→60s 선형 증가)으로 불필요한 API 호출 절감 |
+| D-18: LLM Proxy support | OpenAI/Anthropic provider에 `base_url` 옵션 추가. 프록시 경유 시 API key 중앙 관리 + rate limiting + 사용량 추적 자동 획득. `base_url` 설정 시 `api_key` 빈값 허용 (프록시가 관리). 요청/응답 포맷 변경 없음 — URL만 교체 |
 
 ## 라이선스
 

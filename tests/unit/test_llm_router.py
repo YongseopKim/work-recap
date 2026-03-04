@@ -701,3 +701,107 @@ class TestWaitForBatchDynamic:
         )
         assert len(results) == 1
         assert len(progress_msgs) > 0  # At least one progress message
+
+
+# ── Proxy base_url ──
+
+
+class TestProxyBaseUrl:
+    @patch("workrecap.infra.providers.openai_provider.OpenAI")
+    def test_router_passes_base_url_to_openai(self, mock_openai_cls, tmp_path):
+        """Router가 config의 base_url을 OpenAIProvider에 전달."""
+        from types import SimpleNamespace
+
+        mock_instance = MagicMock()
+        mock_instance.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+        mock_openai_cls.return_value = mock_instance
+
+        path = _write_toml(
+            tmp_path,
+            """\
+            [providers.openai]
+            api_key = "unused"
+            base_url = "http://proxy:8081/openai/v1"
+
+            [tasks.default]
+            provider = "openai"
+            model = "gpt-4o-mini"
+            """,
+        )
+        config = ProviderConfig(config_path=path)
+        router = LLMRouter(config)
+        router.chat("sys", "usr", task="default")
+
+        mock_openai_cls.assert_called_once_with(
+            api_key="unused",
+            base_url="http://proxy:8081/openai/v1",
+            timeout=120.0,
+            max_retries=3,
+        )
+
+    @patch("workrecap.infra.providers.anthropic_provider.anthropic")
+    def test_router_passes_base_url_to_anthropic(self, mock_anthropic_mod, tmp_path):
+        """Router가 config의 base_url을 AnthropicProvider에 전달."""
+        from types import SimpleNamespace
+
+        mock_instance = MagicMock()
+        mock_instance.messages.create.return_value = SimpleNamespace(
+            content=[SimpleNamespace(text="ok")],
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+        )
+        mock_anthropic_mod.Anthropic.return_value = mock_instance
+
+        path = _write_toml(
+            tmp_path,
+            """\
+            [providers.anthropic]
+            api_key = "unused"
+            base_url = "http://proxy:8081/anthropic"
+
+            [tasks.default]
+            provider = "anthropic"
+            model = "claude-haiku-4-5-20251001"
+            """,
+        )
+        config = ProviderConfig(config_path=path)
+        router = LLMRouter(config)
+        router.chat("sys", "usr", task="default")
+
+        mock_anthropic_mod.Anthropic.assert_called_once_with(
+            api_key="unused",
+            base_url="http://proxy:8081/anthropic",
+            timeout=120.0,
+            max_retries=3,
+        )
+
+    @patch("workrecap.infra.providers.openai_provider.OpenAI")
+    def test_router_omits_base_url_when_none(self, mock_openai_cls, tmp_path):
+        """base_url이 없으면 provider에 base_url을 전달하지 않음."""
+        from types import SimpleNamespace
+
+        mock_instance = MagicMock()
+        mock_instance.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+        mock_openai_cls.return_value = mock_instance
+
+        path = _write_toml(
+            tmp_path,
+            """\
+            [providers.openai]
+            api_key = "sk-test"
+
+            [tasks.default]
+            provider = "openai"
+            model = "gpt-4o-mini"
+            """,
+        )
+        config = ProviderConfig(config_path=path)
+        router = LLMRouter(config)
+        router.chat("sys", "usr", task="default")
+
+        mock_openai_cls.assert_called_once_with(api_key="sk-test", timeout=120.0, max_retries=3)

@@ -43,10 +43,14 @@ class OpenAIProvider(LLMProvider, BatchCapable):
         self,
         api_key: str,
         *,
+        base_url: str | None = None,
         timeout: float = 120.0,
         max_retries: int = 3,
     ) -> None:
-        self._client = OpenAI(api_key=api_key, timeout=timeout, max_retries=max_retries)
+        kwargs: dict = {"api_key": api_key, "timeout": timeout, "max_retries": max_retries}
+        if base_url is not None:
+            kwargs["base_url"] = base_url
+        self._client = OpenAI(**kwargs)
 
     @property
     def provider_name(self) -> str:

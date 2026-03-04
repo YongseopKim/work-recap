@@ -114,9 +114,11 @@ class ProviderConfig:
                     f"which is not defined in [providers]"
                 )
 
-        # Check api_key presence (custom providers with empty key are OK)
+        # Check api_key presence (custom providers and proxy-mode providers are OK)
         for name, entry in self._providers.items():
             if name == "custom":
+                continue
+            if entry.base_url:
                 continue
             if not entry.api_key:
                 errors.append(f"Provider '{name}' has empty api_key")

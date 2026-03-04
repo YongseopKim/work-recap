@@ -394,11 +394,11 @@ class LLMRouter:
         if name == "openai":
             from workrecap.infra.providers.openai_provider import OpenAIProvider
 
-            return OpenAIProvider(api_key=entry.api_key)
+            return OpenAIProvider(api_key=entry.api_key, base_url=entry.base_url)
         elif name == "anthropic":
             from workrecap.infra.providers.anthropic_provider import AnthropicProvider
 
-            return AnthropicProvider(api_key=entry.api_key)
+            return AnthropicProvider(api_key=entry.api_key, base_url=entry.base_url)
         elif name == "custom":
             from workrecap.infra.providers.custom_provider import CustomProvider
 

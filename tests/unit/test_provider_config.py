@@ -173,6 +173,45 @@ class TestTOMLParsing:
         assert tc.provider == "openai"
         assert tc.model == "gpt-4o-mini"
 
+    def test_proxy_mode_allows_empty_api_key(self, tmp_path):
+        """base_url이 설정된 provider는 api_key 빈값 허용 (프록시가 key 관리)."""
+        path = self._write_toml(
+            tmp_path,
+            """\
+            [providers.openai]
+            api_key = ""
+            base_url = "http://proxy:8081/openai/v1"
+
+            [providers.anthropic]
+            api_key = ""
+            base_url = "http://proxy:8081/anthropic"
+
+            [tasks.default]
+            provider = "openai"
+            model = "gpt-4o-mini"
+            """,
+        )
+        pc = ProviderConfig(config_path=path)
+        errors = pc.validate()
+        assert not errors, f"Unexpected errors: {errors}"
+
+    def test_no_base_url_still_requires_api_key(self, tmp_path):
+        """base_url 없이 api_key도 비어있으면 여전히 validation 에러."""
+        path = self._write_toml(
+            tmp_path,
+            """\
+            [providers.openai]
+            api_key = ""
+
+            [tasks.default]
+            provider = "openai"
+            model = "gpt-4o-mini"
+            """,
+        )
+        pc = ProviderConfig(config_path=path)
+        errors = pc.validate()
+        assert any("api_key" in e for e in errors)
+
 
 # ── AppConfig integration ──
 

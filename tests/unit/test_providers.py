@@ -70,6 +70,23 @@ class TestOpenAIProvider:
         mock_cls.assert_called_once_with(api_key="sk-test", timeout=120.0, max_retries=3)
 
     @patch("workrecap.infra.providers.openai_provider.OpenAI")
+    def test_init_with_base_url(self, mock_cls):
+        """base_url이 설정되면 OpenAI 클라이언트에 전달."""
+        OpenAIProvider(api_key="unused", base_url="http://proxy:8081/openai/v1")
+        mock_cls.assert_called_once_with(
+            api_key="unused",
+            base_url="http://proxy:8081/openai/v1",
+            timeout=120.0,
+            max_retries=3,
+        )
+
+    @patch("workrecap.infra.providers.openai_provider.OpenAI")
+    def test_init_without_base_url_omits_kwarg(self, mock_cls):
+        """base_url=None이면 OpenAI 클라이언트에 base_url을 전달하지 않음."""
+        OpenAIProvider(api_key="sk-test", base_url=None)
+        mock_cls.assert_called_once_with(api_key="sk-test", timeout=120.0, max_retries=3)
+
+    @patch("workrecap.infra.providers.openai_provider.OpenAI")
     def test_chat_returns_text_and_usage(self, mock_cls):
         mock_instance = MagicMock()
         mock_instance.chat.completions.create.return_value = _openai_response(
@@ -231,6 +248,25 @@ class TestAnthropicProvider:
     def test_init_creates_client(self, mock_mod):
         p = AnthropicProvider(api_key="sk-ant-test")
         assert p.provider_name == "anthropic"
+        mock_mod.Anthropic.assert_called_once_with(
+            api_key="sk-ant-test", timeout=120.0, max_retries=3
+        )
+
+    @patch("workrecap.infra.providers.anthropic_provider.anthropic")
+    def test_init_with_base_url(self, mock_mod):
+        """base_url이 설정되면 Anthropic 클라이언트에 전달."""
+        AnthropicProvider(api_key="unused", base_url="http://proxy:8081/anthropic")
+        mock_mod.Anthropic.assert_called_once_with(
+            api_key="unused",
+            base_url="http://proxy:8081/anthropic",
+            timeout=120.0,
+            max_retries=3,
+        )
+
+    @patch("workrecap.infra.providers.anthropic_provider.anthropic")
+    def test_init_without_base_url_omits_kwarg(self, mock_mod):
+        """base_url=None이면 Anthropic 클라이언트에 base_url을 전달하지 않음."""
+        AnthropicProvider(api_key="sk-ant-test", base_url=None)
         mock_mod.Anthropic.assert_called_once_with(
             api_key="sk-ant-test", timeout=120.0, max_retries=3
         )
