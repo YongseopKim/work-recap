@@ -62,7 +62,8 @@ class TestProviderConnectivity:
 
         from workrecap.infra.providers.openai_provider import OpenAIProvider
 
-        provider = OpenAIProvider(api_key=pc.providers["openai"].api_key)
+        entry = pc.providers["openai"]
+        provider = OpenAIProvider(api_key=entry.api_key, base_url=entry.base_url)
         text, usage = provider.chat(
             "gpt-5-mini",
             "You are a helpful assistant.",
@@ -79,7 +80,8 @@ class TestProviderConnectivity:
 
         from workrecap.infra.providers.anthropic_provider import AnthropicProvider
 
-        provider = AnthropicProvider(api_key=pc.providers["anthropic"].api_key)
+        entry = pc.providers["anthropic"]
+        provider = AnthropicProvider(api_key=entry.api_key, base_url=entry.base_url)
         text, usage = provider.chat(
             "claude-haiku-4-5-20251001",
             "You are a helpful assistant.",
