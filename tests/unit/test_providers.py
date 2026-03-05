@@ -71,11 +71,12 @@ class TestOpenAIProvider:
 
     @patch("workrecap.infra.providers.openai_provider.OpenAI")
     def test_init_with_base_url(self, mock_cls):
-        """base_url이 설정되면 OpenAI 클라이언트에 전달."""
+        """base_url이 설정되면 OpenAI 클라이언트에 base_url + X-Client-ID 헤더 전달."""
         OpenAIProvider(api_key="unused", base_url="http://proxy:8081/openai/v1")
         mock_cls.assert_called_once_with(
             api_key="unused",
             base_url="http://proxy:8081/openai/v1",
+            default_headers={"X-Client-ID": "work-recap"},
             timeout=120.0,
             max_retries=3,
         )
@@ -254,11 +255,12 @@ class TestAnthropicProvider:
 
     @patch("workrecap.infra.providers.anthropic_provider.anthropic")
     def test_init_with_base_url(self, mock_mod):
-        """base_url이 설정되면 Anthropic 클라이언트에 전달."""
+        """base_url이 설정되면 Anthropic 클라이언트에 base_url + X-Client-ID 헤더 전달."""
         AnthropicProvider(api_key="unused", base_url="http://proxy:8081/anthropic")
         mock_mod.Anthropic.assert_called_once_with(
             api_key="unused",
             base_url="http://proxy:8081/anthropic",
+            default_headers={"X-Client-ID": "work-recap"},
             timeout=120.0,
             max_retries=3,
         )

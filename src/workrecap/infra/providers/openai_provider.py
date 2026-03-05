@@ -50,6 +50,7 @@ class OpenAIProvider(LLMProvider, BatchCapable):
         kwargs: dict = {"api_key": api_key, "timeout": timeout, "max_retries": max_retries}
         if base_url is not None:
             kwargs["base_url"] = base_url
+            kwargs["default_headers"] = {"X-Client-ID": "work-recap"}
         self._client = OpenAI(**kwargs)
 
     @property
