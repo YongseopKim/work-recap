@@ -41,6 +41,7 @@ class CustomProvider(LLMProvider):
         json_mode: bool = False,
         max_tokens: int | None = None,
         cache_system_prompt: bool = False,
+        stream: bool = False,
     ) -> tuple[str, TokenUsage]:
         kwargs: dict = {
             "model": model,
@@ -53,6 +54,10 @@ class CustomProvider(LLMProvider):
             kwargs["response_format"] = {"type": "json_object"}
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
+
+        if stream:
+            return self._chat_stream(kwargs)
+
         response = self._client.chat.completions.create(**kwargs)
         text = response.choices[0].message.content
         # Some local models don't return usage stats
@@ -66,6 +71,18 @@ class CustomProvider(LLMProvider):
         else:
             usage = TokenUsage(call_count=1)
         return text, usage
+
+    def _chat_stream(self, kwargs: dict) -> tuple[str, TokenUsage]:
+        """Streaming chat — collects chunks internally, returns same type."""
+        kwargs["stream"] = True
+        chunks: list[str] = []
+
+        response = self._client.chat.completions.create(**kwargs)
+        for chunk in response:
+            if chunk.choices and chunk.choices[0].delta.content:
+                chunks.append(chunk.choices[0].delta.content)
+
+        return "".join(chunks), TokenUsage(call_count=1)
 
     def list_models(self) -> list[ModelInfo]:
         response = self._client.models.list()

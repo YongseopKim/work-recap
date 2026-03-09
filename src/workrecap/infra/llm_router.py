@@ -105,6 +105,7 @@ class LLMRouter:
         json_mode: bool = False,
         max_tokens: int | None = None,
         cache_system_prompt: bool = True,
+        stream: bool = False,
     ) -> str:
         """Send a chat completion, routing to the correct provider/model for the task.
 
@@ -160,6 +161,7 @@ class LLMRouter:
                     json_mode=json_mode,
                     max_tokens=resolved_max_tokens,
                     cache_system_prompt=cache_system_prompt,
+                    stream=stream,
                 )
             else:
                 t0 = time.monotonic()
@@ -170,6 +172,7 @@ class LLMRouter:
                     json_mode=json_mode,
                     max_tokens=resolved_max_tokens,
                     cache_system_prompt=cache_system_prompt,
+                    stream=stream,
                 )
                 elapsed = time.monotonic() - t0
                 logger.info(
@@ -224,6 +227,7 @@ class LLMRouter:
         json_mode: bool = False,
         max_tokens: int | None = None,
         cache_system_prompt: bool = False,
+        stream: bool = False,
     ):
         """Use EscalationHandler for adaptive escalation."""
         from workrecap.infra.escalation import EscalationHandler
@@ -242,6 +246,7 @@ class LLMRouter:
             json_mode=json_mode,
             max_tokens=max_tokens,
             cache_system_prompt=cache_system_prompt,
+            stream=stream,
         )
 
     @property

@@ -57,9 +57,11 @@ class EscalationHandler:
         json_mode: bool = False,
         max_tokens: int | None = None,
         cache_system_prompt: bool = False,
+        stream: bool = False,
     ) -> tuple[str, TokenUsage]:
         """Execute with possible escalation. Returns (text, total_usage)."""
         # Step 1: Call base model with lean system + merged user content
+        # Base assessment always uses json_mode=True, never streams
         wrapped_user = _ESCALATION_USER.format(
             system_prompt=system_prompt, user_content=user_content
         )
@@ -90,6 +92,7 @@ class EscalationHandler:
                 json_mode=json_mode,
                 max_tokens=max_tokens,
                 cache_system_prompt=cache_system_prompt,
+                stream=stream,
             )
             total_usage = base_usage + esc_usage
             return esc_text, total_usage

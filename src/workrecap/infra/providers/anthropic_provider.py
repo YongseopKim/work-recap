@@ -56,6 +56,7 @@ class AnthropicProvider(LLMProvider, BatchCapable):
         json_mode: bool = False,
         max_tokens: int | None = None,
         cache_system_prompt: bool = False,
+        stream: bool = False,
     ) -> tuple[str, TokenUsage]:
         messages: list[dict] = [{"role": "user", "content": user_content}]
         if json_mode:
@@ -73,22 +74,39 @@ class AnthropicProvider(LLMProvider, BatchCapable):
         else:
             system = system_prompt
 
-        response = self._client.messages.create(
-            model=model,
-            max_tokens=max_tokens or 4096,
-            system=system,
-            messages=messages,
-        )
+        kwargs = {
+            "model": model,
+            "max_tokens": max_tokens or 4096,
+            "system": system,
+            "messages": messages,
+        }
+
+        if stream:
+            return self._chat_stream(kwargs, json_mode)
+
+        response = self._client.messages.create(**kwargs)
         text = response.content[0].text
         if json_mode:
             text = "[" + text
 
-        # Extract cache token stats from response
-        resp_usage = response.usage
+        return text, self._extract_usage(response.usage)
+
+    def _chat_stream(
+        self, kwargs: dict, json_mode: bool
+    ) -> tuple[str, TokenUsage]:
+        """Streaming chat — collects chunks internally, returns same type."""
+        with self._client.messages.stream(**kwargs) as stream:
+            text = stream.get_final_text()
+        if json_mode:
+            text = "[" + text
+        resp_usage = stream.get_final_message().usage
+        return text, self._extract_usage(resp_usage)
+
+    @staticmethod
+    def _extract_usage(resp_usage) -> TokenUsage:
         cache_read = getattr(resp_usage, "cache_read_input_tokens", 0) or 0
         cache_write = getattr(resp_usage, "cache_creation_input_tokens", 0) or 0
-
-        usage = TokenUsage(
+        return TokenUsage(
             prompt_tokens=resp_usage.input_tokens,
             completion_tokens=resp_usage.output_tokens,
             total_tokens=resp_usage.input_tokens + resp_usage.output_tokens,
@@ -96,7 +114,6 @@ class AnthropicProvider(LLMProvider, BatchCapable):
             cache_read_tokens=cache_read,
             cache_write_tokens=cache_write,
         )
-        return text, usage
 
     def list_models(self) -> list[ModelInfo]:
         response = self._client.models.list()

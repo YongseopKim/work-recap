@@ -90,7 +90,7 @@ class SummarizerService:
         )
 
         response = self._llm.chat(
-            system_prompt, user_content, task="daily", cache_system_prompt=True
+            system_prompt, user_content, task="daily", cache_system_prompt=True, stream=detailed
         )
 
         output_path = self._config.daily_summary_path(target_date, repo=repo_key)

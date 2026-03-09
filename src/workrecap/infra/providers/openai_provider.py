@@ -66,6 +66,7 @@ class OpenAIProvider(LLMProvider, BatchCapable):
         json_mode: bool = False,
         max_tokens: int | None = None,
         cache_system_prompt: bool = False,
+        stream: bool = False,
     ) -> tuple[str, TokenUsage]:
         kwargs: dict = {
             "model": model,
@@ -79,21 +80,42 @@ class OpenAIProvider(LLMProvider, BatchCapable):
         if max_tokens is not None and not self._is_reasoning_model(model):
             kwargs["max_completion_tokens"] = max_tokens
         # cache_system_prompt is ignored — OpenAI auto-caches prompts ≥1024 tokens
+
+        if stream:
+            return self._chat_stream(kwargs)
+
         response = self._client.chat.completions.create(**kwargs)
         text = response.choices[0].message.content or ""
+        return text, self._extract_usage(response.usage)
 
-        # Extract auto-cache stats from OpenAI response
-        details = getattr(response.usage, "prompt_tokens_details", None)
+    def _chat_stream(self, kwargs: dict) -> tuple[str, TokenUsage]:
+        """Streaming chat — collects chunks internally, returns same type."""
+        kwargs["stream"] = True
+        kwargs["stream_options"] = {"include_usage": True}
+        chunks: list[str] = []
+        usage = TokenUsage(call_count=1)
+
+        with self._client.chat.completions.create(**kwargs) as response:
+            for chunk in response:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    chunks.append(chunk.choices[0].delta.content)
+                if chunk.usage is not None:
+                    usage = self._extract_usage(chunk.usage)
+
+        return "".join(chunks), usage
+
+    @staticmethod
+    def _extract_usage(resp_usage) -> TokenUsage:
+        """Extract TokenUsage from OpenAI response usage object."""
+        details = getattr(resp_usage, "prompt_tokens_details", None)
         cached_tokens = getattr(details, "cached_tokens", 0) if details else 0
-
-        usage = TokenUsage(
-            prompt_tokens=response.usage.prompt_tokens,
-            completion_tokens=response.usage.completion_tokens,
-            total_tokens=response.usage.total_tokens,
+        return TokenUsage(
+            prompt_tokens=resp_usage.prompt_tokens,
+            completion_tokens=resp_usage.completion_tokens,
+            total_tokens=resp_usage.total_tokens,
             call_count=1,
             cache_read_tokens=cached_tokens or 0,
         )
-        return text, usage
 
     def list_models(self) -> list[ModelInfo]:
         response = self._client.models.list()

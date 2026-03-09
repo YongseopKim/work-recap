@@ -32,6 +32,7 @@ class LLMProvider(ABC):
         json_mode: bool = False,
         max_tokens: int | None = None,
         cache_system_prompt: bool = False,
+        stream: bool = False,
     ) -> tuple[str, TokenUsage]:
         """Send a chat completion request.
 
@@ -43,6 +44,8 @@ class LLMProvider(ABC):
             max_tokens: Maximum output tokens. None = provider default.
             cache_system_prompt: If True, enable prompt caching for system prompt.
                 Anthropic: uses cache_control blocks. OpenAI: auto-cached (ignored).
+            stream: If True, use streaming API to avoid read timeout.
+                Response is collected internally; return type is unchanged.
 
         Returns:
             (response_text, token_usage) tuple.
