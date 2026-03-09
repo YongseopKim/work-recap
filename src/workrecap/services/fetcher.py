@@ -50,6 +50,7 @@ class FetcherService:
         client_pool: "GHESClientPool | None" = None,
         progress_store: "FetchProgressStore | None" = None,
         failed_date_store: "FailedDateStore | None" = None,
+        repos: list[str] | None = None,
     ) -> None:
         self._config = config
         self._client = ghes_client
@@ -59,6 +60,7 @@ class FetcherService:
         self._client_pool = client_pool
         self._progress_store = progress_store
         self._failed_date_store = failed_date_store
+        self._repos = repos or []
 
     @property
     def source_name(self) -> str:
@@ -444,6 +446,32 @@ class FetcherService:
                     issues.append(result)
         return issues
 
+    # ── Repo filtering ──
+
+    def _filter_items_by_repos(self, items: dict[str, dict]) -> dict[str, dict]:
+        """Filter PR/Issue search results by repository_url."""
+        if not self._repos:
+            return items
+        return {
+            url: item
+            for url, item in items.items()
+            if self._extract_repo_name(item.get("repository_url", "")) in self._repos
+        }
+
+    def _filter_commits_by_repos(self, commits: list[dict]) -> list[dict]:
+        """Filter commit search results by repository.full_name."""
+        if not self._repos:
+            return commits
+        return [c for c in commits if c.get("repository", {}).get("full_name", "") in self._repos]
+
+    @staticmethod
+    def _extract_repo_name(repository_url: str) -> str:
+        """Extract 'owner/repo' from repository_url like 'https://.../repos/owner/repo'."""
+        parts = repository_url.rstrip("/").split("/")
+        if len(parts) >= 2:
+            return f"{parts[-2]}/{parts[-1]}"
+        return ""
+
     @staticmethod
     def _bucket_by_date(
         pr_map: dict[str, dict],
@@ -513,7 +541,7 @@ class FetcherService:
                 api_url = item.get("pull_request", {}).get("url", item["url"])
                 if api_url not in pr_map:
                     pr_map[api_url] = item
-        return pr_map
+        return self._filter_items_by_repos(pr_map)
 
     def _search_commits_range(self, start: str, end: str) -> list[dict]:
         """날짜 범위로 커밋 검색."""
@@ -521,7 +549,7 @@ class FetcherService:
         try:
             items = self._search_all_commit_pages(query)
             self._warn_if_truncated(len(items), query)
-            return items
+            return self._filter_commits_by_repos(items)
         except FetchError:
             logger.warning("Commit range search not supported, skipping")
             return []
@@ -544,7 +572,7 @@ class FetcherService:
                 api_url = item["url"]
                 if api_url not in issue_map:
                     issue_map[api_url] = item
-        return issue_map
+        return self._filter_items_by_repos(issue_map)
 
     # ── 3축 검색 + dedup ──
 
@@ -573,7 +601,7 @@ class FetcherService:
                 if api_url not in pr_map:
                     pr_map[api_url] = item
 
-        return pr_map
+        return self._filter_items_by_repos(pr_map)
 
     def _search_all_pages(self, query: str) -> list[dict]:
         """Search API 전체 페이지 수집."""
@@ -677,6 +705,7 @@ class FetcherService:
             logger.warning("Commit search not supported, skipping")
             return []
 
+        items = self._filter_commits_by_repos(items)
         commits: list[CommitRaw] = []
         for item in items:
             try:
@@ -753,6 +782,7 @@ class FetcherService:
                 if api_url not in issue_map:
                     issue_map[api_url] = item
 
+        issue_map = self._filter_items_by_repos(issue_map)
         issues: list[IssueRaw] = []
         for api_url, item in issue_map.items():
             try:

@@ -1555,3 +1555,122 @@ class TestFetchRangeFailedDates:
 
         # Should be skipped because retries exhausted (won't be in retryable set)
         assert statuses["2025-02-15"] == "skipped"
+
+
+# ── Repo filter tests ──
+
+
+class TestRepoFilter:
+    """Tests for repository filtering in FetcherService."""
+
+    def test_filter_items_by_repos_keeps_matching(self, tmp_data_dir, test_config):
+        """_filter_items_by_repos keeps only items matching specified repos."""
+        client = Mock(spec=GHESClient)
+        service = FetcherService(test_config, client, repos=["myorg/myrepo"])
+
+        items = {
+            "https://api.example.com/repos/myorg/myrepo/pulls/1": {
+                "repository_url": "https://api.example.com/repos/myorg/myrepo",
+                "url": "https://api.example.com/repos/myorg/myrepo/pulls/1",
+            },
+            "https://api.example.com/repos/myorg/other/pulls/2": {
+                "repository_url": "https://api.example.com/repos/myorg/other",
+                "url": "https://api.example.com/repos/myorg/other/pulls/2",
+            },
+        }
+
+        filtered = service._filter_items_by_repos(items)
+        assert len(filtered) == 1
+        assert "https://api.example.com/repos/myorg/myrepo/pulls/1" in filtered
+
+    def test_filter_items_by_repos_empty_repos_keeps_all(self, tmp_data_dir, test_config):
+        """Empty repos list means no filtering."""
+        client = Mock(spec=GHESClient)
+        service = FetcherService(test_config, client, repos=[])
+
+        items = {
+            "url1": {"repository_url": "https://api.example.com/repos/a/b", "url": "url1"},
+            "url2": {"repository_url": "https://api.example.com/repos/c/d", "url": "url2"},
+        }
+
+        filtered = service._filter_items_by_repos(items)
+        assert len(filtered) == 2
+
+    def test_filter_items_by_repos_none_repos_keeps_all(self, tmp_data_dir, test_config):
+        """None repos (default) means no filtering."""
+        client = Mock(spec=GHESClient)
+        service = FetcherService(test_config, client)
+
+        items = {
+            "url1": {"repository_url": "https://api.example.com/repos/a/b", "url": "url1"},
+            "url2": {"repository_url": "https://api.example.com/repos/c/d", "url": "url2"},
+        }
+
+        filtered = service._filter_items_by_repos(items)
+        assert len(filtered) == 2
+
+    def test_filter_commits_by_repos(self, tmp_data_dir, test_config):
+        """Commit items use repository.full_name for filtering."""
+        client = Mock(spec=GHESClient)
+        service = FetcherService(test_config, client, repos=["myorg/myrepo"])
+
+        commits = [
+            {
+                "sha": "abc",
+                "repository": {"full_name": "myorg/myrepo"},
+                "commit": {"committer": {"date": "2026-01-01"}},
+            },
+            {
+                "sha": "def",
+                "repository": {"full_name": "myorg/other"},
+                "commit": {"committer": {"date": "2026-01-01"}},
+            },
+        ]
+
+        filtered = service._filter_commits_by_repos(commits)
+        assert len(filtered) == 1
+        assert filtered[0]["sha"] == "abc"
+
+    def test_filter_commits_by_repos_empty_keeps_all(self, tmp_data_dir, test_config):
+        """Empty repos list keeps all commits."""
+        client = Mock(spec=GHESClient)
+        service = FetcherService(test_config, client, repos=[])
+
+        commits = [
+            {
+                "sha": "abc",
+                "repository": {"full_name": "myorg/myrepo"},
+                "commit": {"committer": {"date": "2026-01-01"}},
+            },
+        ]
+
+        filtered = service._filter_commits_by_repos(commits)
+        assert len(filtered) == 1
+
+    def test_extract_repo_name(self):
+        """_extract_repo_name parses owner/repo from repository_url."""
+        assert (
+            FetcherService._extract_repo_name("https://api.example.com/repos/myorg/myrepo")
+            == "myorg/myrepo"
+        )
+        assert (
+            FetcherService._extract_repo_name("https://api.example.com/repos/myorg/myrepo/")
+            == "myorg/myrepo"
+        )
+        assert FetcherService._extract_repo_name("") == ""
+
+    def test_filter_multiple_repos(self, tmp_data_dir, test_config):
+        """Multiple repos in filter list all pass through."""
+        client = Mock(spec=GHESClient)
+        service = FetcherService(test_config, client, repos=["org/repo1", "org/repo2"])
+
+        items = {
+            "url1": {"repository_url": "https://api.example.com/repos/org/repo1", "url": "url1"},
+            "url2": {"repository_url": "https://api.example.com/repos/org/repo2", "url": "url2"},
+            "url3": {"repository_url": "https://api.example.com/repos/org/repo3", "url": "url3"},
+        }
+
+        filtered = service._filter_items_by_repos(items)
+        assert len(filtered) == 2
+        assert "url1" in filtered
+        assert "url2" in filtered
