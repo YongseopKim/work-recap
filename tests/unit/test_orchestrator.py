@@ -71,7 +71,9 @@ class TestRunDaily:
 
         mocks["fetcher"].fetch.assert_called_once_with("2025-02-16", types=None, progress=None)
         mocks["normalizer"].normalize.assert_called_once_with("2025-02-16", progress=None)
-        mocks["summarizer"].daily.assert_called_once_with("2025-02-16", progress=None)
+        mocks["summarizer"].daily.assert_called_once_with(
+            "2025-02-16", progress=None, detailed=False
+        )
 
         # 호출 순서 검증
         manager = Mock()
@@ -84,7 +86,7 @@ class TestRunDaily:
         assert manager.mock_calls == [
             call.fetch("2025-02-16", types=None, progress=None),
             call.normalize("2025-02-16", progress=None),
-            call.summarize("2025-02-16", progress=None),
+            call.summarize("2025-02-16", progress=None, detailed=False),
         ]
 
     def test_returns_summary_path(self, orchestrator):
@@ -273,7 +275,7 @@ class TestRunRangeOptimized:
             )
         )
         mocks["summarizer"].daily_range.side_effect = (
-            lambda s, u, force=False, progress=None, max_workers=1, batch=False: (
+            lambda s, u, force=False, progress=None, max_workers=1, batch=False, detailed=False: (
                 call_order.append("daily_range") or []
             )
         )
@@ -513,7 +515,13 @@ class TestRunRangeForcePassthrough:
             "2025-02-14", "2025-02-14", force=True, progress=None, max_workers=1, batch=False
         )
         mocks["summarizer"].daily_range.assert_called_once_with(
-            "2025-02-14", "2025-02-14", force=True, progress=None, max_workers=1, batch=False
+            "2025-02-14",
+            "2025-02-14",
+            force=True,
+            progress=None,
+            max_workers=1,
+            batch=False,
+            detailed=False,
         )
 
     def test_force_false_by_default(self, mocks, mock_config):
@@ -534,7 +542,13 @@ class TestRunRangeForcePassthrough:
             "2025-02-14", "2025-02-14", force=False, progress=None, max_workers=1, batch=False
         )
         mocks["summarizer"].daily_range.assert_called_once_with(
-            "2025-02-14", "2025-02-14", force=False, progress=None, max_workers=1, batch=False
+            "2025-02-14",
+            "2025-02-14",
+            force=False,
+            progress=None,
+            max_workers=1,
+            batch=False,
+            detailed=False,
         )
 
 
@@ -605,7 +619,7 @@ class TestProgressCallback:
 
         mocks["fetcher"].fetch.assert_called_once_with("2025-02-16", types=None, progress=cb)
         mocks["normalizer"].normalize.assert_called_once_with("2025-02-16", progress=cb)
-        mocks["summarizer"].daily.assert_called_once_with("2025-02-16", progress=cb)
+        mocks["summarizer"].daily.assert_called_once_with("2025-02-16", progress=cb, detailed=False)
         assert cb.call_count >= 3  # at least 3 phase messages
 
     def test_run_range_passes_progress(self, mocks, mock_config):
@@ -627,7 +641,13 @@ class TestProgressCallback:
             "2025-02-14", "2025-02-14", force=False, progress=cb, max_workers=1, batch=False
         )
         mocks["summarizer"].daily_range.assert_called_once_with(
-            "2025-02-14", "2025-02-14", force=False, progress=cb, max_workers=1, batch=False
+            "2025-02-14",
+            "2025-02-14",
+            force=False,
+            progress=cb,
+            max_workers=1,
+            batch=False,
+            detailed=False,
         )
         assert cb.call_count >= 3  # Phase 1/3, 2/3, 3/3
 

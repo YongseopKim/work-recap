@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Body, Depends
 from pydantic import BaseModel
 
 from workrecap.api.deps import get_config, get_job_store
@@ -18,12 +18,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+class SummarizeDailySingleRequest(BaseModel):
+    force: bool = False
+    detailed: bool = False
+
+
 class SummarizeDailyRangeRequest(BaseModel):
     since: str
     until: str
     force: bool = False
     max_workers: int | None = None
     batch: bool = False
+    detailed: bool = False
 
 
 class SummarizeWeeklyRequest(BaseModel):
@@ -49,6 +55,7 @@ def _summarize_daily_single_task(
     config: AppConfig,
     store: JobStore,
     force: bool = False,
+    detailed: bool = False,
 ) -> None:
     """BackgroundTask: 단일 날짜 daily summary 생성."""
     logger.info("Background task start: summarize daily %s (job=%s)", target_date, job_id)
@@ -58,7 +65,7 @@ def _summarize_daily_single_task(
         llm = get_llm_router(config)
         ds = DailyStateStore(config.daily_state_path)
         service = SummarizerService(config, llm, daily_state=ds)
-        path = service.daily(target_date, force=force)
+        path = service.daily(target_date, force=force, detailed=detailed)
         store.update(job_id, JobStatus.COMPLETED, result=str(path))
     except Exception as e:
         logger.warning("Background task failed: summarize daily %s: %s", target_date, e)
@@ -74,6 +81,7 @@ def _summarize_daily_range_task(
     force: bool = False,
     max_workers: int = 1,
     batch: bool = False,
+    detailed: bool = False,
 ) -> None:
     """BackgroundTask: 기간 범위 daily summary 생성."""
     logger.info(
@@ -89,7 +97,7 @@ def _summarize_daily_range_task(
         ds = DailyStateStore(config.daily_state_path)
         service = SummarizerService(config, llm, daily_state=ds)
         results = service.daily_range(
-            since, until, force=force, max_workers=max_workers, batch=batch
+            since, until, force=force, max_workers=max_workers, batch=batch, detailed=detailed
         )
 
         succeeded = sum(1 for r in results if r["status"] == "success")
@@ -193,6 +201,7 @@ def summarize_daily_range(
         force=body.force,
         max_workers=max_workers,
         batch=body.batch,
+        detailed=body.detailed,
     )
     return {"job_id": job.job_id, "status": job.status.value}
 
@@ -201,10 +210,13 @@ def summarize_daily_range(
 def summarize_daily_single(
     date: str,
     bg: BackgroundTasks,
+    body: SummarizeDailySingleRequest | None = Body(default=None),
     config: AppConfig = Depends(get_config),
     store: JobStore = Depends(get_job_store),
 ):
     """단일 날짜 daily summary async 생성."""
+    if body is None:
+        body = SummarizeDailySingleRequest()
     job = store.create()
     bg.add_task(
         _summarize_daily_single_task,
@@ -212,6 +224,8 @@ def summarize_daily_single(
         date,
         config,
         store,
+        force=body.force,
+        detailed=body.detailed,
     )
     return {"job_id": job.job_id, "status": job.status.value}
 

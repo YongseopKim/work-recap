@@ -740,6 +740,7 @@ class TestProxyBaseUrl:
             base_url="http://proxy:8081/openai/v1",
             timeout=120.0,
             max_retries=3,
+            default_headers={"X-Client-ID": "work-recap"},
         )
 
     @patch("workrecap.infra.providers.anthropic_provider.anthropic")
@@ -775,6 +776,7 @@ class TestProxyBaseUrl:
             base_url="http://proxy:8081/anthropic",
             timeout=120.0,
             max_retries=3,
+            default_headers={"X-Client-ID": "work-recap"},
         )
 
     @patch("workrecap.infra.providers.openai_provider.OpenAI")

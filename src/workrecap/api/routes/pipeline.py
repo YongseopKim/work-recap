@@ -35,6 +35,8 @@ class RunSingleRequest(BaseModel):
     types: list[str] | None = None
     enrich: bool = True
     source: str | None = None
+    repos: list[str] | None = None
+    detailed: bool = False
 
 
 class RunRangeRequest(BaseModel):
@@ -49,6 +51,8 @@ class RunRangeRequest(BaseModel):
     summarize_monthly: str | None = None
     summarize_yearly: int | None = None
     batch: bool = False
+    repos: list[str] | None = None
+    detailed: bool = False
 
 
 def _weeks_in_month(year: int, month: int) -> list[tuple[int, int]]:
@@ -113,6 +117,8 @@ def _run_pipeline_task(
     force: bool = False,
     types: set[str] | None = None,
     enrich: bool = True,
+    repos: list[str] | None = None,
+    detailed: bool = False,
 ) -> None:
     """BackgroundTask: 단일 날짜 파이프라인 실행."""
     logger.info(
@@ -131,12 +137,12 @@ def _run_pipeline_task(
         llm = get_llm_router(config)
         ds = DailyStateStore(config.daily_state_path)
         ps = FetchProgressStore(config.state_dir / "fetch_progress")
-        fetcher = FetcherService(config, ghes, daily_state=ds, progress_store=ps)
+        fetcher = FetcherService(config, ghes, daily_state=ds, progress_store=ps, repos=repos or [])
         normalizer = NormalizerService(config, daily_state=ds, llm=llm if enrich else None)
         summarizer = SummarizerService(config, llm, daily_state=ds)
         orchestrator = OrchestratorService(fetcher, normalizer, summarizer, config=config)
 
-        path = orchestrator.run_daily(target_date, types=types)
+        path = orchestrator.run_daily(target_date, types=types, detailed=detailed)
         logger.info("Background task complete: run_pipeline %s → %s", target_date, path)
         store.update(job_id, JobStatus.COMPLETED, result=str(path))
     except Exception as e:
@@ -161,6 +167,8 @@ def _run_range_task(
     summarize_monthly: str | None = None,
     summarize_yearly: int | None = None,
     batch: bool = False,
+    repos: list[str] | None = None,
+    detailed: bool = False,
 ) -> None:
     """BackgroundTask: 기간 범위 파이프라인 실행."""
     logger.info(
@@ -185,7 +193,7 @@ def _run_range_task(
             pool = GHESClientPool(config.ghes_url, config.ghes_token, size=max_workers)
             fetch_kwargs["max_workers"] = max_workers
             fetch_kwargs["client_pool"] = pool
-        fetcher = FetcherService(config, ghes, **fetch_kwargs)
+        fetcher = FetcherService(config, ghes, repos=repos or [], **fetch_kwargs)
         normalizer = NormalizerService(config, daily_state=ds, llm=llm if enrich else None)
         summarizer = SummarizerService(config, llm, daily_state=ds)
         orchestrator = OrchestratorService(fetcher, normalizer, summarizer, config=config)
@@ -197,6 +205,7 @@ def _run_range_task(
             types=types,
             max_workers=max_workers,
             batch=batch,
+            detailed=detailed,
         )
 
         # Report progress per date
@@ -261,6 +270,8 @@ def run_pipeline_range(
         summarize_monthly=body.summarize_monthly,
         summarize_yearly=body.summarize_yearly,
         batch=body.batch,
+        repos=body.repos,
+        detailed=body.detailed,
     )
     return {"job_id": job.job_id, "status": job.status.value}
 
@@ -287,6 +298,8 @@ def run_pipeline(
         force=body.force,
         types=types_set,
         enrich=body.enrich,
+        repos=body.repos,
+        detailed=body.detailed,
     )
     return {"job_id": job.job_id, "status": job.status.value}
 

@@ -226,7 +226,9 @@ class TestPipelineRun:
         assert status_resp.json()["status"] == "completed"
 
         # Verify types passed as set
-        mock_orch.return_value.run_daily.assert_called_once_with("2025-02-16", types={"prs"})
+        mock_orch.return_value.run_daily.assert_called_once_with(
+            "2025-02-16", types={"prs"}, detailed=False
+        )
 
         # Verify enrich=False → NormalizerService gets llm=None
         norm_call_kwargs = mock_norm.call_args

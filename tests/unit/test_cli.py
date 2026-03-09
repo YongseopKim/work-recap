@@ -569,6 +569,7 @@ class TestSummarizeDailyDateRange:
             progress=ANY,
             max_workers=5,
             batch=False,
+            detailed=False,
         )
         assert "3 day(s)" in result.output
 
@@ -653,7 +654,9 @@ class TestRun:
         result = runner.invoke(app, ["run", "2025-02-16"])
         assert result.exit_code == 0
         assert "Pipeline complete" in result.output
-        mock_orch.return_value.run_daily.assert_called_once_with("2025-02-16", types=None)
+        mock_orch.return_value.run_daily.assert_called_once_with(
+            "2025-02-16", types=None, detailed=False
+        )
 
     @patch("workrecap.cli.main.OrchestratorService")
     @patch("workrecap.cli.main.SummarizerService")
@@ -753,6 +756,7 @@ class TestRun:
             progress=ANY,
             max_workers=5,
             batch=False,
+            detailed=False,
         )
 
     @patch("workrecap.cli.main.date_utils")
@@ -878,6 +882,7 @@ class TestRunForce:
             progress=ANY,
             max_workers=5,
             batch=False,
+            detailed=False,
         )
 
     @patch("workrecap.cli.main.OrchestratorService")
@@ -909,6 +914,7 @@ class TestRunForce:
             progress=ANY,
             max_workers=5,
             batch=False,
+            detailed=False,
         )
 
     @patch("workrecap.cli.main.OrchestratorService")
@@ -1159,6 +1165,7 @@ class TestSummarizeDailyCatchUp:
             progress=ANY,
             max_workers=5,
             batch=False,
+            detailed=False,
         )
 
     @patch("workrecap.cli.main.date_utils")
@@ -1197,6 +1204,7 @@ class TestSummarizeDailyForce:
             progress=ANY,
             max_workers=5,
             batch=False,
+            detailed=False,
         )
 
 
@@ -1304,7 +1312,9 @@ class TestRunTypeFilter:
         mock_orch.return_value.run_daily.return_value = Path("/data/daily.md")
         result = runner.invoke(app, ["run", "--type", "prs", "2025-02-16"])
         assert result.exit_code == 0
-        mock_orch.return_value.run_daily.assert_called_once_with("2025-02-16", types={"prs"})
+        mock_orch.return_value.run_daily.assert_called_once_with(
+            "2025-02-16", types={"prs"}, detailed=False
+        )
 
     @patch("workrecap.cli.main.OrchestratorService")
     @patch("workrecap.cli.main.SummarizerService")
@@ -1329,6 +1339,7 @@ class TestRunTypeFilter:
             progress=ANY,
             max_workers=5,
             batch=False,
+            detailed=False,
         )
 
     def test_type_invalid(self):
@@ -1368,6 +1379,7 @@ class TestRunTypeFilter:
             progress=ANY,
             max_workers=5,
             batch=False,
+            detailed=False,
         )
 
 

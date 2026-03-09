@@ -23,6 +23,7 @@ router = APIRouter()
 class FetchSingleRequest(BaseModel):
     types: list[str] | None = None
     force: bool = False
+    repos: list[str] | None = None
 
 
 class FetchRangeRequest(BaseModel):
@@ -31,6 +32,7 @@ class FetchRangeRequest(BaseModel):
     types: list[str] | None = None
     force: bool = False
     max_workers: int | None = None
+    repos: list[str] | None = None
 
 
 def _fetch_single_task(
@@ -40,6 +42,7 @@ def _fetch_single_task(
     store: JobStore,
     types: set[str] | None = None,
     force: bool = False,
+    repos: list[str] | None = None,
 ) -> None:
     """BackgroundTask: 단일 날짜 fetch."""
     logger.info("Background task start: fetch %s (job=%s)", target_date, job_id)
@@ -50,7 +53,7 @@ def _fetch_single_task(
         ghes = GHESClient(config.ghes_url, config.ghes_token, search_interval=2.0)
         ds = DailyStateStore(config.daily_state_path)
         ps = FetchProgressStore(config.state_dir / "fetch_progress")
-        service = FetcherService(config, ghes, daily_state=ds, progress_store=ps)
+        service = FetcherService(config, ghes, daily_state=ds, progress_store=ps, repos=repos or [])
         result = service.fetch(target_date, types=types)
         paths = {k: str(v) for k, v in result.items()}
         store.update(job_id, JobStatus.COMPLETED, result=str(paths))
@@ -71,6 +74,7 @@ def _fetch_range_task(
     types: set[str] | None = None,
     force: bool = False,
     max_workers: int = 1,
+    repos: list[str] | None = None,
 ) -> None:
     """BackgroundTask: 기간 범위 fetch."""
     logger.info("Background task start: fetch_range %s..%s (job=%s)", since, until, job_id)
@@ -87,7 +91,7 @@ def _fetch_range_task(
             pool = GHESClientPool(config.ghes_url, config.ghes_token, size=max_workers)
             fetch_kwargs["max_workers"] = max_workers
             fetch_kwargs["client_pool"] = pool
-        service = FetcherService(config, ghes, **fetch_kwargs)
+        service = FetcherService(config, ghes, repos=repos or [], **fetch_kwargs)
         results = service.fetch_range(since, until, types=types, force=force)
 
         succeeded = sum(1 for r in results if r["status"] == "success")
@@ -127,6 +131,7 @@ def fetch_range(
         types=types_set,
         force=body.force,
         max_workers=max_workers,
+        repos=body.repos,
     )
     return {"job_id": job.job_id, "status": job.status.value}
 
@@ -152,5 +157,6 @@ def fetch_single(
         store,
         types=types_set,
         force=body.force,
+        repos=body.repos,
     )
     return {"job_id": job.job_id, "status": job.status.value}

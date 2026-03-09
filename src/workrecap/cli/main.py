@@ -247,9 +247,7 @@ def fetch(
     ),
 ) -> None:
     """Fetch PR/Commit/Issue data from GHES."""
-    logger.info(
-        "Command: fetch date=%s types=%s force=%s repos=%s", target_date, type, force, repo
-    )
+    logger.info("Command: fetch date=%s types=%s force=%s repos=%s", target_date, type, force, repo)
     # 1. --type 검증
     types: set[str] | None = None
     if type is not None:
@@ -449,6 +447,9 @@ def summarize_daily(
     force: bool = typer.Option(False, "--force", "-f", help="Re-summarize even if data exists"),
     workers: int = typer.Option(None, "--workers", "-w", help="Parallel workers (default: config)"),
     batch: bool = typer.Option(False, "--batch/--no-batch", help="Use batch API for LLM calls"),
+    detailed: bool = typer.Option(
+        False, "--detailed", help="Generate detailed summary with richer context"
+    ),
 ) -> None:
     """Generate daily summary."""
     logger.info("Command: summarize daily date=%s force=%s batch=%s", target_date, force, batch)
@@ -487,10 +488,11 @@ def summarize_daily(
                 progress=_progress,
                 max_workers=max_workers,
                 batch=batch,
+                detailed=detailed,
             )
             _print_range_results("Daily summary", range_results)
         else:
-            path = service.daily(dates[0])
+            path = service.daily(dates[0], detailed=detailed)
             _echo(f"Daily summary → {path}")
         _print_usage_report(llm)
     except WorkRecapError as e:
@@ -632,6 +634,9 @@ def run(
     repo: list[str] = typer.Option(
         [], "--repo", "-r", help="Filter by repo (owner/name), repeatable"
     ),
+    detailed: bool = typer.Option(
+        False, "--detailed", help="Generate detailed summary with richer context"
+    ),
 ) -> None:
     """Run full pipeline (fetch → normalize → summarize)."""
     logger.info(
@@ -723,6 +728,7 @@ def run(
                 progress=_progress,
                 max_workers=max_workers,
                 batch=batch,
+                detailed=detailed,
             )
             succeeded = sum(1 for r in results if r["status"] == "success")
             skipped = sum(1 for r in results if r["status"] == "skipped")
@@ -777,7 +783,7 @@ def run(
             if failed > 0:
                 raise typer.Exit(code=1)
         else:
-            path = orchestrator.run_daily(dates[0], types=types)
+            path = orchestrator.run_daily(dates[0], types=types, detailed=detailed)
             ghes.close()
             _echo(f"Pipeline complete → {path}")
             _print_usage_report(llm)
