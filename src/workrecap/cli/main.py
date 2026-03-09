@@ -242,9 +242,14 @@ def fetch(
     yearly: int = typer.Option(None, help="Year, e.g. 2026"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-fetch even if data exists"),
     workers: int = typer.Option(1, "--workers", "-w", help="Parallel workers (default: 1)"),
+    repo: list[str] = typer.Option(
+        [], "--repo", "-r", help="Filter by repo (owner/name), repeatable"
+    ),
 ) -> None:
     """Fetch PR/Commit/Issue data from GHES."""
-    logger.info("Command: fetch date=%s types=%s force=%s", target_date, type, force)
+    logger.info(
+        "Command: fetch date=%s types=%s force=%s repos=%s", target_date, type, force, repo
+    )
     # 1. --type 검증
     types: set[str] | None = None
     if type is not None:
@@ -296,7 +301,7 @@ def fetch(
                 pool = GHESClientPool(config.ghes_url, config.ghes_token, size=workers)
                 fetch_kwargs["max_workers"] = workers
                 fetch_kwargs["client_pool"] = pool
-            service = FetcherService(config, client, **fetch_kwargs)
+            service = FetcherService(config, client, repos=repo, **fetch_kwargs)
 
             # 다중 날짜 → fetch_range (월 단위 최적화)
             range_ep = endpoints or catchup_endpoints
@@ -624,15 +629,19 @@ def run(
     ),
     workers: int = typer.Option(None, "--workers", "-w", help="Parallel workers (default: config)"),
     batch: bool = typer.Option(False, "--batch/--no-batch", help="Use batch API for LLM calls"),
+    repo: list[str] = typer.Option(
+        [], "--repo", "-r", help="Filter by repo (owner/name), repeatable"
+    ),
 ) -> None:
     """Run full pipeline (fetch → normalize → summarize)."""
     logger.info(
-        "Command: run date=%s types=%s force=%s enrich=%s batch=%s",
+        "Command: run date=%s types=%s force=%s enrich=%s batch=%s repos=%s",
         target_date,
         type,
         force,
         enrich,
         batch,
+        repo,
     )
     # --type 검증
     types: set[str] | None = None
@@ -689,7 +698,7 @@ def run(
             fetch_kwargs["max_workers"] = max_workers
             fetch_kwargs["client_pool"] = pool
 
-        fetcher = FetcherService(config, ghes, **fetch_kwargs)
+        fetcher = FetcherService(config, ghes, repos=repo, **fetch_kwargs)
         normalizer = NormalizerService(config, daily_state=ds, llm=llm if enrich else None)
         summarizer = SummarizerService(config, llm, daily_state=ds)
 

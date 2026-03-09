@@ -1398,3 +1398,124 @@ class TestTelegramSummary:
         summarizer = SummarizerService(test_config, mock_llm)
         with pytest.raises(SummarizeError, match="Unknown summary level"):
             summarizer.telegram_summary("invalid", "2026-03-01")
+
+
+# ── Detailed Template Tests ──
+
+
+class TestDailyDetailed:
+    """daily() with detailed flag selects the correct template."""
+
+    def test_daily_detailed_uses_detailed_template(self, test_config, mock_llm):
+        """daily(detailed=True) uses daily_detailed.md template."""
+        norm_dir = test_config.date_normalized_dir("2026-01-01")
+        norm_dir.mkdir(parents=True, exist_ok=True)
+        (norm_dir / "activities.jsonl").write_text(
+            '{"kind": "pr_authored", "title": "test", "repo": "org/repo", '
+            '"url": "https://example.com", "additions": 1, "deletions": 0}\n'
+        )
+        (norm_dir / "stats.json").write_text(
+            '{"github": {"authored_count": 1, "reviewed_count": 0, "commented_count": 0, '
+            '"total_additions": 1, "total_deletions": 0, "repos_touched": ["org/repo"]}}'
+        )
+
+        prompts_dir = test_config.prompts_dir
+        prompts_dir.mkdir(parents=True, exist_ok=True)
+        (prompts_dir / "daily.md").write_text("normal template\n<!-- SPLIT -->\n{{ date }}")
+        (prompts_dir / "daily_detailed.md").write_text(
+            "detailed template\n<!-- SPLIT -->\n{{ date }}"
+        )
+
+        service = SummarizerService(test_config, mock_llm)
+        service.daily("2026-01-01", detailed=True)
+
+        call_args = mock_llm.chat.call_args
+        assert "detailed template" in call_args[0][0]
+
+    def test_daily_default_uses_normal_template(self, test_config, mock_llm):
+        """daily() without detailed uses daily.md template."""
+        norm_dir = test_config.date_normalized_dir("2026-01-01")
+        norm_dir.mkdir(parents=True, exist_ok=True)
+        (norm_dir / "activities.jsonl").write_text(
+            '{"kind": "pr_authored", "title": "test", "repo": "org/repo", '
+            '"url": "https://example.com", "additions": 1, "deletions": 0}\n'
+        )
+        (norm_dir / "stats.json").write_text(
+            '{"github": {"authored_count": 1, "reviewed_count": 0, "commented_count": 0, '
+            '"total_additions": 1, "total_deletions": 0, "repos_touched": ["org/repo"]}}'
+        )
+
+        prompts_dir = test_config.prompts_dir
+        prompts_dir.mkdir(parents=True, exist_ok=True)
+        (prompts_dir / "daily.md").write_text("normal template\n<!-- SPLIT -->\n{{ date }}")
+        (prompts_dir / "daily_detailed.md").write_text(
+            "detailed template\n<!-- SPLIT -->\n{{ date }}"
+        )
+
+        service = SummarizerService(test_config, mock_llm)
+        service.daily("2026-01-01")
+
+        call_args = mock_llm.chat.call_args
+        assert "normal template" in call_args[0][0]
+
+    def test_daily_range_passes_detailed_to_daily(self, test_config, mock_llm):
+        """daily_range(detailed=True) passes detailed through to daily()."""
+        norm_dir = test_config.date_normalized_dir("2026-01-01")
+        norm_dir.mkdir(parents=True, exist_ok=True)
+        (norm_dir / "activities.jsonl").write_text(
+            '{"kind": "pr_authored", "title": "test", "repo": "org/repo", '
+            '"url": "https://example.com", "additions": 1, "deletions": 0}\n'
+        )
+        (norm_dir / "stats.json").write_text(
+            '{"github": {"authored_count": 1, "reviewed_count": 0, "commented_count": 0, '
+            '"total_additions": 1, "total_deletions": 0, "repos_touched": ["org/repo"]}}'
+        )
+
+        prompts_dir = test_config.prompts_dir
+        prompts_dir.mkdir(parents=True, exist_ok=True)
+        (prompts_dir / "daily.md").write_text("normal template\n<!-- SPLIT -->\n{{ date }}")
+        (prompts_dir / "daily_detailed.md").write_text(
+            "detailed template\n<!-- SPLIT -->\n{{ date }}"
+        )
+
+        service = SummarizerService(test_config, mock_llm)
+        results = service.daily_range("2026-01-01", "2026-01-01", detailed=True)
+
+        assert results[0]["status"] == "success"
+        call_args = mock_llm.chat.call_args
+        assert "detailed template" in call_args[0][0]
+
+    def test_daily_range_batch_uses_detailed_template(self, test_config, mock_llm):
+        """daily_range(batch=True, detailed=True) uses detailed template in batch mode."""
+        from workrecap.infra.providers.batch_mixin import BatchResult
+
+        norm_dir = test_config.date_normalized_dir("2026-01-01")
+        norm_dir.mkdir(parents=True, exist_ok=True)
+        (norm_dir / "activities.jsonl").write_text(
+            '{"kind": "pr_authored", "title": "test", "repo": "org/repo", '
+            '"url": "https://example.com", "additions": 1, "deletions": 0}\n'
+        )
+        (norm_dir / "stats.json").write_text(
+            '{"github": {"authored_count": 1, "reviewed_count": 0, "commented_count": 0, '
+            '"total_additions": 1, "total_deletions": 0, "repos_touched": ["org/repo"]}}'
+        )
+
+        prompts_dir = test_config.prompts_dir
+        prompts_dir.mkdir(parents=True, exist_ok=True)
+        (prompts_dir / "daily.md").write_text("normal template\n<!-- SPLIT -->\n{{ date }}")
+        (prompts_dir / "daily_detailed.md").write_text(
+            "detailed template\n<!-- SPLIT -->\n{{ date }}"
+        )
+
+        mock_llm.submit_batch.return_value = "batch-123"
+        mock_llm.wait_for_batch.return_value = [
+            BatchResult(custom_id="daily-2026-01-01", content="# Summary", error=None)
+        ]
+
+        service = SummarizerService(test_config, mock_llm)
+        results = service.daily_range("2026-01-01", "2026-01-01", batch=True, detailed=True)
+
+        assert results[0]["status"] == "success"
+        # Verify the batch request used detailed template
+        batch_requests = mock_llm.submit_batch.call_args[0][0]
+        assert "detailed template" in batch_requests[0]["system_prompt"]

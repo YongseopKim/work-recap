@@ -39,7 +39,12 @@ class SummarizerService:
 
     # ── Public API ──
 
-    def daily(self, target_date: str, progress: Callable[[str], None] | None = None) -> Path:
+    def daily(
+        self,
+        target_date: str,
+        progress: Callable[[str], None] | None = None,
+        detailed: bool = False,
+    ) -> Path:
         """Daily summary 생성."""
         logger.info("Summarizing daily: %s", target_date)
         if progress:
@@ -70,8 +75,9 @@ class SummarizerService:
             self._update_checkpoint(target_date)
             return output_path
 
+        template_name = "daily_detailed.md" if detailed else "daily.md"
         system_prompt, dynamic = self._render_split_prompt(
-            "daily.md", date=target_date, stats=stats
+            template_name, date=target_date, stats=stats
         )
         user_content = dynamic + "\n\n" + self._format_activities(activities)
         logger.debug(
@@ -98,11 +104,13 @@ class SummarizerService:
         progress: Callable[[str], None] | None = None,
         max_workers: int = 1,
         batch: bool = False,
+        detailed: bool = False,
     ) -> list[dict]:
         """날짜 범위 순회하며 daily summary 생성. skip/force/resilience 지원.
 
         Args:
             batch: If True, use batch API for LLM calls (all dates in one batch).
+            detailed: If True, use daily_detailed.md template.
         """
         dates = date_range(since, until)
         logger.info(
@@ -118,17 +126,18 @@ class SummarizerService:
             progress(f"Summarizing {since}..{until} ({len(dates)} dates)")
 
         if batch:
-            return self._daily_range_batch(dates, force, progress)
+            return self._daily_range_batch(dates, force, progress, detailed)
 
         if max_workers <= 1:
-            return self._daily_range_sequential(dates, force, progress)
-        return self._daily_range_parallel(dates, force, progress, max_workers)
+            return self._daily_range_sequential(dates, force, progress, detailed)
+        return self._daily_range_parallel(dates, force, progress, max_workers, detailed)
 
     def _daily_range_sequential(
         self,
         dates: list[str],
         force: bool,
         progress: Callable[[str], None] | None,
+        detailed: bool = False,
     ) -> list[dict]:
         results: list[dict] = []
         for d in dates:
@@ -136,7 +145,7 @@ class SummarizerService:
                 if not force and self._is_date_summarized(d):
                     results.append({"date": d, "status": "skipped"})
                     continue
-                self.daily(d, progress=progress)
+                self.daily(d, progress=progress, detailed=detailed)
                 results.append({"date": d, "status": "success"})
             except Exception as e:
                 logger.warning("Failed to summarize %s: %s", d, e)
@@ -149,6 +158,7 @@ class SummarizerService:
         force: bool,
         progress: Callable[[str], None] | None,
         max_workers: int,
+        detailed: bool = False,
     ) -> list[dict]:
         results_by_date: dict[str, dict] = {}
 
@@ -156,7 +166,7 @@ class SummarizerService:
             try:
                 if not force and self._is_date_summarized(d):
                     return {"date": d, "status": "skipped"}
-                self.daily(d, progress=progress)
+                self.daily(d, progress=progress, detailed=detailed)
                 return {"date": d, "status": "success"}
             except Exception as e:
                 logger.warning("Failed to summarize %s: %s", d, e)
@@ -175,6 +185,7 @@ class SummarizerService:
         dates: list[str],
         force: bool,
         progress: Callable[[str], None] | None,
+        detailed: bool = False,
     ) -> list[dict]:
         """Batch mode: prepare all daily prompts, submit as one batch."""
         results: list[dict] = []
@@ -217,7 +228,8 @@ class SummarizerService:
                 results.append({"date": d, "status": "success"})
                 continue
 
-            system_prompt, dynamic = self._render_split_prompt("daily.md", date=d, stats=stats)
+            template_name = "daily_detailed.md" if detailed else "daily.md"
+            system_prompt, dynamic = self._render_split_prompt(template_name, date=d, stats=stats)
             user_content = dynamic + "\n\n" + self._format_activities(activities)
 
             batch_requests.append(
