@@ -142,7 +142,7 @@ def _run_pipeline_task(
         summarizer = SummarizerService(config, llm, daily_state=ds)
         orchestrator = OrchestratorService(fetcher, normalizer, summarizer, config=config)
 
-        path = orchestrator.run_daily(target_date, types=types, detailed=detailed)
+        path = orchestrator.run_daily(target_date, types=types, detailed=detailed, repos=repos)
         logger.info("Background task complete: run_pipeline %s → %s", target_date, path)
         store.update(job_id, JobStatus.COMPLETED, result=str(path))
     except Exception as e:
@@ -206,6 +206,7 @@ def _run_range_task(
             max_workers=max_workers,
             batch=batch,
             detailed=detailed,
+            repos=repos,
         )
 
         # Report progress per date

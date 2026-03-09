@@ -91,9 +91,12 @@ class AppConfig(BaseSettings):
         y, m, d = date.split("-")
         return self.normalized_dir / y / m / d
 
-    def daily_summary_path(self, date: str) -> Path:
-        """date='2025-02-16' → data/summaries/2025/daily/02-16.md"""
+    def daily_summary_path(self, date: str, *, repo: str | None = None) -> Path:
+        """date='2025-02-16' → data/summaries/2025/daily/02-16.md
+        repo='owner/name' → data/summaries/repos/owner/name/2025/daily/02-16.md"""
         y, m, d = date.split("-")
+        if repo:
+            return self.summaries_dir / "repos" / repo / y / "daily" / f"{m}-{d}.md"
         return self.summaries_dir / y / "daily" / f"{m}-{d}.md"
 
     def weekly_summary_path(self, year: int, week: int) -> Path:

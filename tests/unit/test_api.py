@@ -227,7 +227,7 @@ class TestPipelineRun:
 
         # Verify types passed as set
         mock_orch.return_value.run_daily.assert_called_once_with(
-            "2025-02-16", types={"prs"}, detailed=False
+            "2025-02-16", types={"prs"}, detailed=False, repos=None
         )
 
         # Verify enrich=False → NormalizerService gets llm=None

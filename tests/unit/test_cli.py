@@ -655,7 +655,7 @@ class TestRun:
         assert result.exit_code == 0
         assert "Pipeline complete" in result.output
         mock_orch.return_value.run_daily.assert_called_once_with(
-            "2025-02-16", types=None, detailed=False
+            "2025-02-16", types=None, detailed=False, repos=None
         )
 
     @patch("workrecap.cli.main.OrchestratorService")
@@ -757,6 +757,7 @@ class TestRun:
             max_workers=5,
             batch=False,
             detailed=False,
+            repos=None,
         )
 
     @patch("workrecap.cli.main.date_utils")
@@ -883,6 +884,7 @@ class TestRunForce:
             max_workers=5,
             batch=False,
             detailed=False,
+            repos=None,
         )
 
     @patch("workrecap.cli.main.OrchestratorService")
@@ -915,6 +917,7 @@ class TestRunForce:
             max_workers=5,
             batch=False,
             detailed=False,
+            repos=None,
         )
 
     @patch("workrecap.cli.main.OrchestratorService")
@@ -1313,7 +1316,7 @@ class TestRunTypeFilter:
         result = runner.invoke(app, ["run", "--type", "prs", "2025-02-16"])
         assert result.exit_code == 0
         mock_orch.return_value.run_daily.assert_called_once_with(
-            "2025-02-16", types={"prs"}, detailed=False
+            "2025-02-16", types={"prs"}, detailed=False, repos=None
         )
 
     @patch("workrecap.cli.main.OrchestratorService")
@@ -1340,6 +1343,7 @@ class TestRunTypeFilter:
             max_workers=5,
             batch=False,
             detailed=False,
+            repos=None,
         )
 
     def test_type_invalid(self):
@@ -1380,6 +1384,7 @@ class TestRunTypeFilter:
             max_workers=5,
             batch=False,
             detailed=False,
+            repos=None,
         )
 
 

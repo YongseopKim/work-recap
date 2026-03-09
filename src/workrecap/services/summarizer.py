@@ -44,6 +44,7 @@ class SummarizerService:
         target_date: str,
         progress: Callable[[str], None] | None = None,
         detailed: bool = False,
+        repos: list[str] | None = None,
     ) -> Path:
         """Daily summary 생성."""
         logger.info("Summarizing daily: %s", target_date)
@@ -62,17 +63,21 @@ class SummarizerService:
         stats = load_json(stats_path)
         logger.debug("Loaded %d activities for %s", len(activities), target_date)
 
+        # Single repo → repo-specific path; multi/none → default path
+        repo_key = repos[0] if repos and len(repos) == 1 else None
+
         if not activities:
             logger.info(
                 "No activities for %s, skipping LLM call and writing marker file", target_date
             )
-            output_path = self._config.daily_summary_path(target_date)
+            output_path = self._config.daily_summary_path(target_date, repo=repo_key)
             marker = (
                 f"# {target_date} Daily Summary\n\n"
                 "활동이 없는 날입니다. (No activity on this day.)\n"
             )
             self._save_markdown(output_path, marker)
-            self._update_checkpoint(target_date)
+            if not repo_key:
+                self._update_checkpoint(target_date)
             return output_path
 
         template_name = "daily_detailed.md" if detailed else "daily.md"
@@ -88,12 +93,13 @@ class SummarizerService:
             system_prompt, user_content, task="daily", cache_system_prompt=True
         )
 
-        output_path = self._config.daily_summary_path(target_date)
+        output_path = self._config.daily_summary_path(target_date, repo=repo_key)
         self._save_markdown(output_path, response)
 
         logger.info("Generated daily summary: %s", output_path)
 
-        self._update_checkpoint(target_date)
+        if not repo_key:
+            self._update_checkpoint(target_date)
         return output_path
 
     def daily_range(
@@ -105,12 +111,14 @@ class SummarizerService:
         max_workers: int = 1,
         batch: bool = False,
         detailed: bool = False,
+        repos: list[str] | None = None,
     ) -> list[dict]:
         """날짜 범위 순회하며 daily summary 생성. skip/force/resilience 지원.
 
         Args:
             batch: If True, use batch API for LLM calls (all dates in one batch).
             detailed: If True, use daily_detailed.md template.
+            repos: If single repo, save to repo-specific path.
         """
         dates = date_range(since, until)
         logger.info(
@@ -126,11 +134,11 @@ class SummarizerService:
             progress(f"Summarizing {since}..{until} ({len(dates)} dates)")
 
         if batch:
-            return self._daily_range_batch(dates, force, progress, detailed)
+            return self._daily_range_batch(dates, force, progress, detailed, repos)
 
         if max_workers <= 1:
-            return self._daily_range_sequential(dates, force, progress, detailed)
-        return self._daily_range_parallel(dates, force, progress, max_workers, detailed)
+            return self._daily_range_sequential(dates, force, progress, detailed, repos)
+        return self._daily_range_parallel(dates, force, progress, max_workers, detailed, repos)
 
     def _daily_range_sequential(
         self,
@@ -138,6 +146,7 @@ class SummarizerService:
         force: bool,
         progress: Callable[[str], None] | None,
         detailed: bool = False,
+        repos: list[str] | None = None,
     ) -> list[dict]:
         results: list[dict] = []
         for d in dates:
@@ -145,7 +154,7 @@ class SummarizerService:
                 if not force and self._is_date_summarized(d):
                     results.append({"date": d, "status": "skipped"})
                     continue
-                self.daily(d, progress=progress, detailed=detailed)
+                self.daily(d, progress=progress, detailed=detailed, repos=repos)
                 results.append({"date": d, "status": "success"})
             except Exception as e:
                 logger.warning("Failed to summarize %s: %s", d, e)
@@ -159,6 +168,7 @@ class SummarizerService:
         progress: Callable[[str], None] | None,
         max_workers: int,
         detailed: bool = False,
+        repos: list[str] | None = None,
     ) -> list[dict]:
         results_by_date: dict[str, dict] = {}
 
@@ -166,7 +176,7 @@ class SummarizerService:
             try:
                 if not force and self._is_date_summarized(d):
                     return {"date": d, "status": "skipped"}
-                self.daily(d, progress=progress, detailed=detailed)
+                self.daily(d, progress=progress, detailed=detailed, repos=repos)
                 return {"date": d, "status": "success"}
             except Exception as e:
                 logger.warning("Failed to summarize %s: %s", d, e)
@@ -186,6 +196,7 @@ class SummarizerService:
         force: bool,
         progress: Callable[[str], None] | None,
         detailed: bool = False,
+        repos: list[str] | None = None,
     ) -> list[dict]:
         """Batch mode: prepare all daily prompts, submit as one batch."""
         results: list[dict] = []
@@ -218,12 +229,14 @@ class SummarizerService:
 
             if not activities:
                 # Write marker file for empty days
-                output_path = self._config.daily_summary_path(d)
+                repo_key = repos[0] if repos and len(repos) == 1 else None
+                output_path = self._config.daily_summary_path(d, repo=repo_key)
                 marker = (
                     f"# {d} Daily Summary\n\n활동이 없는 날입니다. (No activity on this day.)\n"
                 )
                 self._save_markdown(output_path, marker)
-                self._update_checkpoint(d)
+                if not repo_key:
+                    self._update_checkpoint(d)
                 marker_dates.add(d)
                 results.append({"date": d, "status": "success"})
                 continue
@@ -267,9 +280,11 @@ class SummarizerService:
                     results.append({"date": d, "status": "failed", "error": error_msg})
                     continue
 
-                output_path = self._config.daily_summary_path(d)
+                repo_key = repos[0] if repos and len(repos) == 1 else None
+                output_path = self._config.daily_summary_path(d, repo=repo_key)
                 self._save_markdown(output_path, br.content)
-                self._update_checkpoint(d)
+                if not repo_key:
+                    self._update_checkpoint(d)
                 results.append({"date": d, "status": "success"})
 
         except Exception as e:

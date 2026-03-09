@@ -729,6 +729,7 @@ def run(
                 max_workers=max_workers,
                 batch=batch,
                 detailed=detailed,
+                repos=repo or None,
             )
             succeeded = sum(1 for r in results if r["status"] == "success")
             skipped = sum(1 for r in results if r["status"] == "skipped")
@@ -783,7 +784,9 @@ def run(
             if failed > 0:
                 raise typer.Exit(code=1)
         else:
-            path = orchestrator.run_daily(dates[0], types=types, detailed=detailed)
+            path = orchestrator.run_daily(
+                dates[0], types=types, detailed=detailed, repos=repo or None
+            )
             ghes.close()
             _echo(f"Pipeline complete → {path}")
             _print_usage_report(llm)

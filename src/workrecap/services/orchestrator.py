@@ -60,6 +60,7 @@ class OrchestratorService:
         types: set[str] | None = None,
         progress: Callable[[str], None] | None = None,
         detailed: bool = False,
+        repos: list[str] | None = None,
     ) -> Path:
         """
         단일 날짜 전체 파이프라인: fetch → normalize → summarize(daily).
@@ -97,7 +98,9 @@ class OrchestratorService:
             progress(f"Pipeline: summarize {target_date}")
 
         try:
-            summary_path = self._summarizer.daily(target_date, progress=progress, detailed=detailed)
+            summary_path = self._summarizer.daily(
+                target_date, progress=progress, detailed=detailed, repos=repos
+            )
         except SummarizeError as e:
             raise StepFailedError("summarize", e) from e
 
@@ -147,6 +150,7 @@ class OrchestratorService:
         max_workers: int = 1,
         batch: bool = False,
         detailed: bool = False,
+        repos: list[str] | None = None,
     ) -> list[dict]:
         """
         기간 범위 backfill using bulk operations.
@@ -190,6 +194,7 @@ class OrchestratorService:
             max_workers=max_workers,
             batch=batch,
             detailed=detailed,
+            repos=repos,
         )
 
         results = self._merge_results(fetch_results, normalize_results, summarize_results)
