@@ -603,14 +603,32 @@ class SummarizerService:
         template = Template(template_text)
         return template.render(**kwargs), ""
 
+    # 500K chars ≈ 150K tokens — leaves room for system prompt within 200K limit
+    _FORMAT_BUDGET = 500_000
+
     @staticmethod
-    def _format_activities(activities: list[dict]) -> str:
+    def _is_merge_commit(act: dict) -> bool:
+        """Merge commit 여부 판별. 개별 commit과 중복되므로 요약에서 제외."""
+        return act.get("kind") == "commit" and (act.get("title") or "").startswith("Merge ")
+
+    @classmethod
+    def _format_activities(cls, activities: list[dict]) -> str:
         """activities dict 목록을 읽기 좋은 텍스트로 변환."""
         if not activities:
             return "(활동 없음)"
 
+        # Merge commit 필터링 (개별 commit과 중복)
+        filtered = [a for a in activities if not cls._is_merge_commit(a)]
+        if len(filtered) < len(activities):
+            logger.info(
+                "Filtered %d merge commits from %d activities",
+                len(activities) - len(filtered),
+                len(activities),
+            )
+
         lines = []
-        for act in activities:
+        total_chars = 0
+        for act in filtered:
             line = (
                 f"- [{act['kind']}] {act['title']} ({act['repo']}) "
                 f"+{act.get('additions', 0)}/-{act.get('deletions', 0)} "
@@ -672,6 +690,18 @@ class SummarizerService:
                     )
                 if ctx_lines:
                     line += "\n  Inline comments:\n" + "\n".join(ctx_lines)
+
+            total_chars += len(line)
+            if total_chars > cls._FORMAT_BUDGET:
+                remaining = len(filtered) - len(lines)
+                lines.append(f"\n... (truncated: {remaining} activities omitted, budget exceeded)")
+                logger.warning(
+                    "Activity text truncated at %d chars (%d/%d activities included)",
+                    total_chars,
+                    len(lines),
+                    len(filtered),
+                )
+                break
             lines.append(line)
 
         return "\n".join(lines)
